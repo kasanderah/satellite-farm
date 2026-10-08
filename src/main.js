@@ -1331,6 +1331,7 @@ $('reset-yes').addEventListener('click', () => {
   paintKpi();
   paintRates();
   paintPause();
+  updateDock();
   saveNow();
 });
 $('assets-open').addEventListener('click', () => { $('admin').classList.remove('on'); toggleViewer(); });
