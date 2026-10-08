@@ -189,7 +189,12 @@ export function passWorldDays() {
   return (L.LANES * L.FIELD) / (MACHINE_MPS * DAY_SECONDS);
 }
 export const economy = { revenue: 0, timeScale: 1 };
-export const stores = { seed: 6, fertilizer: 6, spray: 6 };
+// 一块田用一份种薯。新游戏只带这一份，之后到商店买。价格是占位，和营收同一记账单位。
+export const SEED_PER_FIELD = 1;
+export const SHOP = [
+  { id: 'seed', name: '种薯', price: 1800 },
+];
+export const stores = { seed: SEED_PER_FIELD, fertilizer: 6, spray: 6 };
 export const warehouse = [];
 export const buildings = [];
 let nextLot = 1;
@@ -642,6 +647,17 @@ export function placeBuilding(x, z) {
   buildings.push(b);
   return { ok: true, building: b };
 }
+export function buySeed(qty) {
+  const item = SHOP.find(s => s.id === 'seed');
+  const n = Math.floor(Number(qty));
+  if (!item || !Number.isFinite(n) || n < 1 || n > 999) return { ok: false, reason: 'qty' };
+  const cost = item.price * n;
+  if (!(economy.revenue >= cost)) return { ok: false, reason: 'money', cost };
+  economy.revenue -= cost;
+  stores.seed += n;
+  log.push({ type: 'buy', pay: cost, name: item.name, n, t: worldDay });
+  return { ok: true, cost, n, seed: stores.seed };
+}
 export function sellLot(id) {
   const i = warehouse.findIndex(lot => lot.id === id);
   if (i < 0) return null;
@@ -655,9 +671,9 @@ export function plantField(f, cropId) {
   if (f.state === 3 || f.live) return { ok: false, reason: 'busy' };
   const crop = typeof cropId === 'number' ? cropId : CROPS.findIndex(c => c.id === cropId);
   if (crop < 0 || !CROPS[crop].plantable) return { ok: false, reason: 'crop' };
-  if (stores.seed < 1) return { ok: false, reason: 'seed' };
+  if (stores.seed < SEED_PER_FIELD) return { ok: false, reason: 'seed' };
   if (stores.fertilizer < 1) return { ok: false, reason: 'fertilizer' };
-  stores.seed -= 1;
+  stores.seed -= SEED_PER_FIELD;
   stores.fertilizer -= 1;
   f.crop = crop; f.state = 1; f.g = 0; f.s = 0; f.timer = 0;
   f.live = true; f.hold = false; f.frozen = false;
@@ -724,7 +740,7 @@ export function applySnapshot(data) {
   }
   economy.revenue = +data.revenue || 0;
   if (data.stores) {
-    stores.seed = +data.stores.seed || 0;
+    stores.seed = Number.isFinite(+data.stores.seed) ? +data.stores.seed : 0;
     stores.fertilizer = +data.stores.fertilizer || 0;
     stores.spray = +data.stores.spray || 0;
   }

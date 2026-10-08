@@ -11,7 +11,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { HorizontalTiltShiftShader } from 'three/addons/shaders/HorizontalTiltShiftShader.js';
 import { VerticalTiltShiftShader } from 'three/addons/shaders/VerticalTiltShiftShader.js';
-import { PALETTE, CROPS, TEX_ID, L, fields, harvesters, haulers, drones, step, TRUNKS_X, TRUNKS_Z, depots, inCrater, ROADS, RING, LAYERS, CUT, wrapX, PLOT, economy, focus, signals, log, plantField, quote, setTimeScale, setPaused, paused, exportSnapshot, applySnapshot, fieldAtWorld, fieldAt, simTime, worldDay, stores, rigs, fieldVisual, cropWatch, POTATO_DAYS, warehouse, buildings, sellLot, placeBuilding, rigReadout } from './_shared.js';
+import { PALETTE, CROPS, TEX_ID, L, fields, harvesters, haulers, drones, step, TRUNKS_X, TRUNKS_Z, depots, inCrater, ROADS, RING, LAYERS, CUT, wrapX, PLOT, economy, focus, signals, log, plantField, quote, setTimeScale, setPaused, paused, exportSnapshot, applySnapshot, fieldAtWorld, fieldAt, simTime, worldDay, stores, rigs, fieldVisual, cropWatch, POTATO_DAYS, warehouse, buildings, sellLot, placeBuilding, rigReadout, SHOP, buySeed, SEED_PER_FIELD } from './_shared.js';
 import { NOISE, FARM, CURVE_DECL, CURVE_PROJECT } from './glsl.js';
 import { harvesterKit, haulerKit, droneKit, personKit, conveyorKit, depotKit, hubKit, plantGeometry, mastKit, irrigatorKit, growRackKit, tankKit, pumpKit, pipeRackKit, tractorKit, planterKit, hillerKit, topperKit, potatoLifterKit, shedKit } from './prefabs.js';
 
@@ -1028,7 +1028,7 @@ legend.innerHTML = [
   ['碎秧', PALETTE.ochre, PALETTE.rust],
   ['起薯', PALETTE.straw, PALETTE.regoLt],
 ].map(([name, a, b]) => `<div class="lg"><i style="background:linear-gradient(90deg,${a},${b})"></i><span>${name}</span></div>`).join('');
-const MODES = [['machines', '农机', 'FLEET'], ['plan', '区域', 'PLAN'], ['store', '仓库', 'STORE'], ['build', '建设', 'BUILD']];
+const MODES = [['machines', '农机', 'FLEET'], ['plan', '区域', 'PLAN'], ['store', '仓库', 'STORE'], ['build', '建设', 'BUILD'], ['shop', '商店', 'SHOP']];
 $('tiers').innerHTML = MODES.map(([id, zh, en]) => `<button type="button" data-mode="${id}"><b>${zh}</b><small>${en}</small></button>`).join('');
 function gotoTier(n) { camT.d = [4800, 900, 160, 34][n - 1]; camT.pOff = 0; camT.lookUp = 0; camT.fovAdd = 0; }
 function fieldCode(f) { return `F-${String(f.i).padStart(3, '0')}${String(f.j).padStart(2, '0')}`; }
@@ -1086,6 +1086,13 @@ function paintSheet() {
     const price = quote(CROPS.indexOf(potato));
     const lots = warehouse.map(lot => `<button type="button" class="rowbtn${pickedLot === lot.id ? ' on' : ''}" data-lot="${lot.id}"><b>${lot.name}</b><small>${fieldCode(lot)} · ${fmt(lot.liters)} L</small></button>`).join('');
     el.innerHTML = `<div class="who"><b>仓库</b><span>选中一仓薯，再出售。出售才计入营收。</span></div><div class="price"><span>${potato.name}</span><em>牌价 ${fmt(price)}</em></div><p class="note">牌价是这一茬的记账价。行情以后接在这里，现在不会变。</p>${lots || '<p class="note">仓里还没有薯。</p>'}<button type="button" class="sell" id="sell"${pickedLot == null ? ' disabled' : ''}>出售</button>`;
+  } else if (mode === 'shop') {
+    const item = SHOP.find(s => s.id === 'seed');
+    el.innerHTML = `<div class="who"><b>商店</b><span>用营收买种薯。商品薯仍在仓库出售。</span></div><div class="price"><span>${item.name}</span><em>${fmt(item.price)}</em></div><p class="note">库存 ${stores.seed}。种一块田用 ${SEED_PER_FIELD}。</p><div class="buyline"><input id="shop-qty" class="qty" type="text" inputmode="numeric" value="1" aria-label="购买数量" autocomplete="off"><button type="button" class="sell" id="buy">购买</button></div>`;
+    const qty = $('shop-qty');
+    qty.addEventListener('focus', ev => ev.target.select());
+    qty.addEventListener('mouseup', ev => ev.preventDefault());
+    qty.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); $('buy').click(); } });
   } else if (mode === 'build') {
     const placed = buildings.map(b => `<button type="button" class="rowbtn" data-shed="${b.id}"><b>${b.name}</b><small>${Math.round(b.x)}, ${Math.round(b.z)}</small></button>`).join('');
     el.innerHTML = `<div class="who"><b>建设</b><span>在自己的田区里点地面，放下仓棚</span></div><p class="note">只有这一种房子。它落在田区里，仓里的薯记在这栋仓棚上。</p>${placed || '<p class="note">还没有房子。</p>'}`;
@@ -1114,6 +1121,16 @@ $('sheet').addEventListener('click', e => {
     if (!b) return;
     watchRig = null;
     camT.x = b.x; camT.z = b.z; camT.d = 80;
+    return;
+  }
+  if (e.target.id === 'buy') {
+    const bought = buySeed($('shop-qty')?.value);
+    if (!bought.ok && bought.reason === 'money') toast('营收不够');
+    else if (!bought.ok) toast('请填购买数量');
+    else toast(`<b>−${fmt(bought.cost)}</b>种薯 ${bought.n}`);
+    paintSheet();
+    paintKpi();
+    saveSoon();
     return;
   }
   if (e.target.id === 'sell') {
@@ -1256,7 +1273,7 @@ function updateDock() {
   $('selstat').textContent = stat;
   const p = watch ? Math.max(0, Math.min(1, watch.day / watch.days)) : 0;
   $('selbar').style.width = (p * 100).toFixed(1) + '%';
-  const busy = !f.owned || !!watch || f.state === 3 || stores.seed < 1 || stores.fertilizer < 1;
+  const busy = !f.owned || !!watch || f.state === 3 || stores.fertilizer < 1;
   document.querySelectorAll('#selbtns button').forEach(b => {
     b.disabled = busy;
     b.classList.toggle('on', !!watch);
@@ -1272,7 +1289,7 @@ $('dock').innerHTML = `<div class="who"><b id="selid"></b><span id="selstat"></s
 for (const c of CROPS) if (c.plantable) {
   const b = document.createElement('button');
   b.dataset.crop = c.id;
-  b.innerHTML = `<b>${c.name}</b><small>种薯 1 · 肥料 1 · ${POTATO_DAYS} 日 · ${fmt(quote(CROPS.indexOf(c)))}</small>`;
+  b.innerHTML = `<b>${c.name}</b><small>种薯 ${SEED_PER_FIELD} · 肥料 1 · ${POTATO_DAYS} 日 · ${fmt(quote(CROPS.indexOf(c)))}</small>`;
   b.style.gridColumn = '1 / -1';
   b.addEventListener('click', () => doPlant(c.id));
   $('selbtns').appendChild(b);
@@ -1545,7 +1562,7 @@ requestAnimationFrame(frame);
 addEventListener('resize', () => { cam.aspect = innerWidth / innerHeight; cam.updateProjectionMatrix(); R.setSize(innerWidth, innerHeight); composer.setSize(innerWidth, innerHeight); gtao.setSize(innerWidth, innerHeight); });
 window.__farm = {
   economy, stores, focus, fields, harvesters, rigs, log, CROPS, PLOT, quote, fieldAtWorld, project, pick: pickFlat,
-  warehouse, buildings, sellLot, placeBuilding,
+  warehouse, buildings, sellLot, placeBuilding, buySeed, shop: SHOP,
   snapshot: exportSnapshot, plant: doPlant, select: (i, j) => selectField(fieldAt(i, j)),
   setTimeScale, setPaused,
   get selected() { return selected; },

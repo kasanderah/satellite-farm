@@ -5,6 +5,7 @@ import {
   plantField, step, economy, quote, log, exportSnapshot, applySnapshot, RING,
   stores, worldDay, cropWatch, fieldVisual, setPaused, setTimeScale,
   DAY_SECONDS, MACHINE_MPS, warehouse, sellLot, placeBuilding, buildings, rigReadout,
+  SHOP, buySeed, SEED_PER_FIELD,
 } from '../src/_shared.js';
 
 test('one colonist plot is about 4 km on the ring', () => {
@@ -209,4 +210,46 @@ test('a working machine stays on its field, and the next machine starts from tha
   assert.ok(read.speed > 2 && read.speed < 3, read.speed);
   assert.equal(read.doing, '培土');
   assert.ok(read.frac < 0.05, read.frac);
+});
+
+test('the shop sells seed potatoes, and an empty stock does not start a field', () => {
+  assert.equal(SHOP.length, 1);
+  assert.equal(SHOP[0].name, '种薯');
+  assert.equal(SHOP[0].id, 'seed');
+  const price = SHOP[0].price;
+  assert.equal(price, 1800);
+  assert.equal(SEED_PER_FIELD, 1);
+  economy.revenue = 0;
+  const broke = buySeed(1);
+  assert.equal(broke.ok, false);
+  assert.equal(broke.reason, 'money');
+  assert.equal(economy.revenue, 0);
+  const before = stores.seed;
+  economy.revenue = price * 2 + 10;
+  const bought = buySeed(2);
+  assert.equal(bought.ok, true);
+  assert.equal(stores.seed, before + 2);
+  assert.equal(economy.revenue, 10);
+  assert.equal(buySeed(1).ok, false);
+  assert.equal(economy.revenue, 10);
+  assert.equal(stores.seed, before + 2);
+  assert.equal(buySeed(0).reason, 'qty');
+  const plot = fields.find(f => f.owned && !f.live && f.state !== 3);
+  assert.ok(plot);
+  stores.seed = 0;
+  stores.fertilizer = 6;
+  assert.equal(plantField(plot, 'potato').reason, 'seed');
+  assert.equal(plot.live, false);
+  stores.seed = SEED_PER_FIELD;
+  assert.equal(plantField(plot, 'potato').ok, true);
+  assert.equal(stores.seed, 0);
+  const snap = exportSnapshot();
+  delete snap.stores.seed;
+  assert.equal(applySnapshot(snap), true);
+  assert.equal(stores.seed, 0);
+  const bareSave = exportSnapshot();
+  delete bareSave.stores;
+  stores.seed = 4;
+  assert.equal(applySnapshot(bareSave), true);
+  assert.equal(stores.seed, 4);
 });
