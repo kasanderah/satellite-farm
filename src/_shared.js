@@ -21,15 +21,16 @@ export const PALETTE = {
 // young / ripe : 幼苗色 → 成熟色（同一家族里只沿明度/彩度移动）
 // stub : 收割后残茬色    height : 株高(米)，决定长影长度与近景单株高度
 // row  : 行距(米)        along : 株距(米)    tex : 远景田垄纹理    shape : 近景单株造型
-// grow : 画面里既有冠层的参考周期（秒）。season : 玩家新播下的一茬，加速后的可见生长（秒）
-// plantable / yieldL / price : 这一切片能种的几种。产量 L/ha、牌价 $/1000L 只作量级参考（FS25 简单难度均价），不是那套田间流程。
-// weight : 环带上的占比（邻区快照和定格冠层仍用全部 8 种，色板才和美术小样一致）
+// grow : 邻区定格冠层的参考相位（秒），不驱动玩家的世界钟。
+// plantable : 这一切片只能种中熟商品薯。其余条目只给环带色块，名字不进播种界面。
+// weight : 环带上的占比（邻区快照仍用全部 8 种纹理，色板才和美术小样一致）
+// 商品薯：120 个世界日。yieldL / price 只作一茬营收的量级，不是百科条目。
 export const CROPS = [
-  { id: 'wheat',   name: '金穗麦', analog: '小麦', family: 'grain', young: 'olive',   ripe: 'straw',  stub: 'regoLt', height: 1.0, row: 0.45, along: 0.30, tex: 'drill',  shape: 'ear',     grow: 260, season: 22, plantable: true,  yieldL: 17800, price: 1011, weight: 0.27 },
-  { id: 'maize',   name: '尖塔玉米', analog: '玉米', family: 'green', young: 'oliveDp', ripe: 'olive',  stub: 'ochre',  height: 2.6, row: 0.80, along: 0.32, tex: 'wide',   shape: 'stalk',   grow: 320, season: 26, plantable: true,  yieldL: 18400, price: 1139, weight: 0.17 },
-  { id: 'soy',     name: '苔豆',   analog: '大豆', family: 'green', young: 'oliveDp', ripe: 'oliveDp',stub: 'regoDk', height: 0.8, row: 0.50, along: 0.30, tex: 'drill',  shape: 'bush',    grow: 240, season: 20, plantable: true,  yieldL: 9000,  price: 2333, weight: 0.15 },
-  { id: 'potato',  name: '赭薯',   analog: '土豆', family: 'grain', young: 'oliveDp', ripe: 'ochre',  stub: 'regoDk', height: 0.6, row: 0.90, along: 0.35, tex: 'ridges', shape: 'bush',    grow: 280, season: 28, plantable: false, weight: 0.10 },
-  { id: 'rice',    name: '蓝藻稻', analog: '水稻', family: 'teal',  young: 'tealGy',  ripe: 'tealGy', stub: 'regoDk', height: 0.8, row: 0.40, along: 0.30, tex: 'paddy',  shape: 'tuft',    grow: 300, season: 24, plantable: true,  yieldL: 13200, price: 3300, weight: 0.08 },
+  { id: 'wheat',   name: '麦色冠层', analog: '小麦', family: 'grain', young: 'olive',   ripe: 'straw',  stub: 'regoLt', height: 1.0, row: 0.45, along: 0.30, tex: 'drill',  shape: 'ear',     grow: 260, season: 22, plantable: false, weight: 0.27 },
+  { id: 'maize',   name: '高秆冠层', analog: '玉米', family: 'green', young: 'oliveDp', ripe: 'olive',  stub: 'ochre',  height: 2.6, row: 0.80, along: 0.32, tex: 'wide',   shape: 'stalk',   grow: 320, season: 26, plantable: false, weight: 0.17 },
+  { id: 'soy',     name: '矮丛冠层', analog: '大豆', family: 'green', young: 'oliveDp', ripe: 'oliveDp',stub: 'regoDk', height: 0.8, row: 0.50, along: 0.30, tex: 'drill',  shape: 'bush',    grow: 240, season: 20, plantable: false, weight: 0.15 },
+  { id: 'potato',  name: '中熟商品薯', analog: '商品薯', family: 'grain', young: 'oliveDp', ripe: 'ochre', stub: 'rust', height: 0.55, row: 0.90, along: 0.40, tex: 'ridges', shape: 'bush', grow: 280, season: 120, plantable: true, yieldL: 44000, price: 412, weight: 0.10, days: 120 },
+  { id: 'rice',    name: '水田冠层', analog: '水稻', family: 'teal',  young: 'tealGy',  ripe: 'tealGy', stub: 'regoDk', height: 0.8, row: 0.40, along: 0.30, tex: 'paddy',  shape: 'tuft',    grow: 300, season: 24, plantable: false, weight: 0.08 },
   { id: 'cabbage', name: '霜甘蓝', analog: '甘蓝', family: 'teal',  young: 'tealGy',  ripe: 'sage',   stub: 'regoDk', height: 0.45,row: 0.70, along: 0.55, tex: 'beds',   shape: 'rosette', grow: 220, season: 22, plantable: false, weight: 0.08 },
   { id: 'alfalfa', name: '银叶苜', analog: '苜蓿', family: 'teal',  young: 'tealGy',  ripe: 'steel',  stub: 'regoDk', height: 0.7, row: 0.30, along: 0.25, tex: 'drill',  shape: 'tuft',    grow: 200, season: 18, plantable: false, weight: 0.10 },
   { id: 'sorghum', name: '锈穗粱', analog: '高粱', family: 'grain', young: 'olive',   ripe: 'rust',   stub: 'ochre',  height: 1.8, row: 0.75, along: 0.30, tex: 'wide',   shape: 'stalk',   grow: 300, season: 24, plantable: false, weight: 0.05 },
@@ -77,8 +78,8 @@ L.CURVE_R = RING.R;
 // 这一切片只经营一个人的田区：环带宽约 4 km，沿环再取 7 个区 ≈ 3.9 km。
 // 中枢落在这片田区里。环上其余田块是邻区的冻结快照（不生长、不入账），留给以后的异步多人。
 export const PLOT = {
-  id: 'kestrel-7/plot-07',
-  index: 7,
+  id: 'nongshen-viii/plot-01',
+  index: 1,
   bi0: L.HUBX - 3,
   bi1: L.HUBX + 3,
   bj0: 0,
@@ -175,16 +176,75 @@ export const fieldAt = (i, j) => (i < 0 || j < 0 || i >= L.NFX || j >= L.NFZ) ? 
 // 田块局部坐标（u 沿作物行，v 跨行）→ 世界坐标
 export const toWorld = (f, u, v) => f.dir === 0 ? [f.x0 + u, f.z0 + v] : [f.x0 + v, f.z0 + u];
 
-// ---------- ⑦ 玩家田区、账本、自动收割 ----------
-// 机器按真实秒走，看得清；作物用 timeScale 加速。CUT 让一整块田大约二十秒割完。
+// ---------- ⑦ 玩家田区：一口世界钟上的中熟商品薯 ----------
+// 1× = 每个真实秒 1 个世界日。播种到起薯共 120 个世界日。流速只乘这口钟。
+// 播种机、培土机、杀秧机、收获机的作业窗口也按世界日计，不单独瞬间长成。
 export const SIM = { CUT: 80, MOVE: 75, STUBBLE: 8, TILL: 0 };
-export const economy = { revenue: 0, timeScale: 4 };
+export const POTATO_DAYS = 120;
+export const economy = { revenue: 0, timeScale: 1 };
+export const stores = { seed: 6, fertilizer: 6, spray: 6 };
 export let simTime = 0;
+export let worldDay = 0;
 export const log = [];
 export const focus = { x: 0, z: 0, i: 0, j: 0 };
 export const signals = [];
 export const harvesters = [];
+export const rigs = [];
 export function setTimeScale(v) { economy.timeScale = Math.max(1, Math.min(16, v)); }
+export const PHASE_LABEL = {
+  plant: '播种起垄', ridge: '裸垄', shoot: '出苗', hill: '培土',
+  canopy: '封垄', flower: '开花', top: '杀秧', haulm: '碎秧', lift: '起薯',
+};
+const JOBS = {
+  planter: { at: 0, span: 6, label: '播种机' },
+  hiller: { at: 20, span: 6, label: '培土机' },
+  topper: { at: 100, span: 6, label: '杀秧机' },
+  lifter: { at: 114, span: 6, label: '收获机' },
+};
+export function potatoPhase(day) {
+  if (day < 6) return 'plant';
+  if (day < 18) return 'ridge';
+  if (day < 20) return 'shoot';
+  if (day < 26) return 'hill';
+  if (day < 46) return 'shoot';
+  if (day < 72) return 'canopy';
+  if (day < 100) return 'flower';
+  if (day < 106) return 'top';
+  if (day < 114) return 'haulm';
+  return 'lift';
+}
+export function stageNum(day) {
+  if (day < 18) return 1;
+  if (day < 46) return 2;
+  if (day < 72) return 3;
+  if (day < 100) return 4;
+  if (day < 114) return 5;
+  return 6;
+}
+export function workFront(day) {
+  const span = (a, b) => Math.max(0, Math.min(1, (day - a) / (b - a))) * L.LANES;
+  if (day < 6) return span(0, 6);
+  if (day < 20) return L.LANES;
+  if (day < 26) return span(20, 26);
+  if (day < 100) return L.LANES;
+  if (day < 106) return span(100, 106);
+  if (day < 114) return L.LANES;
+  if (day < 120) return span(114, 120);
+  return L.LANES;
+}
+export function fieldVisual(f) {
+  if (f && f.live && !f.paid && f.crop >= 0 && CROPS[f.crop].id === 'potato') {
+    const day = Math.max(0, worldDay - f.plantedAt);
+    if (day < POTATO_DAYS) return { crop: f.crop, g: stageNum(day) + 0.2, s: workFront(day), dir: f.dir };
+  }
+  return { crop: f.crop, g: f.state === 0 ? 0 : f.g, s: (f.state === 3 || f.state === 4) ? f.s : 0, dir: f.dir };
+}
+export function cropWatch(f) {
+  if (!f?.live || f.paid || f.crop < 0 || CROPS[f.crop].id !== 'potato') return null;
+  const day = Math.max(0, worldDay - f.plantedAt);
+  const phase = potatoPhase(Math.min(day, POTATO_DAYS - 0.001));
+  return { day, phase, label: PHASE_LABEL[phase], front: workFront(day), days: POTATO_DAYS };
+}
 
 // 与 v3.1 相同次数的随机数，好让后面的运输车 / 无人机还落在原来的位置上
 for (const f of fields) if (f.state === 3) { rnd(); rnd(); }
@@ -220,41 +280,70 @@ function armCutter(f, lane, u) {
   harvesters.push(h);
   return h;
 }
-function spawnIdle(n) {
-  harvesters.push({
-    id: harvesters.length, f: null, mode: 'idle', lane: 0, u: 0, path: null,
-    x: 88 + (n % 4) * 16, z: 148 + Math.floor(n / 4) * 18, ang: -Math.PI / 2, vert: false, turnT: 0, idleT: 2,
-  });
+function poseOn(f, s) {
+  const capped = Math.min(Math.max(s, 0), L.LANES - 0.001);
+  const lane = Math.floor(capped);
+  const frac = capped - lane;
+  const dirp = lane % 2 === 0;
+  const u = dirp ? frac * L.FIELD : (1 - frac) * L.FIELD;
+  const [x, z] = toWorld(f, u, laneV(lane));
+  const along = dirp ? 0 : Math.PI;
+  const ang = f.dir === 0 ? along : (dirp ? Math.PI / 2 : -Math.PI / 2);
+  return { x, z, ang };
+}
+function placeRigs() {
+  const live = [];
+  for (const f of fields) if (f.live && !f.paid && f.crop >= 0 && CROPS[f.crop].id === 'potato') live.push(f);
+  for (const r of rigs) {
+    const spec = JOBS[r.kind];
+    let best = null, bestU = 1e9;
+    for (const f of live) {
+      const u = worldDay - f.plantedAt - spec.at;
+      if (u < 0 || u >= spec.span) continue;
+      if (u < bestU) { bestU = u; best = f; }
+    }
+    if (!best) { r.busy = false; r.f = null; r.x = r.parkX; r.z = r.parkZ; r.ang = -Math.PI / 2; continue; }
+    const pose = poseOn(best, workFront(worldDay - best.plantedAt));
+    r.busy = true; r.f = best; r.x = pose.x; r.z = pose.z; r.ang = pose.ang;
+  }
+}
+function settlePotatoes() {
+  for (const f of fields) {
+    if (!f.live || f.paid || f.crop < 0 || CROPS[f.crop].id !== 'potato') continue;
+    const day = worldDay - f.plantedAt;
+    if (!f.sprayed && day >= JOBS.topper.at) {
+      f.sprayed = true;
+      if (stores.spray > 0) stores.spray -= 1;
+    }
+    if (day >= POTATO_DAYS) {
+      f.paid = true;
+      const pay = quote(f.crop);
+      economy.revenue += pay;
+      log.push({ type: 'harvest', pay, crop: 'potato', name: CROPS[f.crop].name, i: f.i, j: f.j, t: worldDay });
+      f.live = false; f.hold = true; f.state = 0; f.g = 0; f.s = 0; f.claimed = false;
+    }
+  }
+  placeRigs();
 }
 
-// 镜头落在中枢旁一块裸地上，旁边一台收割机正在干活，远一点还有一台在玉米里（近景镜头用）
+// 镜头落在中枢旁一块可播种的裸地上。远处留一台不入账的收割机，近景镜头仍有机器可读。
 {
   const bare = fieldAt((L.HUBX + 1) * L.PER + 1, L.HUBZ * L.PER + 1);
-  const wheat = fieldAt((L.HUBX + 1) * L.PER + 2, L.HUBZ * L.PER + 1);
-  bare.crop = CROPS.findIndex(c => c.id === 'wheat');
-  bare.state = 0; bare.g = 0; bare.s = 0; bare.timer = 0; bare.owned = true; bare.live = false; bare.hold = true; bare.frozen = false;
+  bare.state = 0; bare.g = 0; bare.s = 0; bare.timer = 0; bare.owned = true; bare.live = false; bare.hold = true; bare.frozen = false; bare.paid = false; bare.sprayed = false;
   focus.x = bare.x0 + L.FIELD / 2; focus.z = bare.z0 + L.FIELD / 2; focus.i = bare.i; focus.j = bare.j;
-  wheat.crop = CROPS.findIndex(c => c.id === 'wheat');
-  armCutter(wheat, 8, 36);
   let maize = null, best = 1e9;
   for (const f of fields) {
-    if (!f.owned || f === bare || f === wheat) continue;
+    if (!f.owned || f === bare) continue;
     const d = Math.hypot(f.x0 + L.FIELD / 2, f.z0 + L.FIELD / 2);
     if (d < 620 || d > 1400) continue;
     const score = d + (CROPS[f.crop]?.id === 'maize' ? 0 : 4000);
     if (score < best) { best = score; maize = f; }
   }
-  if (maize) { maize.crop = CROPS.findIndex(c => c.id === 'maize'); armCutter(maize, 3, 48); }
-  let nRipe = 0;
-  for (const f of fields) {
-    if (nRipe >= 2) break;
-    if (!f.owned || f === bare || f === wheat || f === maize || f.state === 3) continue;
-    const d = Math.hypot(f.x0 - bare.x0, f.z0 - bare.z0);
-    if (d < 160 || d > 900) continue;
-    f.state = 2; f.g = 1; f.s = 0; f.live = true; f.hold = false; f.claimed = false;
-    nRipe++;
-  }
-  spawnIdle(0); spawnIdle(1);
+  if (maize) { maize.crop = CROPS.findIndex(c => c.id === 'maize'); maize.demo = true; armCutter(maize, 3, 48); }
+  ['planter', 'hiller', 'topper', 'lifter'].forEach((kind, n) => {
+    const x = 36 + n * 22, z = 176;
+    rigs.push({ id: n, kind, label: JOBS[kind].label, busy: false, f: null, parkX: x, parkZ: z, x, z, ang: -Math.PI / 2 });
+  });
   for (const f of fields) {
     if (signals.length >= 56) break;
     if (f.owned || f.crop < 0 || f.state < 2 || f.state > 3) continue;
@@ -305,18 +394,11 @@ function dispatch(h) {
   const eVert = best.dir === 0;
   h.path = manhattan(h.x, h.z, aVert, ex, ez, eVert); h.mode = 'travel';
 }
-function nudgeFleet() {
-  const h = harvesters.find(x => x.mode === 'idle');
-  if (h) dispatch(h);
-}
-export function stepFields(dt) {
+export function stepFields(days) {
   for (const f of fields) {
-    if (f.crop < 0 || f.frozen || f.hold || !f.live) continue;
-    if (f.state === 1) {
-      f.g += dt / f.growT;
-      if (f.g >= 1) { f.g = 1; f.state = 2; if (f.plantedAt) nudgeFleet(); }
-    } else if (f.state === 4) {
-      f.timer -= dt;
+    if (f.live && f.crop >= 0 && CROPS[f.crop].id === 'potato') continue;
+    if (f.state === 4) {
+      f.timer -= days;
       if (f.timer < 0) { f.state = 0; f.s = 0; f.g = 0; f.live = false; f.hold = true; f.timer = 0; f.plantedAt = 0; }
     }
   }
@@ -345,9 +427,6 @@ export function stepHarvesters(dt) {
       if (dirp ? h.u > L.FIELD + L.ROAD / 2 : h.u < -L.ROAD / 2) {
         f.s = h.lane + 1;
         if (h.lane + 1 >= L.LANES) {
-          const pay = quote(f.crop);
-          economy.revenue += pay;
-          log.push({ type: 'harvest', pay, crop: CROPS[f.crop].id, name: CROPS[f.crop].name, i: f.i, j: f.j, t: simTime });
           h.vert = f.dir === 0; f.state = 4; f.s = L.LANES; f.g = 1; f.timer = SIM.STUBBLE; f.claimed = false; f.plantedAt = 0;
           h.f = null; dispatch(h);
         }
@@ -365,39 +444,34 @@ export function stepHarvesters(dt) {
 }
 export function plantField(f, cropId) {
   if (!f?.owned) return { ok: false, reason: 'plot' };
-  if (f.state === 3) return { ok: false, reason: 'busy' };
+  if (f.state === 3 || f.live) return { ok: false, reason: 'busy' };
   const crop = typeof cropId === 'number' ? cropId : CROPS.findIndex(c => c.id === cropId);
   if (crop < 0 || !CROPS[crop].plantable) return { ok: false, reason: 'crop' };
-  if (f.claimed) {
-    for (const h of harvesters) if (h.f === f) { h.f = null; h.mode = 'idle'; h.path = null; h.idleT = 0; }
-    f.claimed = false;
-  }
-  f.crop = crop; f.state = 1; f.g = 0.06; f.s = 0; f.timer = 0;
+  if (stores.seed < 1) return { ok: false, reason: 'seed' };
+  if (stores.fertilizer < 1) return { ok: false, reason: 'fertilizer' };
+  stores.seed -= 1;
+  stores.fertilizer -= 1;
+  f.crop = crop; f.state = 1; f.g = 0; f.s = 0; f.timer = 0;
   f.live = true; f.hold = false; f.frozen = false;
-  f.growT = CROPS[crop].season || CROPS[crop].grow;
-  f.plantedAt = simTime || 0.001;
-  return { ok: true, payout: quote(crop), name: CROPS[crop].name };
-}
-function rebuildFleet() {
-  harvesters.length = 0;
-  for (const f of fields) {
-    if (!f.owned || f.state !== 3) continue;
-    f.state = 2; f.g = 1; f.s = 0; f.live = true; f.hold = false; f.claimed = false;
-  }
-  for (let n = 0; n < 4; n++) spawnIdle(n);
+  f.plantedAt = worldDay; f.paid = false; f.sprayed = false; f.claimed = false;
+  placeRigs();
+  return { ok: true, payout: quote(crop), name: CROPS[crop].name, day: worldDay };
 }
 export function exportSnapshot() {
   return {
-    schema: 1,
+    schema: 2,
     kind: 'farm-snapshot',
     plotId: PLOT.id,
-    simTime,
+    simTime: worldDay,
+    worldDay,
     revenue: economy.revenue,
     timeScale: economy.timeScale,
+    stores: { seed: stores.seed, fertilizer: stores.fertilizer, spray: stores.spray },
     fields: fields.filter(f => f.owned).map(f => ({
       i: f.i, j: f.j, crop: f.crop, dir: f.dir, state: f.state,
       g: +f.g.toFixed(4), s: +f.s.toFixed(4), timer: +(+f.timer || 0).toFixed(3),
       growT: f.growT, live: !!f.live, hold: !!f.hold, plantedAt: f.plantedAt || 0,
+      paid: !!f.paid, sprayed: !!f.sprayed,
     })),
     harvesters: harvesters.map(h => ({
       id: h.id, mode: h.mode, lane: h.lane, u: +h.u.toFixed(2),
@@ -406,8 +480,16 @@ export function exportSnapshot() {
     })),
   };
 }
+function rebuildDemo() {
+  harvesters.length = 0;
+  for (const f of fields) {
+    if (f.state !== 3 || f.crop < 0 || CROPS[f.crop].id === 'potato') continue;
+    f.claimed = false;
+    armCutter(f, 3, 48);
+  }
+}
 export function applySnapshot(data) {
-  if (!data || data.schema !== 1 || data.plotId !== PLOT.id || !Array.isArray(data.fields)) return false;
+  if (!data || data.schema !== 2 || data.plotId !== PLOT.id || !Array.isArray(data.fields)) return false;
   const by = new Map(data.fields.map(s => [s.i + ':' + s.j, s]));
   for (const f of fields) {
     if (!f.owned) continue;
@@ -417,12 +499,20 @@ export function applySnapshot(data) {
     if (s.dir === 0 || s.dir === 1) f.dir = s.dir;
     f.state = s.state; f.g = +s.g || 0; f.s = +s.s || 0; f.timer = +s.timer || 0;
     f.growT = s.growT || f.growT; f.live = !!s.live; f.hold = !!s.hold; f.plantedAt = s.plantedAt || 0;
+    f.paid = !!s.paid; f.sprayed = !!s.sprayed;
     f.claimed = false; f.frozen = false; f.owned = true;
   }
   economy.revenue = +data.revenue || 0;
+  if (data.stores) {
+    stores.seed = +data.stores.seed || 0;
+    stores.fertilizer = +data.stores.fertilizer || 0;
+    stores.spray = +data.stores.spray || 0;
+  }
   if (data.timeScale) setTimeScale(data.timeScale);
-  simTime = +data.simTime || 0;
-  rebuildFleet();
+  worldDay = +(data.worldDay ?? data.simTime) || 0;
+  simTime = worldDay;
+  rebuildDemo();
+  placeRigs();
   return true;
 }
 
@@ -450,9 +540,11 @@ export function stepDrones(t) {
   for (const d of drones) { const a = t * d.sp + d.ph; d.x = d.cx + Math.cos(a) * d.R; d.z = d.cz + Math.sin(a * 2) * d.R * 0.5; d.y = d.h + Math.sin(t * 1.3 + d.ph) * 0.8; d.ang = Math.atan2(Math.cos(a * 2) * d.R, -Math.sin(a) * d.R); }
 }
 export function step(dt, t, scale = 1) {
-  const gdt = dt * (scale > 0 ? scale : 0);
-  simTime += gdt;
-  stepFields(gdt);
+  const days = dt * (scale > 0 ? scale : 0);
+  worldDay += days;
+  simTime = worldDay;
+  stepFields(days);
+  settlePotatoes();
   stepHarvesters(dt);
   stepHaulers(dt);
   stepDrones(t);

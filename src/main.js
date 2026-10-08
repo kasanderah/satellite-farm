@@ -11,9 +11,9 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { HorizontalTiltShiftShader } from 'three/addons/shaders/HorizontalTiltShiftShader.js';
 import { VerticalTiltShiftShader } from 'three/addons/shaders/VerticalTiltShiftShader.js';
-import { PALETTE, CROPS, TEX_ID, L, fields, harvesters, haulers, drones, step, TRUNKS_X, TRUNKS_Z, depots, inCrater, ROADS, RING, LAYERS, CUT, wrapX, PLOT, economy, focus, signals, log, plantField, quote, setTimeScale, exportSnapshot, applySnapshot, fieldAtWorld, fieldAt, simTime } from './_shared.js';
+import { PALETTE, CROPS, TEX_ID, L, fields, harvesters, haulers, drones, step, TRUNKS_X, TRUNKS_Z, depots, inCrater, ROADS, RING, LAYERS, CUT, wrapX, PLOT, economy, focus, signals, log, plantField, quote, setTimeScale, exportSnapshot, applySnapshot, fieldAtWorld, fieldAt, simTime, worldDay, stores, rigs, fieldVisual, cropWatch, POTATO_DAYS } from './_shared.js';
 import { NOISE, FARM, CURVE_DECL, CURVE_PROJECT } from './glsl.js';
-import { harvesterKit, haulerKit, droneKit, personKit, conveyorKit, depotKit, hubKit, plantGeometry, mastKit, irrigatorKit, growRackKit, tankKit, pumpKit, pipeRackKit } from './prefabs.js';
+import { harvesterKit, haulerKit, droneKit, personKit, conveyorKit, depotKit, hubKit, plantGeometry, mastKit, irrigatorKit, growRackKit, tankKit, pumpKit, pipeRackKit, planterKit, hillerKit, topperKit, potatoLifterKit } from './prefabs.js';
 
 const Q = new URLSearchParams(location.search);
 const VIEW = Q.get('view') || '', PREWARM = +Q.get('t') || 0, NOPOST = Q.has('nopost'), SHOWFPS = Q.has('fps');
@@ -70,8 +70,8 @@ const inCut = (x, z, pad = 0) => cut.on && Math.abs(x - cut.x) < CUT.AX + pad &&
 function writeFields() {
   for (const f of fields) {
     const o = (f.j * NFX + f.i) * 4;
-    fieldData[o] = f.crop; fieldData[o + 1] = f.state === 0 ? 0 : f.g;
-    fieldData[o + 2] = (f.state === 3 || f.state === 4) ? f.s : 0; fieldData[o + 3] = f.dir;
+    const v = fieldVisual(f);
+    fieldData[o] = v.crop; fieldData[o + 1] = v.g; fieldData[o + 2] = v.s; fieldData[o + 3] = v.dir;
   }
   fieldTex.needsUpdate = true;
 }
@@ -180,7 +180,7 @@ const hemi = new THREE.HemisphereLight('#5f7480', '#2a2622', 0.42); scene.add(he
 // 环带内表面：一条整圈长（周长 + 重叠）、环壁到环壁宽的长条，沿环向跟随镜头；卷曲在顶点着色器里做
 const ground = new THREE.Mesh(new THREE.PlaneGeometry(RING.CIRC + 400, RING.W, 760, 8).rotateX(-Math.PI / 2), MAT.ground);
 ground.receiveShadow = true; ground.frustumCulled = false; scene.add(ground);
-const GC = { soil: C('regoDk').multiplyScalar(0.62), rego: C('rego'), regoDk: C('regoDk'), regoLt: C('regoLt'), haze: C('haze'), paper: C('paper'), metalDk: C('metalDk'), deep: C('deep'), tealGy: C('tealGy'), zone: C('zone'), data: C('data'), harvest: C('harvest'), void: C('void'), alert: C('alert') };
+const GC = { soil: C('regoDk').multiplyScalar(0.62), rego: C('rego'), regoDk: C('regoDk'), regoLt: C('regoLt'), haze: C('haze'), paper: C('paper'), metalDk: C('metalDk'), deep: C('deep'), tealGy: C('tealGy'), zone: C('zone'), data: C('data'), harvest: C('harvest'), void: C('void'), alert: C('alert'), oliveDp: C('oliveDp'), olive: C('olive'), moss: C('moss'), ochre: C('ochre'), straw: C('straw'), rust: C('rust') };
 MAT.ground.onBeforeCompile = (s) => {
   Object.assign(s.uniforms, U);
   for (const k in GC) s.uniforms['g_' + k] = { value: GC[k] };
@@ -300,7 +300,63 @@ vec3 farmAlbedo(vec2 p){
     float g = d.g;
     bool cut = laneCut(uv, d.b);
     float patchy = (n1 - 0.5) * 0.12 + (n2 - 0.5) * 0.05;
-    if (cut) {                                       // 残茬：作业带一深一浅（收割方向不同），带车辙
+    float pst = floor(g + 0.001);
+    if (pst >= 1.0 && tex == 2) {                    // 商品薯：16 m 垄，播放镜头里也能看见阶段
+      float rowP = 16.0;
+      float phP = across / rowP;
+      float visP = 1.0 - smoothstep(0.35, 0.85, fwidth(phP));
+      float profP = 0.5 + 0.5 * cos(6.2832 * phP);
+      float slopeP = -sin(6.2832 * phP);
+      bool worked = laneCut(uv, d.b);
+      vec3 soil = g_soil * (0.82 + 0.22 * profP * visP) * (1.0 + patchy);
+      vec3 shoot = mix(g_oliveDp, g_moss, 0.4);
+      vec3 canopy = mix(g_oliveDp, g_olive, 0.62);
+      vec3 flower = vec3(0.74, 0.62, 0.84);
+      float flk = smoothstep(0.78, 0.94, hash12(floor(uv * vec2(0.55, 0.85))));
+      float crest = smoothstep(0.42, 0.86, profP);
+      vec3 haulm = mix(g_soil, mix(g_ochre, g_rust, 0.5), 0.75);
+      haulm *= 0.84 + 0.16 * cos(uv.x * 2.6);
+      if (pst < 1.5) {
+        vec3 soilTone = worked ? g_rego * 0.92 : g_soil * 0.78;
+        col = mix(soilTone, mix(soilTone * 0.72, soilTone * 1.22, profP), max(visP, worked ? 0.65 : 0.0));
+        gTilt = acrossW * slopeP * (worked ? 1.35 : 0.15) * max(visP, 0.35);
+        gRough = 0.97;
+      } else if (pst < 2.5) {
+        vec3 shootTone = mix(g_soil, shoot, 0.62);
+        col = mix(shootTone, mix(g_soil, shoot, crest), max(visP, 0.35));
+        gTilt = acrossW * slopeP * (worked ? 1.3 : 0.9) * max(visP, 0.25);
+        canopyHere = true;
+      } else if (pst < 3.5) {
+        col = mix(canopy, mix(g_soil * 0.85, canopy, smoothstep(0.15, 0.7, profP)), visP);
+        gTilt = acrossW * slopeP * 0.45 * visP;
+        canopyHere = true;
+        gRough = 0.68;
+      } else if (pst < 4.5) {
+        vec3 wash = mix(canopy, flower, 0.62);
+        col = mix(wash, mix(wash, flower, flk), max(visP, 0.25));
+        gTilt = acrossW * slopeP * 0.3 * visP;
+        canopyHere = true;
+        gRough = 0.64;
+      } else if (pst < 5.5) {
+        vec3 vine = mix(canopy, flower, 0.5);
+        vec3 dead = mix(g_rust, g_ochre, 0.35);
+        bool shredded = worked || d.b >= 9.5;
+        col = shredded ? mix(dead, dead * (0.82 + 0.18 * profP), max(visP, 0.4)) : vine;
+        if (!shredded) canopyHere = true;
+        gTilt = acrossW * slopeP * 0.28 * visP;
+        gRough = shredded ? 0.92 : 0.66;
+      } else if (worked) {
+        vec3 opened = mix(g_straw, g_regoLt, 0.25);
+        float tub = smoothstep(0.62, 0.9, hash12(floor(uv * vec2(0.35, 0.45))));
+        col = mix(opened * 0.82, g_straw * 1.35, tub * 0.85);
+        gTilt = acrossW * slopeP * 0.12 * visP;
+        gRough = 0.9;
+      } else {
+        col = mix(g_rust, g_ochre, 0.35);
+        gTilt = acrossW * slopeP * 0.22 * visP;
+        gRough = 0.92;
+      }
+    } else if (cut) {                                       // 残茬：作业带一深一浅（收割方向不同），带车辙
       float lane = floor(uv.y / LANE), lv = mod(uv.y, LANE) - LANE * .5;
       col = mix(g_soil, uCropStub[c], 0.6) * (1. + patchy);
       col *= mod(lane, 2.) < .5 ? 1.06 : 0.9;
@@ -344,7 +400,7 @@ vec3 farmAlbedo(vec2 p){
     }
     // 制图层的地图模式：成熟度用单一色相渐变
     if (uMap > 0.) {
-      float m = cut ? 0.0 : g;
+      float m = pst >= 1.0 ? growthVis(g) : (cut ? 0.0 : g);
       vec3 mc = mix(g_deep * 1.6, g_zone, m) * (cut ? 0.6 : 1.0);
       col = mix(col, mc, uMap * 0.92);
     }
@@ -480,11 +536,19 @@ uniform float uTime, uCutOn; uniform vec4 uPlantWin, uCut;
 varying vec3 vCropCol;`).replace('#include <begin_vertex>', `#include <begin_vertex>
   vec4 io = modelMatrix * instanceMatrix * vec4(0., 0., 0., 1.);
   ivec2 fij; vec2 loc, bl; int kind = farmCell(io.xz, fij, loc, bl);
-  float sc = 0.; int c = 0; float gg = 0.;
+  float sc = 0.; int c = 0; float gg = 0.; vec4 d = vec4(0.); float stage = 0.;
   if (kind == 3) {
-    vec4 d = texelFetch(uField, fij, 0); c = int(d.r + .5);
+    d = texelFetch(uField, fij, 0); c = int(d.r + .5);
     vec2 uv = d.a > .5 ? loc.yx : loc;
-    if (d.r >= 0. && !laneCut(uv, d.b)) { gg = d.g; sc = d.g; }
+    if (d.r >= 0.) {
+      stage = floor(d.g + 0.001);
+      bool opened = laneCut(uv, d.b);
+      gg = growthVis(d.g);
+      if (stage < 0.5 && opened) gg = 0.;
+      if (stage > 4.5 && opened) gg = stage < 5.5 ? 0.08 : 0.;
+      if (stage > 0.5 && stage < 1.5) gg = 0.;
+      sc = gg;
+    }
   }
   vec2 dw = abs(io.xz - uPlantWin.xy);
   float edge = 1. - smoothstep(uPlantWin.z * 0.72, uPlantWin.z, max(dw.x, dw.y));
@@ -494,7 +558,9 @@ varying vec3 vCropCol;`).replace('#include <begin_vertex>', `#include <begin_ver
   transformed.xz *= ws; transformed.y *= hs;
   float sw = sin(uTime * 1.6 + io.x * 0.31 + io.z * 0.17) + 0.5 * sin(uTime * 2.7 + io.x * 0.9);
   transformed.x += sw * 0.06 * position.y * hs; transformed.z += sw * 0.03 * position.y * hs;
-  vCropCol = mix(uCropYoung[c], uCropRipe[c], smoothstep(0.45, 1.0, gg));`)
+  vCropCol = mix(uCropYoung[c], uCropRipe[c], smoothstep(0.45, 1.0, gg));
+  if (stage > 3.5 && stage < 4.5 && position.y > 0.48) vCropCol = vec3(0.76, 0.64, 0.86);
+  if (stage > 4.5 && stage < 5.5) vCropCol = uCropStub[c];`)
     .replace('#include <project_vertex>', CURVE_PROJECT);
   if (!depth) s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vCropCol;')
     .replace('#include <color_fragment>', '#include <color_fragment>\n diffuseColor.rgb *= vCropCol * 1.08; { float lm = dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722)); diffuseColor.rgb = max(mix(vec3(lm), diffuseColor.rgb, 1.15), 0.); }');
@@ -566,6 +632,12 @@ const HUBC = L.X0 + L.HUBX * L.BP + L.BLOCK / 2;  // 中枢区中心（= 0；z �
 const HV = harvesterKit();
 const H_NEAR = 80, PARKED = 14;
 const harvSet = instanced(HV, H_NEAR + PARKED);
+const rigMesh = {
+  planter: instanced(planterKit(), 2),
+  hiller: instanced(hillerKit(), 2),
+  topper: instanced(topperKit(), 2),
+  lifter: instanced(potatoLifterKit(), 2),
+};
 const parked = Array.from({ length: PARKED }, (_, n) => ({ x: HUBC + 85 + (n % 7) * 14.6, z: HUBC + 150 + Math.floor(n / 7) * 22, ang: -Math.PI / 2 }));
 const haulSet = instanced(haulerKit(), haulers.length);
 const droneSet = instanced(droneKit(), drones.length, false);
@@ -844,12 +916,24 @@ function onMapClick(cx, cy) {
   if (!f.owned) { selectField(f, f.crop === -3 ? '蓄水池' : '设施用地'); return; }
   selectField(f, '');
 }
+function toast(html) {
+  const d = document.createElement('div');
+  d.className = 'toast';
+  d.innerHTML = html;
+  $('toasts').appendChild(d);
+  setTimeout(() => d.remove(), 4800);
+}
 function doPlant(id) {
-  if (!selected?.owned || selected.state === 3) return;
+  if (!selected?.owned || selected.state === 3) return { ok: false, reason: 'busy' };
   const r = plantField(selected, id);
-  if (!r.ok) return;
+  if (!r.ok) {
+    const why = r.reason === 'seed' ? '种薯不足' : r.reason === 'fertilizer' ? '肥料不足' : r.reason === 'busy' ? '这块田正在长' : '不能播种';
+    toast(why);
+    return r;
+  }
   plantWin = { x: 1e9, z: 1e9, w: 0 };
   saveSoon();
+  return r;
 }
 R.domElement.addEventListener('contextmenu', e => e.preventDefault());
 R.domElement.addEventListener('pointerdown', e => {
@@ -920,7 +1004,14 @@ const $ = id => document.getElementById(id);
 const labelLayer = $('labels'); const LBL = [];
 for (let i = 0; i < 70; i++) { const d = document.createElement('div'); d.className = 'lbl'; labelLayer.appendChild(d); LBL.push(d); }
 const legend = $('legend');
-legend.innerHTML = CROPS.map(c => `<div class="lg"><i style="background:linear-gradient(90deg,${PALETTE[c.young]},${PALETTE[c.ripe]})"></i><span>${c.name}</span><em>${c.height.toFixed(1)} m</em></div>`).join('');
+legend.innerHTML = [
+  ['裸垄', PALETTE.regoDk, PALETTE.rego],
+  ['出苗', PALETTE.regoDk, PALETTE.oliveDp],
+  ['封垄', PALETTE.oliveDp, PALETTE.olive],
+  ['开花', PALETTE.olive, '#c4b0d4'],
+  ['碎秧', PALETTE.ochre, PALETTE.rust],
+  ['起薯', PALETTE.straw, PALETTE.regoLt],
+].map(([name, a, b]) => `<div class="lg"><i style="background:linear-gradient(90deg,${a},${b})"></i><span>${name}</span></div>`).join('');
 const TIERS = [['轨道', 'ORBITAL', 1800], ['区域', 'SECTOR', 450], ['作业', 'OPERATIONS', 70], ['单株', 'CROP', 0]];
 $('tiers').innerHTML = TIERS.map((t, i) => `<span data-i="${i}"><b>${t[0]}</b><small>${t[1]}</small></span>`).join('');
 function gotoTier(n) { camT.d = [4800, 900, 160, 34][n - 1]; camT.pOff = 0; camT.lookUp = 0; camT.fovAdd = 0; }
@@ -941,21 +1032,23 @@ function updateLabels(d) {
     const x = L.X0 + bi * L.BP + L.BLOCK / 2, z = L.Z0 + bj * L.BP + L.BLOCK / 2;
     if (Math.hypot(x - camS.x, z - camS.z) > d * 1.0) continue;
     const hub = bi === L.HUBX && bj === L.HUBZ; if (!hub && (bi % 3 !== 1 || bj % 3 !== 1)) continue;
-    want.push({ x, z, pr: hub ? 0 : 1, a: aSec, html: hub ? `<b>中枢 · CENTRAL HUB</b><small>卫星 KESTREL-7 · 轨道农业署</small>` : `<b>${secName(bi, bj)}</b><small>${CROPS[fields[(bj * L.PER + 1) * L.NFX + bi * L.PER + 1].crop]?.name || ''}</small>`, cls: hub ? 'hub' : 'sec' });
+    want.push({ x, z, pr: hub ? 0 : 1, a: aSec, html: hub ? `<b>中枢 · CENTRAL HUB</b><small>试验卫星 · 农神VIII</small>` : `<b>${secName(bi, bj)}</b><small>邻区</small>`, cls: hub ? 'hub' : 'sec' });
   }
   if (aField > 0) for (const f of fields) {
     if (f.crop < 0) continue; const x = f.x0 + 64, z = f.z0 + 64; if (Math.hypot(x - camS.x, z - camS.z) > Math.min(d * 1.15, 720) || inCut(x, z, 40)) continue;
-    const c = CROPS[f.crop];
-    const st = f.state === 3 ? `收割中 ${Math.round(Math.min(1, f.s / L.LANES) * 100)}%` : f.state === 2 ? '待收' : f.state === 1 ? `${Math.round(f.g * 100)}%` : f.state === 4 ? '残茬' : '可播种';
-    want.push({ x, z, pr: 2, a: aField, html: `<i style="background:${PALETTE[c.ripe]}"></i><b>F-${String(f.i).padStart(2, '0')}${String(f.j).padStart(2, '0')}</b><span>${c.name} · ${st}</span>`, cls: 'fld' + ((f === selected || f.state === 3) ? ' act' : '') });
+    const watch = cropWatch(f);
+    const st = watch ? `${watch.label} · 第 ${Math.floor(watch.day)} 日` : (f.state === 3 ? '作业' : '定格冠层');
+    const sw = watch ? PALETTE.olive : PALETTE.rego;
+    want.push({ x, z, pr: 2, a: aField, html: `<i style="background:${sw}"></i><b>F-${String(f.i).padStart(2, '0')}${String(f.j).padStart(2, '0')}</b><span>${st}</span>`, cls: 'fld' + ((f === selected || watch) ? ' act' : '') });
   }
-  if (ops) for (const h of nearH.slice(0, 6)) if (h.mode === 'cut' || h.mode === 'turn') want.push({ x: h.x, z: h.z, y: 8, pr: 3, a: Math.min(1, (260 - d) / 60) * Math.min(1, (d - 60) / 30), html: `<b>H-${String(h.id).padStart(3, '0')}</b><span>收割 ${Math.round(h.f.s / L.LANES * 100)}%</span>`, cls: 'veh' });
+  if (ops) for (const h of nearH.slice(0, 6)) if (h.mode === 'cut' || h.mode === 'turn') want.push({ x: h.x, z: h.z, y: 8, pr: 3, a: Math.min(1, (260 - d) / 60) * Math.min(1, (d - 60) / 30), html: `<b>H-${String(h.id).padStart(3, '0')}</b><span>作业</span>`, cls: 'veh' });
+  for (const r of rigs) if (r.busy) want.push({ x: r.x, z: r.z, y: 6, pr: 3, a: Math.min(1, Math.max(0, (1400 - d) / 500)), html: `<b>${r.label}</b>`, cls: 'veh' });
   if (cut.on && d < 2200) {
     const I = cutInner(), a = 1 - Math.min(1, Math.max(0, (d - 1500) / 500));
     want.push({ x: cut.x + CUT.AX * 0.55, z: cut.z - CUT.AZ + 18, y: LAYERS[1].floor, pr: -2, a, html: `<b>${LAYERS[1].name} · ${LAYERS[1].en}</b><small>${LAYERS[1].floor} m · 立体栽培架 ${rackSet.light.count} 组</small>`, cls: 'hub deck' });
     want.push({ x: (I.x0 + I.x1) / 2, z: I.z0 + 20, y: LAYERS[2].floor, pr: -2, a, html: `<b>${LAYERS[2].name} · ${LAYERS[2].en}</b><small>${LAYERS[2].floor} m · 储液 / 泵站 / 管廊</small>`, cls: 'hub deck' });
   }
-  want.push({ x: HUBC, z: HUBC, pr: -1, a: (d > 260 && d <= 1500) ? 1 : 0, html: `<b>中枢 · CENTRAL HUB</b><small>卫星 KESTREL-7 · 轨道农业署</small>`, cls: 'hub' });
+  want.push({ x: HUBC, z: HUBC, pr: -1, a: (d > 260 && d <= 1500) ? 1 : 0, html: `<b>中枢 · CENTRAL HUB</b><small>试验卫星 · 农神VIII</small>`, cls: 'hub' });
   // 屏幕上贪心去重：间距不足就不显示
   const placed = []; let n = 0;
   want.sort((a, b) => a.pr - b.pr);
@@ -994,7 +1087,7 @@ else if (VIEW === 'up') Object.assign(camS, { x: HUBC + 2600, z: HUBC - 700, d: 
 else if (VIEW === 'ops') { const h = pickHarvester(); Object.assign(camS, { x: h.x, z: h.z - 40, d: 560, yaw: -0.3 }); }
 else if (VIEW === 'hub') Object.assign(camS, { x: HUBC - 20, z: HUBC, d: 620, yaw: 0.5 });
 else if (VIEW === 'far') Object.assign(camS, { x: HUBC + 500, z: HUBC + 250, d: 4800, yaw: 96 * DEG });
-else Object.assign(camS, { x: focus.x, z: focus.z, d: 1900, yaw: 100 * DEG, pOff: -26 * DEG, lookUp: 14, fovAdd: 16 });
+else Object.assign(camS, { x: focus.x, z: focus.z, d: 720, yaw: 118 * DEG, pOff: -8 * DEG, lookUp: 0, fovAdd: 6 });
 Object.assign(camT, camS); const follow = camS.follow; delete camT.follow;
 if (Q.get('cx')) { camS.x = camT.x = HUBC + +Q.get('cx'); camS.z = camT.z = HUBC + +(Q.get('cz') || 0); camS.follow = camT.follow = null; }
 if (Q.get('d')) camS.d = camT.d = +Q.get('d');
@@ -1003,7 +1096,7 @@ if (Q.get('po')) camS.pOff = camT.pOff = +Q.get('po') * DEG;
 if (Q.get('lu')) camS.lookUp = camT.lookUp = +Q.get('lu');
 if (Q.has('cut') || VIEW === 'cut') setCut(true, camS.x, camS.z);
 
-const SAVE_KEY = 'kestrel7.plot07.v1';
+const SAVE_KEY = 'ringsheaf.nongshen8.v1';
 const fmt = n => Math.round(n).toLocaleString('en-US');
 function saveNow() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(exportSnapshot())); } catch (e) { /* private mode */ } }
 function saveSoon() { clearTimeout(saveSoon.t); saveSoon.t = setTimeout(saveNow, 400); }
@@ -1022,57 +1115,56 @@ function drainLog() {
   }
 }
 function paintKpi() {
-  let grow = 0, ripe = 0, act = 0;
-  for (const f of fields) if (f.owned && f.live && !f.hold) { if (f.state === 1) grow++; else if (f.state === 2) ripe++; }
-  for (const h of harvesters) if (h.mode === 'cut' || h.mode === 'turn' || h.mode === 'travel') act++;
+  let act = 0;
+  for (const r of rigs) if (r.busy) act++;
   const el = $('kpi-rev');
   el.textContent = fmt(economy.revenue);
   if (economy.revenue !== shownRev) {
     if (shownRev >= 0) { el.classList.remove('tick'); void el.offsetWidth; el.classList.add('tick'); }
     shownRev = economy.revenue;
   }
-  $('kpi-grow').textContent = String(grow);
-  $('kpi-ripe').textContent = String(ripe);
+  $('kpi-day').textContent = String(Math.floor(worldDay));
+  $('kpi-seed').textContent = String(stores.seed);
   $('kpi-act').textContent = String(act);
+  $('stores').textContent = `种薯 ${stores.seed} · 肥料 ${stores.fertilizer} · 干燥剂 ${stores.spray}`;
 }
 function updateDock() {
   const el = $('dock');
   if (!selected) { el.classList.remove('on'); return; }
   el.classList.add('on');
-  const f = selected, c = f.crop >= 0 ? CROPS[f.crop] : null;
+  const f = selected;
+  const watch = cropWatch(f);
   let stat = selNote;
   if (!stat) {
     if (!f.owned) stat = '邻区快照 · 只读';
-    else if (f.state === 3) stat = `收割中 ${Math.round(Math.min(1, f.s / L.LANES) * 100)}% · 收割机作业`;
-    else if (f.state === 1 && f.live) stat = `${c.name} · 生长 ${Math.round(f.g * 100)}%`;
-    else if (f.state === 2 && f.live) stat = `${c.name} · 成熟，收割机在途`;
-    else if (f.state === 4) stat = '残茬 · 可重种';
-    else if (f.state === 0) stat = '裸地 · 点下面一种作物';
-    else stat = `${c ? c.name + ' · ' : ''}点一种作物重种`;
+    else if (watch) stat = `中熟商品薯 · ${watch.label} · 播后 ${Math.floor(watch.day)} / ${watch.days} 日`;
+    else if (f.state === 0) stat = '裸地 · 点种薯，播种机起垄';
+    else stat = '定格冠层 · 可改种商品薯';
   }
   $('selid').textContent = `F-${String(f.i).padStart(3, '0')}${String(f.j).padStart(2, '0')}`;
   $('selstat').textContent = stat;
-  const p = f.state === 1 ? f.g : f.state === 3 ? Math.min(1, f.s / L.LANES) : (f.state === 2 ? 1 : 0);
-  $('selbar').style.width = (Math.max(0, Math.min(1, p)) * 100).toFixed(1) + '%';
-  const busy = !f.owned || f.state === 3;
+  const p = watch ? Math.max(0, Math.min(1, watch.day / watch.days)) : 0;
+  $('selbar').style.width = (p * 100).toFixed(1) + '%';
+  const busy = !f.owned || !!watch || f.state === 3 || stores.seed < 1 || stores.fertilizer < 1;
   document.querySelectorAll('#selbtns button').forEach(b => {
     b.disabled = busy;
-    b.classList.toggle('on', !!(c && b.dataset.crop === c.id && f.state === 1 && f.live));
+    b.classList.toggle('on', !!watch);
   });
 }
 function paintRates() {
   document.querySelectorAll('#rates button').forEach(b => b.classList.toggle('on', +b.dataset.rate === economy.timeScale));
 }
-$('kpi').innerHTML = `<div><small>营收</small><b class="hv" id="kpi-rev">0</b></div><div><small>生长</small><b id="kpi-grow">0</b></div><div><small>待收</small><b id="kpi-ripe">0</b></div><div><small>作业机组</small><b class="hv" id="kpi-act">0</b><em>/ ${harvesters.length}</em></div>`;
+$('kpi').innerHTML = `<div><small>营收</small><b class="hv" id="kpi-rev">0</b></div><div><small>世界日</small><b id="kpi-day">0</b></div><div><small>种薯</small><b id="kpi-seed">${stores.seed}</b></div><div><small>作业</small><b class="hv" id="kpi-act">0</b><em>/ ${rigs.length}</em></div>`;
 $('dock').innerHTML = `<div class="who"><b id="selid"></b><span id="selstat"></span></div><div id="bar"><i id="selbar"></i></div><div class="row" id="selbtns"></div>`;
 for (const c of CROPS) if (c.plantable) {
   const b = document.createElement('button');
   b.dataset.crop = c.id;
-  b.innerHTML = `<b>${c.name}</b><small>${fmt(quote(CROPS.indexOf(c)))}</small>`;
+  b.innerHTML = `<b>${c.name}</b><small>种薯 1 · 肥料 1 · ${POTATO_DAYS} 日 · ${fmt(quote(CROPS.indexOf(c)))}</small>`;
+  b.style.gridColumn = '1 / -1';
   b.addEventListener('click', () => doPlant(c.id));
   $('selbtns').appendChild(b);
 }
-$('rates').innerHTML = `<span>流速</span>` + [1, 4, 12].map(r => `<button type="button" data-rate="${r}">${r}×</button>`).join('');
+$('rates').innerHTML = `<span>世界钟</span>` + [1, 4, 12].map(r => `<button type="button" data-rate="${r}">${r}×</button>`).join('');
 $('rates').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; setTimeScale(+b.dataset.rate); paintRates(); saveSoon(); });
 paintRates();
 if (!VIEW && !Q.has('fresh')) loadNow();
@@ -1141,6 +1233,14 @@ function frame(now) {
     if (h.mode === 'cut' && d < 600 && h._d < 300) for (let e = 0; e < 3; e++) emitDust(h.x, h.z, h.va);
   }
   setCount(harvSet, d < 1500 ? n : 0);
+  for (const r of rigs) {
+    const set = rigMesh[r.kind];
+    if (!set || d >= 1500 || inCut(r.x, r.z, 8)) { setCount(set, 0); continue; }
+    r.va = r.va === undefined ? r.ang : r.va + Math.atan2(Math.sin(r.ang - r.va), Math.cos(r.ang - r.va)) * Math.min(1, dt * 8);
+    setInst(set, 0, r.x, 0, r.z, r.va, r.kind === 'lifter' ? 1.45 : 2.4);
+    setCount(set, 1);
+    if (r.busy && d < 700) for (let e = 0; e < 2; e++) emitDust(r.x, r.z, r.va);
+  }
   haulers.forEach((h, i) => setInst(haulSet, i, h.x, 0, h.z, h.ang)); setCount(haulSet, d < 1500 ? haulers.length : 0);
   drones.forEach((dr, i) => setInst(droneSet, i, dr.x, dr.y, dr.z, dr.ang)); setCount(droneSet, d < 1200 ? drones.length : 0);
   people.forEach((p, i) => { p.a += (Math.sin(t * 0.3 + i) * 0.5) * dt; p.x += Math.cos(p.a) * p.sp * dt; p.z += Math.sin(p.a) * p.sp * dt; setInst(peopleSet, i, p.x, 0, p.z, p.a); }); setCount(peopleSet, d < 700 ? people.length : 0);
@@ -1179,8 +1279,7 @@ function frame(now) {
   else U.uSelOn.value = 0;
   drainLog();
   if (frames === 0) {
-    const sol = 214 + Math.floor(simTime / 600), hh = (6 + simTime / 25) % 24;
-    $('clock').textContent = `SOL ${sol} · ${String(Math.floor(hh)).padStart(2, '0')}:${String(Math.floor(hh % 1 * 60)).padStart(2, '0')}`;
+    $('clock').textContent = `第 ${Math.floor(worldDay)} 日 · ${economy.timeScale}×`;
     $('fps').textContent = `${fpsShow.toFixed(0)} FPS`;
   }
   window.__stats = { fps: fpsShow, t, sim: simTime, d, revenue: economy.revenue, g: selected && selected.g, state: selected && selected.state, plants: Object.values(plantMeshes).reduce((a, m) => a + (m.visible ? m.count : 0), 0), harvesters: harvesters.length, active: harvesters.filter(h => h.mode === 'cut').length, calls: R.info.render.calls, tris: R.info.render.triangles };
@@ -1192,12 +1291,15 @@ if (Q.has('nohud')) document.body.classList.add('nohud');
 requestAnimationFrame(frame);
 addEventListener('resize', () => { cam.aspect = innerWidth / innerHeight; cam.updateProjectionMatrix(); R.setSize(innerWidth, innerHeight); composer.setSize(innerWidth, innerHeight); gtao.setSize(innerWidth, innerHeight); });
 window.__farm = {
-  economy, focus, fields, harvesters, log, CROPS, PLOT, quote, fieldAtWorld, project, pick: pickFlat,
+  economy, stores, focus, fields, harvesters, rigs, log, CROPS, PLOT, quote, fieldAtWorld, project, pick: pickFlat,
   snapshot: exportSnapshot, plant: doPlant, select: (i, j) => selectField(fieldAt(i, j)),
   get selected() { return selected; },
+  get worldDay() { return worldDay; },
+  watch: () => cropWatch(selected),
   advance(seconds, scale = economy.timeScale) {
     const n = Math.max(1, Math.round(seconds / 0.05));
     for (let i = 0; i < n; i++) step(seconds / n, t, scale);
+    writeFields();
   },
 };
 window.__ready = true;

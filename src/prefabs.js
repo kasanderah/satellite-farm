@@ -82,6 +82,73 @@ export function harvesterKit() {
   return k.build();
 }
 
+// 拖拉机底盘（约 4.5 m），后面换农具。材质仍是那四套共享材质。
+function tractorBase(k) {
+  k.box('dark', 2.6, 0.7, 1.7, [0.1, 0.95, 0]);
+  k.box('light', 1.45, 1.25, 1.55, [-0.15, 1.9, 0], [0, 0, 0], 'haze');
+  k.box('glass', 1.2, 0.72, 1.35, [-0.1, 2.15, 0]);
+  k.box('dark', 0.9, 0.55, 1.5, [1.15, 1.35, 0]);
+  k.cyl('emis', 0.14, 0.14, 0.22, [0.15, 2.75, 0], [0, 0, 0], glow('harvest', 12), 8);
+  k.box('emis', 0.08, 0.16, 0.4, [1.55, 1.15, 0.55], [0, 0, 0], glow('paper', 8));
+  k.box('emis', 0.08, 0.16, 0.4, [1.55, 1.15, -0.55], [0, 0, 0], glow('paper', 8));
+  for (const x of [1.05, -1.05]) for (const s of [-1, 1]) {
+    k.cyl('dark', 0.52, 0.52, 0.32, [x, 0.52, s * 1.05], [Math.PI / 2, 0, 0], null, 12);
+    k.cyl('light', 0.24, 0.24, 0.34, [x, 0.52, s * 1.05], [Math.PI / 2, 0, 0], 'rego', 8);
+  }
+}
+// 播种机：拖拉机拖着覆土起垄器，种薯落下后垄脊合上
+export function planterKit() {
+  const k = new Kit();
+  tractorBase(k);
+  k.box('dark', 0.8, 0.28, 3.4, [-2.15, 0.85, 0]);
+  k.box('light', 1.3, 0.7, 1.1, [-1.7, 1.35, 0], [0, 0, 0], 'regoLt'); // 种箱
+  for (const z of [-1.2, -0.4, 0.4, 1.2]) {
+    k.box('dark', 0.55, 0.16, 0.16, [-2.55, 0.42, z]);
+    k.box('light', 0.7, 0.32, 0.28, [-2.85, 0.4, z], [0.55, 0, 0], 'paper'); // 覆土板
+  }
+  return k.build();
+}
+// 培土机：圆盘把土重新抛回垄脊，薯块不见光
+export function hillerKit() {
+  const k = new Kit();
+  tractorBase(k);
+  k.box('dark', 0.5, 0.3, 3.6, [-2.2, 0.9, 0]);
+  for (const z of [-1.35, -0.45, 0.45, 1.35]) {
+    k.cyl('light', 0.42, 0.42, 0.1, [-2.15, 0.55, z], [0.4, 0, Math.PI / 2], 'haze', 10);
+    k.box('dark', 0.35, 0.5, 0.12, [-2.55, 0.4, z], [0.2, 0, 0]);
+  }
+  return k.build();
+}
+// 杀秧机：前挂甩刀罩，把藤蔓打碎，不是慢慢变黄
+export function topperKit() {
+  const k = new Kit();
+  tractorBase(k);
+  k.box('dark', 1.5, 0.55, 3.6, [2.55, 0.85, 0]);
+  k.box('light', 1.2, 0.22, 3.7, [2.7, 1.2, 0], [0, 0, 0], 'regoLt');
+  k.cyl('dark', 0.18, 0.18, 3.3, [2.7, 0.62, 0], [Math.PI / 2, 0, 0], null, 8);
+  for (let i = 0; i < 9; i++) k.box('light', 0.28, 0.16, 0.08, [2.7, 0.48, -1.5 + i * 0.38], [0.8, 0, 0], 'rust');
+  return k.build();
+}
+// 收获机：铲起垄，土从杆条网落下，薯块进料仓
+export function potatoLifterKit() {
+  const k = new Kit();
+  k.box('dark', 6.4, 1.15, 2.5, [-0.2, 1.25, 0]);
+  k.box('light', 2.8, 1.35, 2.35, [-1.5, 2.4, 0], [0, 0, 0], 'regoLt'); // 料仓
+  k.box('dark', 2.7, 0.12, 2.2, [-1.5, 3.1, 0]);
+  k.box('glass', 1.5, 1.15, 1.9, [1.35, 2.25, 0]);
+  k.cyl('emis', 0.15, 0.15, 0.24, [1.1, 3.05, 0], [0, 0, 0], glow('harvest', 14), 8);
+  k.box('dark', 1.6, 0.28, 3.1, [3.35, 0.42, 0]); // 铲
+  k.box('light', 0.18, 0.42, 3.2, [4.05, 0.5, 0], [0.6, 0, 0], 'paper');
+  for (let i = 0; i < 7; i++) k.box('light', 0.1, 0.08, 2.3, [2.55 - i * 0.32, 0.85 + i * 0.1, 0], [0.35, 0, 0], 'haze'); // 杆条网
+  for (const s of [-1, 1]) {
+    k.cyl('dark', 0.72, 0.72, 0.4, [1.3, 0.72, s * 1.45], [Math.PI / 2, 0, 0], null, 14);
+    k.cyl('dark', 0.48, 0.48, 0.34, [-2.5, 0.48, s * 1.25], [Math.PI / 2, 0, 0], null, 12);
+  }
+  k.box('emis', 0.08, 0.2, 0.4, [-3.4, 1.5, 0.9], [0, 0, 0], glow('alert', 6));
+  k.box('emis', 0.08, 0.2, 0.4, [-3.4, 1.5, -0.9], [0, 0, 0], glow('alert', 6));
+  return k.build();
+}
+
 // ---------------- 运输车（8 m） ----------------
 export function haulerKit() {
   const k = new Kit();

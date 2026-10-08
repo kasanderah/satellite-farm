@@ -2,7 +2,7 @@
   "name": "satellite-farm",
   "type": "module",
   "version": "0.1.0",
-  "description": "环穗 (Ringsheaf). Playable slice of a ring-band colony farm. One 4 km plot: plant, grow, automated harvest, revenue.",
+  "description": "环穗 (Ringsheaf). One plot on test satellite 农神VIII: a 120-world-day ware potato, from seed ridge to vine-kill and harvest.",
   "main": "index.html",
   "scripts": {
     "build": "node build.mjs",

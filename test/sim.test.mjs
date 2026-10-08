@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  CROPS, L, PLOT, FIELD_HA, fields, fieldAt, fieldAtWorld, focus, harvesters,
+  CROPS, L, PLOT, FIELD_HA, fields, fieldAt, fieldAtWorld, focus, rigs,
   plantField, step, economy, quote, log, exportSnapshot, applySnapshot, RING,
+  stores, worldDay, cropWatch, fieldVisual,
 } from '../src/_shared.js';
 
 test('one colonist plot is about 4 km on the ring', () => {
@@ -28,50 +29,80 @@ test('field lookup matches the flat map, including the ring seam', () => {
   assert.equal(fieldAtWorld(bare.x0 + L.FIELD + 2, bare.z0 + 20), null);
 });
 
-test('plantable quotes use yield and price, not a flat bonus', () => {
-  const wheat = CROPS.findIndex(c => c.id === 'wheat');
-  const expect = Math.round(FIELD_HA * 17800 * 1011 / 1000);
-  assert.equal(quote(wheat), expect);
-  assert.ok(expect > 20000);
-  const rice = CROPS.findIndex(c => c.id === 'rice');
-  assert.ok(quote(rice) > quote(wheat));
-  assert.equal(CROPS.filter(c => c.plantable).length, 4);
+test('only the ware potato is plantable, and its quote uses yield and price', () => {
+  assert.deepEqual(CROPS.filter(c => c.plantable).map(c => c.id), ['potato']);
+  const potato = CROPS.findIndex(c => c.id === 'potato');
+  const expect = Math.round(FIELD_HA * 44000 * 412 / 1000);
+  assert.equal(quote(potato), expect);
+  assert.equal(quote(CROPS.findIndex(c => c.id === 'wheat')), 0);
+  assert.equal(CROPS.find(c => c.id === 'potato').days, 120);
 });
 
-test('a planted crop grows, a harvester pays it, and the snapshot round-trips', () => {
+test('a potato follows one 120-day clock through ridges, vines, vine-kill, and paid harvest', () => {
   const bare = fieldAt(focus.i, focus.j);
   assert.equal(bare.state, 0);
   assert.equal(bare.owned, true);
   const neighbor = fields.find(f => !f.inPlot && f.crop >= 0);
-  assert.equal(plantField(neighbor, 'wheat').ok, false);
-  const planted = plantField(bare, 'wheat');
+  assert.equal(plantField(neighbor, 'potato').ok, false);
+  stores.seed = 0;
+  assert.equal(plantField(bare, 'potato').reason, 'seed');
+  stores.seed = 6;
+  const planted = plantField(bare, 'potato');
   assert.equal(planted.ok, true);
-  const g0 = bare.g;
-  step(1, 1, 4);
-  assert.ok(bare.g > g0, 'growth should be visible after one accelerated second');
-  assert.equal(bare.state, 1);
-  const before = economy.revenue;
-  let guard = 0;
-  while (!log.some(e => e.i === bare.i && e.j === bare.j) && guard++ < 2000) step(0.25, guard, 8);
-  assert.ok(guard < 2000, 'harvester never finished the planted field');
-  assert.ok(economy.revenue >= before + quote(CROPS.findIndex(c => c.id === 'wheat')));
-  assert.ok(harvesters.length >= 2);
+  assert.equal(stores.seed, 5);
+  assert.equal(stores.fertilizer, 5);
+  assert.equal(cropWatch(bare).phase, 'plant');
+  assert.equal(rigs.find(r => r.kind === 'planter').busy, true);
+  step(3, 0, 1);
+  assert.equal(cropWatch(bare).phase, 'plant');
+  assert.ok(fieldVisual(bare).s > 2, 'ridges form behind the planter');
+  assert.ok(fieldVisual(bare).g < 2, 'still bare ridges, not a canopy');
+  step(10, 0, 1);
+  assert.equal(cropWatch(bare).phase, 'ridge');
+  step(10, 0, 1);
+  assert.equal(cropWatch(bare).phase, 'hill');
+  assert.equal(rigs.find(r => r.kind === 'hiller').busy, true);
+  step(20, 0, 1);
+  assert.equal(cropWatch(bare).phase, 'shoot');
+  step(20, 0, 1);
+  assert.equal(cropWatch(bare).phase, 'canopy');
+  assert.ok(fieldVisual(bare).g >= 3 && fieldVisual(bare).g < 4);
+  step(20, 0, 1);
+  assert.equal(cropWatch(bare).phase, 'flower');
+  step(20, 0, 1);
+  assert.equal(cropWatch(bare).phase, 'top');
+  assert.equal(stores.spray, 5);
+  assert.equal(rigs.find(r => r.kind === 'topper').busy, true);
+  step(8, 0, 1);
+  assert.equal(cropWatch(bare).phase, 'haulm');
+  assert.ok(fieldVisual(bare).g >= 5 && fieldVisual(bare).g < 6);
+  step(6, 0, 1);
+  assert.equal(cropWatch(bare).phase, 'lift');
+  assert.equal(economy.revenue, 0);
+  assert.equal(rigs.find(r => r.kind === 'lifter').busy, true);
+  step(4, 0, 1);
+  const pay = quote(CROPS.findIndex(c => c.id === 'potato'));
+  assert.ok(economy.revenue >= pay);
+  assert.equal(log.some(e => e.type === 'harvest' && e.i === bare.i && e.pay === pay), true);
+  assert.equal(bare.live, false);
+  assert.equal(bare.state, 0);
+  const paid = economy.revenue;
+  step(5, 0, 1);
+  assert.equal(economy.revenue, paid, 'harvest pays once');
+  const day = worldDay;
+  step(2, 0, 4);
+  assert.ok(Math.abs(worldDay - day - 8) < 1e-6, '4× moves the same world clock');
   const snap = exportSnapshot();
-  assert.equal(snap.schema, 1);
-  assert.equal(snap.plotId, PLOT.id);
+  assert.equal(snap.schema, 2);
+  assert.equal(snap.plotId, 'nongshen-viii/plot-01');
   assert.equal(snap.kind, 'farm-snapshot');
+  assert.equal(snap.stores.seed, 5);
   assert.ok(snap.fields.length > 400);
-  assert.ok(Array.isArray(snap.harvesters));
-  const saved = snap.revenue;
-  const savedG = snap.fields.find(s => s.i === bare.i && s.j === bare.j);
   economy.revenue = 0;
-  bare.g = 0.2;
-  bare.state = 1;
+  stores.seed = 1;
   assert.equal(applySnapshot(snap), true);
-  assert.equal(economy.revenue, saved);
-  const again = fieldAt(bare.i, bare.j);
-  assert.equal(again.state, savedG.state);
-  assert.equal(again.g, savedG.g);
-  const bad = applySnapshot({ schema: 1, plotId: 'other', fields: [] });
-  assert.equal(bad, false);
+  assert.equal(economy.revenue, paid);
+  assert.equal(stores.seed, 5);
+  assert.equal(fieldAt(bare.i, bare.j).state, 0);
+  assert.equal(applySnapshot({ schema: 2, plotId: 'other', fields: [] }), false);
 });
