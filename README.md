@@ -1,6 +1,6 @@
-# KESTREL-7 · satellite farm
+# 环穗 (Ringsheaf)
 
-A browser farm on the inner surface of a colony ring. This slice is one person's plot: about 3.9 km along the ring by the full width of the band. The rest of the ring is a frozen neighbor backdrop, so the curl, the walls, and the parent planet still read the way the v3.1 art sample does. Nothing here is multiplayer. Your farm is one JSON document that can later be saved or handed over as a neighbor snapshot.
+环穗 (Ringsheaf) is a browser farm on the inner surface of a colony ring. This slice is one person's plot on satellite KESTREL-7, the station run by 轨道农业署: about 3.9 km along the ring by the full width of the band. Those names are the satellite and the office, not the title of the game. The rest of the ring is a frozen neighbor backdrop, so the curl, the walls, and the parent planet still read the way the v3.1 art sample does. Nothing here is multiplayer. Your farm is one JSON document that can later be saved or handed over as a neighbor snapshot.
 
 ## Run
 
@@ -29,7 +29,7 @@ The opening view sits on an empty field next to the hub. The salmon edge is the 
 
 Click another of your fields to replant it. Fields outside the salmon plot boundaries are a neighbor snapshot: you can look, you cannot plant, and they do not pay. Keys: drag to pan, right-drag to orbit, wheel to zoom, 1–4 for orbit / sector / work / plant, C cutaway, N day-night, M map, H hide the HUD.
 
-The game writes the snapshot to `localStorage` (`kestrel7.plot07.v1`) after you plant or harvest. `?fresh=1` starts from the seeded plot again.
+The game writes the snapshot to `localStorage` (`kestrel7.plot07.v1`, the satellite plot id) after you plant or harvest. `?fresh=1` starts from the seeded plot again.
 
 ## Snapshot
 

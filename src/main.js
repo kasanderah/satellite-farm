@@ -1,5 +1,5 @@
 // =====================================================================
-//  殖民卫星自动化农场 · v3.1 环带版 渲染层（three.js r186，ES 模块，build.sh 打包成单文件 html）
+//  环穗 (Ringsheaf) · v3.1 环带版 渲染层（three.js r186，ES 模块，build.sh 打包成单文件 html）
 // =====================================================================
 import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
@@ -941,7 +941,7 @@ function updateLabels(d) {
     const x = L.X0 + bi * L.BP + L.BLOCK / 2, z = L.Z0 + bj * L.BP + L.BLOCK / 2;
     if (Math.hypot(x - camS.x, z - camS.z) > d * 1.0) continue;
     const hub = bi === L.HUBX && bj === L.HUBZ; if (!hub && (bi % 3 !== 1 || bj % 3 !== 1)) continue;
-    want.push({ x, z, pr: hub ? 0 : 1, a: aSec, html: hub ? `<b>中枢 · CENTRAL HUB</b><small>KESTREL-7 农业控制站</small>` : `<b>${secName(bi, bj)}</b><small>${CROPS[fields[(bj * L.PER + 1) * L.NFX + bi * L.PER + 1].crop]?.name || ''}</small>`, cls: hub ? 'hub' : 'sec' });
+    want.push({ x, z, pr: hub ? 0 : 1, a: aSec, html: hub ? `<b>中枢 · CENTRAL HUB</b><small>卫星 KESTREL-7 · 轨道农业署</small>` : `<b>${secName(bi, bj)}</b><small>${CROPS[fields[(bj * L.PER + 1) * L.NFX + bi * L.PER + 1].crop]?.name || ''}</small>`, cls: hub ? 'hub' : 'sec' });
   }
   if (aField > 0) for (const f of fields) {
     if (f.crop < 0) continue; const x = f.x0 + 64, z = f.z0 + 64; if (Math.hypot(x - camS.x, z - camS.z) > Math.min(d * 1.15, 720) || inCut(x, z, 40)) continue;
@@ -955,7 +955,7 @@ function updateLabels(d) {
     want.push({ x: cut.x + CUT.AX * 0.55, z: cut.z - CUT.AZ + 18, y: LAYERS[1].floor, pr: -2, a, html: `<b>${LAYERS[1].name} · ${LAYERS[1].en}</b><small>${LAYERS[1].floor} m · 立体栽培架 ${rackSet.light.count} 组</small>`, cls: 'hub deck' });
     want.push({ x: (I.x0 + I.x1) / 2, z: I.z0 + 20, y: LAYERS[2].floor, pr: -2, a, html: `<b>${LAYERS[2].name} · ${LAYERS[2].en}</b><small>${LAYERS[2].floor} m · 储液 / 泵站 / 管廊</small>`, cls: 'hub deck' });
   }
-  want.push({ x: HUBC, z: HUBC, pr: -1, a: (d > 260 && d <= 1500) ? 1 : 0, html: `<b>中枢 · CENTRAL HUB</b><small>KESTREL-7</small>`, cls: 'hub' });
+  want.push({ x: HUBC, z: HUBC, pr: -1, a: (d > 260 && d <= 1500) ? 1 : 0, html: `<b>中枢 · CENTRAL HUB</b><small>卫星 KESTREL-7 · 轨道农业署</small>`, cls: 'hub' });
   // 屏幕上贪心去重：间距不足就不显示
   const placed = []; let n = 0;
   want.sort((a, b) => a.pr - b.pr);

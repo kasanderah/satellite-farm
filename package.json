@@ -2,7 +2,7 @@
   "name": "satellite-farm",
   "type": "module",
   "version": "0.1.0",
-  "description": "Playable slice of a ring-band colony farm. One 4 km plot: plant, grow, automated harvest, revenue.",
+  "description": "环穗 (Ringsheaf). Playable slice of a ring-band colony farm. One 4 km plot: plant, grow, automated harvest, revenue.",
   "main": "index.html",
   "scripts": {
     "build": "node build.mjs",
