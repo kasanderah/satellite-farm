@@ -96,6 +96,17 @@ function tractorBase(k) {
     k.cyl('light', 0.24, 0.24, 0.34, [x, 0.52, s * 1.05], [Math.PI / 2, 0, 0], 'rego', 8);
   }
 }
+// 仓棚：玩家在自己田区里放下的一栋小平房，材质仍是那四套共享材质。
+export function shedKit() {
+  const k = new Kit();
+  k.box('dark', 9.4, 0.32, 6.4, [0, 0.16, 0]);
+  k.box('light', 8.8, 3.1, 5.8, [0, 1.85, 0], [0, 0, 0], 'haze');
+  k.box('dark', 9.1, 0.22, 6.1, [0, 3.5, 0]);
+  k.box('light', 9.6, 0.4, 6.6, [0, 3.8, 0], [0, 0, 0], 'regoLt');
+  k.box('glass', 1.5, 1.7, 0.12, [4.46, 1.8, 0.4]);
+  k.box('emis', 0.08, 0.14, 0.46, [4.5, 2.85, 1.7], [0, 0, 0], glow('paper', 6));
+  return k.build();
+}
 export function tractorKit() {
   const k = new Kit();
   tractorBase(k);

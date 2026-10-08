@@ -16,11 +16,11 @@ npm run build
 
 `npm test` checks the flat-map sim (plot size, planting, growth, harvest payout, snapshot round-trip). The page itself is the 3D client.
 
-Art cameras, same as the sample: `index.html?view=far`, `mid`, `near`, `cut`, `up`. Add `fresh=1` to ignore a saved game. `rate=4` still sets the world clock for that session (1, 4, or 12). At 1×, one real second is one world day. The speed buttons are not on the play HUD.
+Art cameras, same as the sample: `index.html?view=far`, `mid`, `near`, `cut`, `up`. Add `fresh=1` to ignore a saved game. `rate=4` still sets the world clock for that session. **1× means one real minute is one world day.** A higher multiplier speeds the clock and the machines together. The speed control is not on the play HUD.
 
 ## Play
 
-The only crop in this slice is a mid-season ware potato (中熟商品薯). It takes **120 world days** from planting to harvest. Stages follow that clock. Clicking does not skip a stage. Planter, hiller, haulm topper, and harvester take five times as long to cross a field as they used to. The crop does not slow down with them.
+The only crop in this slice is a mid-season ware potato (中熟商品薯). It takes **120 world days** from planting to harvest. Stages follow that clock. Clicking does not skip a stage. At 1×, the planter, hiller, haulm topper, and harvester move at about 2.8 m/s, so one 128 m field edge takes about 50 real seconds.
 
 The opening view sits on an empty field next to the hub. The salmon edge is the selected field. You start with seed potatoes, fertilizer, and a vine-kill spray, shown as counts.
 
@@ -28,13 +28,22 @@ The opening view sits on an empty field next to the hub. The salmon edge is the 
 2. The field stays bare ridges until emergence. Green shoots show on the ridges. A hiller then throws soil back onto the ridges.
 3. The canopy closes the rows, then the plants flower (pale purple on a yellow-flesh potato).
 4. Before harvest, a haulm topper shreds the vines. That pass also uses one spray if you still have any. The field turns to shredded brown haulm. This is vine-kill, not a slow yellowing.
-5. A harvester lifts the ridge. Soil falls through the web, tubers show briefly in the opened row, and they go into the bunker. **营收** increases by that field's payout.
+5. A harvester lifts the ridge. Soil falls through the web, tubers show briefly in the opened row, and the lot goes into the warehouse. **营收** does not move until you sell that lot.
 
-Click another of your fields to plant it again, if you still have seed and fertilizer. Fields outside the salmon plot boundaries are a neighbor snapshot: you can look, you cannot plant, and they do not pay. Keys: drag to pan, right-drag to orbit, wheel to zoom, 1–4 for orbit / sector / work / plant, C cutaway, N day-night, M map, H hide the HUD.
+Click another of your fields to plant it again, if you still have seed and fertilizer. Fields outside the salmon plot boundary are a neighbor snapshot: you can look, you cannot plant, and they do not pay. The boundary is the same salmon line as a selected field, drawn around the whole plot, including in map mode (M). Keys: drag to pan, right-drag to orbit, wheel to zoom, 1–4 still change camera distance, C cutaway, N day-night, M map, H hide the HUD.
+
+## Bottom bar
+
+The four buttons along the bottom are the play modes:
+
+- **农机** lists the machines you own and what each is doing. Click one and the camera locks onto it.
+- **区域** returns to the field you are planting: select a field, then plant the potato.
+- **仓库** is the store. Harvested potatoes sit here as lots. Select a lot and sell it to add that lot's listed price to 营收. Each crop row has a **牌价**. That number is a placeholder for a future market price. It does not change, and there is no price simulation.
+- **建设** is build mode. Click a spot inside your plot to place a 仓棚. That is the one building in this slice. It uses the same materials as the other structures.
 
 ## Admin
 
-The world clock is an admin control. Press **F2** or **\\**, or click **管理**. The panel has 1×, 4×, and 12×, plus **暂停**. Pause holds the clock, so the potato and the machines stay where they are. The play HUD does not show those buttons. Close the panel with F2, \\, or Esc.
+The world clock is an admin control. Press **F2** or **\\**, or click **管理**. The panel has 1×, 4×, and 12×, a number field for any other multiplier, and **暂停**. 1× is one real minute per world day. Pause holds the clock, so the potato and the machines stay where they are. The play HUD does not show those controls. Close the panel with F2, \\, or Esc.
 
 ## Assets
 
@@ -48,6 +57,8 @@ The game writes the snapshot to `localStorage` (`ringsheaf.nongshen8.v1`) after 
 
 - `plotId` (`nongshen-viii/plot-01`), `worldDay`, `revenue`, `timeScale`
 - `stores`: `seed`, `fertilizer`, `spray`
+- `warehouse[]`: harvested lots, each with `listPrice` (the listed price, not a live market)
+- `buildings[]`: placed 仓棚 sheds
 - `fields[]` for this plot only: `i, j, crop, dir, state, g, s, timer, growT, live, hold, plantedAt, paid, sprayed`
 - `harvesters[]` with mode and the field they are on
 

@@ -11,9 +11,9 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { HorizontalTiltShiftShader } from 'three/addons/shaders/HorizontalTiltShiftShader.js';
 import { VerticalTiltShiftShader } from 'three/addons/shaders/VerticalTiltShiftShader.js';
-import { PALETTE, CROPS, TEX_ID, L, fields, harvesters, haulers, drones, step, TRUNKS_X, TRUNKS_Z, depots, inCrater, ROADS, RING, LAYERS, CUT, wrapX, PLOT, economy, focus, signals, log, plantField, quote, setTimeScale, setPaused, paused, exportSnapshot, applySnapshot, fieldAtWorld, fieldAt, simTime, worldDay, stores, rigs, fieldVisual, cropWatch, POTATO_DAYS } from './_shared.js';
+import { PALETTE, CROPS, TEX_ID, L, fields, harvesters, haulers, drones, step, TRUNKS_X, TRUNKS_Z, depots, inCrater, ROADS, RING, LAYERS, CUT, wrapX, PLOT, economy, focus, signals, log, plantField, quote, setTimeScale, setPaused, paused, exportSnapshot, applySnapshot, fieldAtWorld, fieldAt, simTime, worldDay, stores, rigs, fieldVisual, cropWatch, POTATO_DAYS, warehouse, buildings, sellLot, placeBuilding } from './_shared.js';
 import { NOISE, FARM, CURVE_DECL, CURVE_PROJECT } from './glsl.js';
-import { harvesterKit, haulerKit, droneKit, personKit, conveyorKit, depotKit, hubKit, plantGeometry, mastKit, irrigatorKit, growRackKit, tankKit, pumpKit, pipeRackKit, tractorKit, planterKit, hillerKit, topperKit, potatoLifterKit } from './prefabs.js';
+import { harvesterKit, haulerKit, droneKit, personKit, conveyorKit, depotKit, hubKit, plantGeometry, mastKit, irrigatorKit, growRackKit, tankKit, pumpKit, pipeRackKit, tractorKit, planterKit, hillerKit, topperKit, potatoLifterKit, shedKit } from './prefabs.js';
 
 const Q = new URLSearchParams(location.search);
 const VIEW = Q.get('view') || '', PREWARM = +Q.get('t') || 0, NOPOST = Q.has('nopost'), SHOWFPS = Q.has('fps');
@@ -52,7 +52,7 @@ const U = {
   uCamDist: { value: 1000 },
   uSel: { value: new THREE.Vector4(0, 0, 0, 0) },
   uSelOn: { value: 0 },
-  uPlot: { value: new THREE.Vector2(PLOT.x0, PLOT.x1) },
+  uPlot: { value: new THREE.Vector4(PLOT.x0, PLOT.x1, PLOT.z0, PLOT.z1) },
 };
 // 按期望法线确定三角形绕序（正面朝外，避免被背面剔除 / 双面材质翻转法线）
 function pushQuad(pos, A, B, Cc, D, n) {
@@ -190,7 +190,7 @@ MAT.ground.onBeforeCompile = (s) => {
   s.fragmentShader = s.fragmentShader
     .replace('#include <common>', `#include <common>
 varying vec3 vWP;
-uniform float uTime, uSunTan, uCarto, uMap, uNight, uCamDist, uCutOn, uSelOn; uniform vec2 uSunXZ, uPlot; uniform vec4 uPlantWin, uCut, uSel;
+uniform float uTime, uSunTan, uCarto, uMap, uNight, uCamDist, uCutOn, uSelOn; uniform vec2 uSunXZ; uniform vec4 uPlantWin, uCut, uSel, uPlot;
 ${Object.keys(GC).map(k => 'uniform vec3 g_' + k + ';').join('\n')}
 ${NOISE}
 ${FARM}
@@ -432,8 +432,14 @@ vec3 farmAlbedo(vec2 p){
    float px = max(fwidth(b) * 1.4, 1.2);
    albedo = mix(albedo, g_zone, (1.0 - smoothstep(px * 0.15, px * 1.8, b)) * 0.92);
  }
- float plotEdge = max(aaLine(vWP.x - uPlot.x, 3.0), aaLine(vWP.x - uPlot.y, 3.0));
- albedo = mix(albedo, g_zone, plotEdge * 0.5);
+ float ex = min(abs(vWP.x - uPlot.x), abs(vWP.x - uPlot.y));
+ float ez = min(abs(vWP.z - uPlot.z), abs(vWP.z - uPlot.w));
+ float inZ = step(uPlot.z - 30.0, vWP.z) * step(vWP.z, uPlot.w + 30.0);
+ float inX = step(uPlot.x - 30.0, vWP.x) * step(vWP.x, uPlot.y + 30.0);
+ float pxX = max(fwidth(ex) * 2.4, 3.2);
+ float pxZ = max(fwidth(ez) * 2.4, 3.2);
+ float plotEdge = max((1.0 - smoothstep(pxX * 0.15, pxX * 1.8, ex)) * inZ, (1.0 - smoothstep(pxZ * 0.15, pxZ * 1.8, ez)) * inX);
+ albedo = mix(albedo, g_zone, plotEdge * 0.96);
  diffuseColor.rgb = albedo;
  { float lm = dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722)); diffuseColor.rgb = max(mix(vec3(lm), diffuseColor.rgb, 1.15), 0.); }
 `)
@@ -632,6 +638,7 @@ const rigMesh = {
   topper: instanced(topperKit(), 2),
   lifter: instanced(potatoLifterKit(), 2),
 };
+const shedSet = instanced(shedKit(), 24);
 const parked = Array.from({ length: PARKED }, (_, n) => ({ x: HUBC + 85 + (n % 7) * 14.6, z: HUBC + 150 + Math.floor(n / 7) * 22, ang: -Math.PI / 2 }));
 const haulSet = instanced(haulerKit(), haulers.length);
 const droneSet = instanced(droneKit(), drones.length, false);
@@ -882,6 +889,7 @@ function placeCamera() {
 }
 // 交互：左键平移 / 右键旋转 / 滚轮缩放 / WASD / QE / N 昼夜 / M 地图模式 / H 隐藏界面
 let drag = null, ptr = null, selected = null, selNote = '';
+let mode = 'plan', watchRig = null, pickedLot = null;
 const raycaster = new THREE.Raycaster();
 function pickFlat(cx, cy) {
   const ndc = new THREE.Vector2((cx / innerWidth) * 2 - 1, -(cy / innerHeight) * 2 + 1);
@@ -903,6 +911,13 @@ function pickFlat(cx, cy) {
 function selectField(f, why) { selected = f || null; selNote = why || ''; }
 function onMapClick(cx, cy) {
   const p = pickFlat(cx, cy);
+  if (mode === 'build') {
+    if (!p) { toast('点在自己的田区里'); return; }
+    const r = placeBuilding(p.x, p.z);
+    if (!r.ok) toast('只能建在自己的田区里');
+    else { toast('仓棚已放下'); saveSoon(); paintSheet(); }
+    return;
+  }
   if (!p) { selectField(null); return; }
   const f = fieldAtWorld(p.x, p.z);
   if (!f) { selectField(null); return; }
@@ -949,6 +964,10 @@ addEventListener('pointermove', e => {
 R.domElement.addEventListener('wheel', e => { e.preventDefault(); camT.d = Math.max(22, Math.min(8000, camT.d * Math.exp(e.deltaY * 0.0012))); }, { passive: false });
 const keys = {};
 addEventListener('keydown', e => {
+  if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) {
+    if (e.key === 'Escape') e.target.blur();
+    return;
+  }
   keys[e.key.toLowerCase()] = true;
   if (e.key === 'n' || e.key === 'N') nightT = nightT > 0.5 ? 0 : 1;
   if (e.key === 'm' || e.key === 'M') mapT = mapT > 0.5 ? 0 : 1;
@@ -1009,9 +1028,93 @@ legend.innerHTML = [
   ['碎秧', PALETTE.ochre, PALETTE.rust],
   ['起薯', PALETTE.straw, PALETTE.regoLt],
 ].map(([name, a, b]) => `<div class="lg"><i style="background:linear-gradient(90deg,${a},${b})"></i><span>${name}</span></div>`).join('');
-const TIERS = [['轨道', 'ORBITAL', 1800], ['区域', 'SECTOR', 450], ['作业', 'OPERATIONS', 70], ['单株', 'CROP', 0]];
-$('tiers').innerHTML = TIERS.map((t, i) => `<span data-i="${i}"><b>${t[0]}</b><small>${t[1]}</small></span>`).join('');
+const MODES = [['machines', '农机', 'FLEET'], ['plan', '区域', 'PLAN'], ['store', '仓库', 'STORE'], ['build', '建设', 'BUILD']];
+$('tiers').innerHTML = MODES.map(([id, zh, en]) => `<button type="button" data-mode="${id}"><b>${zh}</b><small>${en}</small></button>`).join('');
 function gotoTier(n) { camT.d = [4800, 900, 160, 34][n - 1]; camT.pOff = 0; camT.lookUp = 0; camT.fovAdd = 0; }
+function fieldCode(f) { return `F-${String(f.i).padStart(3, '0')}${String(f.j).padStart(2, '0')}`; }
+function rigLine(r) {
+  if (!r.busy || !r.f) return '停在机库';
+  const watch = cropWatch(r.f);
+  return `正在 ${fieldCode(r.f)} · ${watch ? watch.label : '作业'}`;
+}
+function showPlan() {
+  watchRig = null;
+  mode = 'plan';
+  const f = selected?.owned ? selected : fieldAt(focus.i, focus.j);
+  selectField(f, '');
+  camT.x = camS.x = f.x0 + L.FIELD / 2;
+  camT.z = camS.z = f.z0 + L.FIELD / 2;
+  camT.d = camS.d = 720;
+  camT.yaw = camS.yaw = 118 * DEG;
+  camT.pOff = camS.pOff = -8 * DEG;
+  camT.lookUp = camS.lookUp = 0;
+  camT.fovAdd = camS.fovAdd = 6;
+  paintModes();
+  paintSheet();
+}
+function lockRig(id) {
+  const r = rigs.find(x => x.id === id);
+  if (!r) return;
+  watchRig = r;
+  camT.d = camS.d = 110;
+  camT.x = camS.x = r.x;
+  camT.z = camS.z = r.z;
+  document.querySelectorAll('#sheet [data-rig]').forEach(b => b.classList.toggle('on', +b.dataset.rig === id));
+}
+function paintModes() {
+  document.querySelectorAll('#tiers button').forEach(b => b.classList.toggle('on', b.dataset.mode === mode));
+}
+function paintSheet() {
+  const el = $('sheet');
+  if (mode === 'plan') { el.classList.remove('on'); el.innerHTML = ''; return; }
+  el.classList.add('on');
+  if (mode === 'machines') {
+    el.innerHTML = `<div class="who"><b>农机</b><span>点一台，镜头跟着它</span></div>` + rigs.map(r => `<button type="button" class="rowbtn${watchRig && watchRig.id === r.id ? ' on' : ''}" data-rig="${r.id}"><b>${r.label}</b><small>${rigLine(r)}</small></button>`).join('');
+  } else if (mode === 'store') {
+    const potato = CROPS.find(c => c.id === 'potato');
+    const price = quote(CROPS.indexOf(potato));
+    const lots = warehouse.map(lot => `<button type="button" class="rowbtn${pickedLot === lot.id ? ' on' : ''}" data-lot="${lot.id}"><b>${lot.name}</b><small>${fieldCode(lot)} · ${fmt(lot.liters)} L</small></button>`).join('');
+    el.innerHTML = `<div class="who"><b>仓库</b><span>选中一仓薯，再出售。出售才计入营收。</span></div><div class="price"><span>${potato.name}</span><em>牌价 ${fmt(price)}</em></div><p class="note">牌价是这一茬的记账价。行情以后接在这里，现在不会变。</p>${lots || '<p class="note">仓里还没有薯。</p>'}<button type="button" class="sell" id="sell"${pickedLot == null ? ' disabled' : ''}>出售</button>`;
+  } else if (mode === 'build') {
+    const placed = buildings.map(b => `<button type="button" class="rowbtn" data-shed="${b.id}"><b>${b.name}</b><small>${Math.round(b.x)}, ${Math.round(b.z)}</small></button>`).join('');
+    el.innerHTML = `<div class="who"><b>建设</b><span>在自己的田区里点地面，放下仓棚</span></div><p class="note">只有这一种房子。它落在田区里，仓里的薯记在这栋仓棚上。</p>${placed || '<p class="note">还没有房子。</p>'}`;
+  }
+}
+function setMode(id) {
+  mode = id;
+  if (id === 'plan') { showPlan(); return; }
+  if (id !== 'machines') watchRig = null;
+  paintModes();
+  paintSheet();
+}
+$('tiers').addEventListener('click', e => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  setMode(b.dataset.mode);
+});
+$('sheet').addEventListener('click', e => {
+  const rig = e.target.closest('[data-rig]');
+  if (rig) { lockRig(+rig.dataset.rig); return; }
+  const lot = e.target.closest('[data-lot]');
+  if (lot) { pickedLot = +lot.dataset.lot; paintSheet(); return; }
+  const shed = e.target.closest('[data-shed]');
+  if (shed) {
+    const b = buildings.find(x => x.id === +shed.dataset.shed);
+    if (!b) return;
+    watchRig = null;
+    camT.x = b.x; camT.z = b.z; camT.d = 80;
+    return;
+  }
+  if (e.target.id === 'sell') {
+    if (pickedLot == null) return;
+    const sold = sellLot(pickedLot);
+    pickedLot = null;
+    if (!sold) toast('这仓薯已经不在了');
+    paintSheet();
+    saveSoon();
+  }
+});
+paintModes();
 // 分层面板：列出 LAYERS（剖面打开时，被剖开的层高亮）
 $('layers').innerHTML = `<div class="lh">分层 · LAYERS <em>C 剖面</em></div>` + LAYERS.map(l => `<div class="ly ly-${l.id}"><i></i><span>${l.name}</span><small>${l.en}</small><em>${l.floor === 0 ? '±0 m' : l.floor.toFixed(0) + ' m'}</em></div>`).join('');
 const pv = new THREE.Vector3();
@@ -1102,10 +1205,10 @@ let seenLog = 0, shownRev = -1;
 function drainLog() {
   for (; seenLog < log.length; seenLog++) {
     const e = log[seenLog];
-    if (e.type !== 'harvest') continue;
+    if (e.type !== 'store' && e.type !== 'sale') continue;
     const d = document.createElement('div');
     d.className = 'toast';
-    d.innerHTML = `<b>+${fmt(e.pay)}</b>${e.name}`;
+    d.innerHTML = e.type === 'sale' ? `<b>+${fmt(e.pay)}</b>${e.name}` : `<b>入仓</b>${e.name}`;
     $('toasts').appendChild(d);
     setTimeout(() => d.remove(), 4800);
     saveSoon();
@@ -1149,7 +1252,9 @@ function updateDock() {
   });
 }
 function paintRates() {
-  document.querySelectorAll('#rates button').forEach(b => b.classList.toggle('on', +b.dataset.rate === economy.timeScale));
+  document.querySelectorAll('#rates button').forEach(b => b.classList.toggle('on', Math.abs(+b.dataset.rate - economy.timeScale) < 1e-6));
+  const input = $('rate-in');
+  if (input && document.activeElement !== input) input.value = String(economy.timeScale);
 }
 $('kpi').innerHTML = `<div><small>营收</small><b class="hv" id="kpi-rev">0</b></div><div><small>世界日</small><b id="kpi-day">0</b></div><div><small>种薯</small><b id="kpi-seed">${stores.seed}</b></div><div><small>作业</small><b class="hv" id="kpi-act">0</b><em>/ ${rigs.length}</em></div>`;
 $('dock').innerHTML = `<div class="who"><b id="selid"></b><span id="selstat"></span></div><div id="bar"><i id="selbar"></i></div><div class="row" id="selbtns"></div>`;
@@ -1161,8 +1266,17 @@ for (const c of CROPS) if (c.plantable) {
   b.addEventListener('click', () => doPlant(c.id));
   $('selbtns').appendChild(b);
 }
-$('rates').innerHTML = `<span>世界钟</span>` + [1, 4, 12].map(r => `<button type="button" data-rate="${r}">${r}×</button>`).join('');
+$('rates').innerHTML = `<span>1× = 1 分/日</span>` + [1, 4, 12].map(r => `<button type="button" data-rate="${r}">${r}×</button>`).join('') + `<input id="rate-in" type="text" inputmode="decimal" value="1" aria-label="世界钟倍率" autocomplete="off">`;
+function applyTypedRate() {
+  const v = +$('rate-in').value;
+  if (!(v > 0)) { paintRates(); return; }
+  setTimeScale(v); paintRates(); saveSoon();
+}
 $('rates').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; setTimeScale(+b.dataset.rate); paintRates(); saveSoon(); });
+$('rate-in').addEventListener('focus', e => e.target.select());
+$('rate-in').addEventListener('mouseup', e => e.preventDefault());
+$('rate-in').addEventListener('change', applyTypedRate);
+$('rate-in').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); applyTypedRate(); } });
 paintRates();
 function toggleAdmin() { $('admin').classList.toggle('on'); }
 $('admin-toggle').addEventListener('click', toggleAdmin);
@@ -1303,6 +1417,7 @@ function frame(now) {
   if (keys.w || keys.arrowup) { camT.x -= s * ks; camT.z -= c * ks; } if (keys.s || keys.arrowdown) { camT.x += s * ks; camT.z += c * ks; }
   if (keys.a || keys.arrowleft) { camT.x -= c * ks; camT.z += s * ks; } if (keys.d || keys.arrowright) { camT.x += c * ks; camT.z -= s * ks; }
   if (keys.q) camT.yaw += dt; if (keys.e) camT.yaw -= dt;
+  if (watchRig && !drag) { camT.x = camS.x = watchRig.x; camT.z = camS.z = watchRig.z; }
   if (follow && !drag && !Q.has('nofollow')) { camT.x += (follow.x - camT.x) * 0.5; camT.z += (follow.z - camT.z) * 0.5; }
   const k = 1 - Math.exp(-dt * 7);
   for (const key of ['x', 'z', 'yaw', 'pOff', 'lookUp', 'fovAdd']) camS[key] += (camT[key] - camS[key]) * k;
@@ -1389,8 +1504,11 @@ function frame(now) {
   finalPass.uniforms.uTime.value = t;
   composer.render();
   // HUD
-  const tier = d > 1800 ? 0 : d > 450 ? 1 : d > 70 ? 2 : 3;
-  document.querySelectorAll('#tiers span').forEach((el, i) => el.classList.toggle('on', i === tier));
+  if (mode === 'machines') document.querySelectorAll('#sheet [data-rig] small').forEach(el => {
+    const r = rigs.find(x => x.id === +el.parentElement.dataset.rig);
+    if (r) el.textContent = rigLine(r);
+  });
+  { const n = Math.min(buildings.length, 24); for (let i = 0; i < n; i++) setInst(shedSet, i, buildings[i].x, 0, buildings[i].z, buildings[i].ang || 0); setCount(shedSet, d < 2200 ? n : 0); }
   const mpp = d * 2 * Math.tan(15 * DEG) / innerHeight; const [m, px] = niceScale(mpp);
   $('scalebar').style.width = px.toFixed(0) + 'px'; $('scaletxt').textContent = m >= 1000 ? (m / 1000) + ' km' : m + ' m';
   updateLabels(d);
@@ -1413,9 +1531,13 @@ requestAnimationFrame(frame);
 addEventListener('resize', () => { cam.aspect = innerWidth / innerHeight; cam.updateProjectionMatrix(); R.setSize(innerWidth, innerHeight); composer.setSize(innerWidth, innerHeight); gtao.setSize(innerWidth, innerHeight); });
 window.__farm = {
   economy, stores, focus, fields, harvesters, rigs, log, CROPS, PLOT, quote, fieldAtWorld, project, pick: pickFlat,
+  warehouse, buildings, sellLot, placeBuilding,
   snapshot: exportSnapshot, plant: doPlant, select: (i, j) => selectField(fieldAt(i, j)),
+  setTimeScale, setPaused,
   get selected() { return selected; },
   get worldDay() { return worldDay; },
+  get mode() { return mode; },
+  get camera() { return { x: camS.x, z: camS.z, d: camS.d }; },
   watch: () => cropWatch(selected),
   advance(seconds, scale = economy.timeScale) {
     const n = Math.max(1, Math.round(seconds / 0.05));

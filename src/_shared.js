@@ -87,6 +87,8 @@ export const PLOT = {
 };
 PLOT.x0 = L.X0 + PLOT.bi0 * L.BP;
 PLOT.x1 = L.X0 + (PLOT.bi1 + 1) * L.BP;
+PLOT.z0 = L.Z0;
+PLOT.z1 = L.Z0 + L.NBZ * L.BP;
 PLOT.along = PLOT.x1 - PLOT.x0;
 PLOT.across = L.NBZ * L.BP - L.TRUNK;
 export const FIELD_HA = (L.FIELD * L.FIELD) / 10000;
@@ -177,13 +179,21 @@ export const fieldAt = (i, j) => (i < 0 || j < 0 || i >= L.NFX || j >= L.NFZ) ? 
 export const toWorld = (f, u, v) => f.dir === 0 ? [f.x0 + u, f.z0 + v] : [f.x0 + v, f.z0 + u];
 
 // ---------- ⑦ 玩家田区：一口世界钟上的中熟商品薯 ----------
-// 1× = 每个真实秒 1 个世界日。播种到起薯共 120 个世界日。流速只乘这口钟。
-// 机器走过一块田的速度是原先的五分之一。作物阶段仍按世界日，不跟着机器变慢。
-export const SIM = { CUT: 16, MOVE: 15, STUBBLE: 8, TILL: 0 };
-export const MACHINE_SPEED = 0.2;
+// 1×：一真实分钟 = 一个世界日。播种到起薯仍是 120 个世界日。倍率同时加快这口钟和农机。
+// 农机在 1× 下约 2.8 m/s，走过一条 128 m 田边大约 46 个真实秒。
+export const DAY_SECONDS = 60;
+export const MACHINE_MPS = 2.8;
+export const SIM = { CUT: MACHINE_MPS, MOVE: MACHINE_MPS, STUBBLE: 8, TILL: 0 };
 export const POTATO_DAYS = 120;
+export function passWorldDays() {
+  return (L.LANES * L.FIELD) / (MACHINE_MPS * DAY_SECONDS);
+}
 export const economy = { revenue: 0, timeScale: 1 };
 export const stores = { seed: 6, fertilizer: 6, spray: 6 };
+export const warehouse = [];
+export const buildings = [];
+let nextLot = 1;
+let nextBuilding = 1;
 export let paused = false;
 export function setPaused(v) { paused = !!v; }
 export let simTime = 0;
@@ -193,16 +203,20 @@ export const focus = { x: 0, z: 0, i: 0, j: 0 };
 export const signals = [];
 export const harvesters = [];
 export const rigs = [];
-export function setTimeScale(v) { economy.timeScale = Math.max(1, Math.min(16, v)); }
+export function setTimeScale(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return;
+  economy.timeScale = Math.min(10000, n);
+}
 export const PHASE_LABEL = {
   plant: '播种起垄', ridge: '裸垄', shoot: '出苗', hill: '培土',
   canopy: '封垄', flower: '开花', top: '杀秧', haulm: '碎秧', lift: '起薯',
 };
 const JOBS = {
-  planter: { at: 0, span: 6, label: '播种机' },
-  hiller: { at: 20, span: 6, label: '培土机' },
-  topper: { at: 100, span: 6, label: '杀秧机' },
-  lifter: { at: 114, span: 6, label: '收获机' },
+  planter: { at: 0, label: '播种机' },
+  hiller: { at: 20, label: '培土机' },
+  topper: { at: 100, label: '杀秧机' },
+  lifter: { at: 114, label: '收获机' },
 };
 export function potatoPhase(day) {
   if (day < 6) return 'plant';
@@ -224,19 +238,19 @@ export function stageNum(day) {
   if (day < 114) return 5;
   return 6;
 }
-function passProgress(day, at, span) {
-  const dur = span / MACHINE_SPEED;
+function passProgress(day, at) {
+  const dur = passWorldDays();
   const u = day - at;
   if (u < 0) return null;
   if (u >= dur) return L.LANES;
   return (u / dur) * L.LANES;
 }
 export function workFront(day) {
-  const jobs = [[0, 6], [20, 6], [100, 6], [114, 6]];
+  const jobs = [0, 20, 100, 114];
   let front = 0;
-  for (const [at, span] of jobs) {
+  for (const at of jobs) {
     if (day < at) break;
-    const p = passProgress(day, at, span);
+    const p = passProgress(day, at);
     if (p != null) front = p;
   }
   return front;
@@ -305,7 +319,7 @@ function placeRigs() {
   for (const f of fields) if (f.live && !f.paid && f.crop >= 0 && CROPS[f.crop].id === 'potato') live.push(f);
   for (const r of rigs) {
     const spec = JOBS[r.kind];
-    const dur = spec.span / MACHINE_SPEED;
+    const dur = passWorldDays();
     let best = null, bestU = 1e9;
     for (const f of live) {
       const u = worldDay - f.plantedAt - spec.at;
@@ -327,9 +341,15 @@ function settlePotatoes() {
     }
     if (day >= POTATO_DAYS) {
       f.paid = true;
-      const pay = quote(f.crop);
-      economy.revenue += pay;
-      log.push({ type: 'harvest', pay, crop: 'potato', name: CROPS[f.crop].name, i: f.i, j: f.j, t: worldDay });
+      const crop = CROPS[f.crop];
+      const lot = {
+        id: nextLot++, crop: crop.id, name: crop.name,
+        liters: Math.round(FIELD_HA * crop.yieldL),
+        listPrice: quote(f.crop),
+        i: f.i, j: f.j, t: worldDay,
+      };
+      warehouse.push(lot);
+      log.push({ type: 'store', pay: 0, listPrice: lot.listPrice, crop: crop.id, name: crop.name, i: f.i, j: f.j, t: worldDay });
       f.live = false; f.hold = true; f.state = 0; f.g = 0; f.s = 0; f.claimed = false;
     }
   }
@@ -452,6 +472,24 @@ export function stepHarvesters(dt) {
     }
   }
 }
+export function inPlayerPlot(x, z) {
+  const wx = wrapX(x);
+  return wx >= PLOT.x0 && wx <= PLOT.x1 && z >= PLOT.z0 && z <= PLOT.z1;
+}
+export function placeBuilding(x, z) {
+  if (!inPlayerPlot(x, z)) return { ok: false, reason: 'plot' };
+  const b = { id: nextBuilding++, kind: 'shed', name: '仓棚', x, z, ang: 0 };
+  buildings.push(b);
+  return { ok: true, building: b };
+}
+export function sellLot(id) {
+  const i = warehouse.findIndex(lot => lot.id === id);
+  if (i < 0) return null;
+  const lot = warehouse.splice(i, 1)[0];
+  economy.revenue += lot.listPrice;
+  log.push({ type: 'sale', pay: lot.listPrice, crop: lot.crop, name: lot.name, i: lot.i, j: lot.j, t: worldDay });
+  return lot;
+}
 export function plantField(f, cropId) {
   if (!f?.owned) return { ok: false, reason: 'plot' };
   if (f.state === 3 || f.live) return { ok: false, reason: 'busy' };
@@ -477,6 +515,8 @@ export function exportSnapshot() {
     revenue: economy.revenue,
     timeScale: economy.timeScale,
     stores: { seed: stores.seed, fertilizer: stores.fertilizer, spray: stores.spray },
+    warehouse: warehouse.map(lot => ({ ...lot })),
+    buildings: buildings.map(b => ({ id: b.id, kind: b.kind, name: b.name, x: +b.x.toFixed(2), z: +b.z.toFixed(2), ang: b.ang || 0 })),
     fields: fields.filter(f => f.owned).map(f => ({
       i: f.i, j: f.j, crop: f.crop, dir: f.dir, state: f.state,
       g: +f.g.toFixed(4), s: +f.s.toFixed(4), timer: +(+f.timer || 0).toFixed(3),
@@ -519,6 +559,16 @@ export function applySnapshot(data) {
     stores.spray = +data.stores.spray || 0;
   }
   if (data.timeScale) setTimeScale(data.timeScale);
+  warehouse.length = 0;
+  for (const lot of data.warehouse || []) {
+    warehouse.push({ ...lot, id: +lot.id || nextLot++ });
+    nextLot = Math.max(nextLot, (+lot.id || 0) + 1);
+  }
+  buildings.length = 0;
+  for (const b of data.buildings || []) {
+    buildings.push({ id: +b.id || nextBuilding++, kind: b.kind || 'shed', name: b.name || '仓棚', x: +b.x || 0, z: +b.z || 0, ang: +b.ang || 0 });
+    nextBuilding = Math.max(nextBuilding, (+b.id || 0) + 1);
+  }
   worldDay = +(data.worldDay ?? data.simTime) || 0;
   simTime = worldDay;
   rebuildDemo();
@@ -551,12 +601,13 @@ export function stepDrones(t) {
 }
 export function step(dt, t, scale = 1) {
   if (paused) { simTime = worldDay; return; }
-  const days = dt * (scale > 0 ? scale : 0);
+  const sc = scale > 0 ? scale : 0;
+  const days = dt * sc / DAY_SECONDS;
   worldDay += days;
   simTime = worldDay;
   stepFields(days);
   settlePotatoes();
-  stepHarvesters(dt);
+  stepHarvesters(dt * sc);
   stepHaulers(dt);
   stepDrones(t);
 }

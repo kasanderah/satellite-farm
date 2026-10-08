@@ -27,10 +27,20 @@ body.nohud .hud,body.nohud #labels{opacity:0!important}
 #clock{top:72px;right:22px;font-size:11px;letter-spacing:.24em;color:var(--mut)}
 /* 底部中间：缩放层级 + 比例尺 */
 #tiers{bottom:22px;left:50%;transform:translateX(-50%);display:flex;gap:0;padding:7px 6px}
-#tiers span{padding:2px 14px;text-align:center;opacity:.45;border-bottom:1px solid transparent;transition:all .3s}
-#tiers span b{display:block;font-weight:400;font-size:12px;letter-spacing:.2em}
-#tiers span small{display:block;font-size:9px;letter-spacing:.24em;color:var(--mut)}
-#tiers span.on{opacity:1;border-bottom-color:var(--sig)}
+#tiers button{font-family:inherit;color:var(--fg);background:transparent;border:0;border-bottom:1px solid transparent;padding:2px 14px;text-align:center;opacity:.45;cursor:pointer;transition:all .3s}
+#tiers button b{display:block;font-weight:400;font-size:12px;letter-spacing:.2em}
+#tiers button small{display:block;font-size:9px;letter-spacing:.24em;color:var(--mut)}
+#tiers button.on{opacity:1;border-bottom-color:var(--sig)}
+#sheet{left:50%;bottom:78px;transform:translateX(-50%);width:340px;max-height:280px;overflow:auto;display:none;padding:10px 12px 12px}
+#sheet.on{display:block}
+#sheet .who{display:flex;flex-direction:column;gap:3px;font-size:12px;letter-spacing:.1em}
+#sheet .who b{font-weight:500}#sheet .who span,#sheet .note{color:var(--mut);letter-spacing:.06em;font-size:11px;line-height:1.5}
+#sheet .note{margin:6px 0 0}
+#sheet .price{display:flex;justify-content:space-between;align-items:baseline;margin-top:8px;font-size:13px;letter-spacing:.12em}
+#sheet .price em{font-style:normal;color:var(--sig);font-size:12px}
+#sheet .rowbtn{display:block;width:100%;text-align:left;margin-top:6px;padding:6px 8px}
+#sheet .rowbtn b{display:block;font-weight:500;font-size:13px;letter-spacing:.12em}
+#sheet .rowbtn small{display:block;color:var(--mut);font-size:10px;letter-spacing:.04em;margin-top:2px}
 #scale{bottom:30px;right:24px;display:flex;align-items:center;gap:10px;font-size:11px;letter-spacing:.16em}
 #scalebar{height:5px;border:1px solid var(--fg);border-top:0}
 /* 左下：作物图例（明度 + 株高） */
@@ -69,10 +79,11 @@ body.cutaway #layers .ly-grow,body.cutaway #layers .ly-equip{opacity:1}body.cuta
 #admin.on{display:flex}
 #admin .ah{display:flex;justify-content:space-between;font-size:10px;letter-spacing:.2em;color:var(--mut)}
 #admin.on ~ #stores{top:214px}
-#rates{display:flex;align-items:center;gap:6px}
+#rates{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+#rates input{width:72px;font-family:inherit;font-size:12px;color:var(--fg);background:transparent;border:1px solid var(--line);padding:3px 6px;letter-spacing:.06em}
 #stores{top:100px;left:22px;font-size:11px;letter-spacing:.12em;color:var(--mut);line-height:1.6}
 #rates span{font-size:10px;letter-spacing:.22em;color:var(--mut)}
-#rates button,#dock button,#admin .arow button,#viewer .bar button,#viewer .card{font-family:inherit;color:var(--fg);background:transparent;border:1px solid var(--line);cursor:pointer;letter-spacing:.08em}
+#rates button,#dock button,#admin .arow button,#viewer .bar button,#viewer .card,#sheet .rowbtn,#sheet .sell{font-family:inherit;color:var(--fg);background:transparent;border:1px solid var(--line);cursor:pointer;letter-spacing:.08em}
 #rates button,#admin .arow button{padding:3px 8px;font-size:12px}
 #admin .arow{display:flex;gap:6px}
 #viewer{position:fixed;inset:0;z-index:8;display:none;overflow:auto;padding:28px 32px 64px;background:rgba(10,12,20,.9);color:var(--fg)}
@@ -95,8 +106,10 @@ body.cutaway #layers .ly-grow,body.cutaway #layers .ly-equip{opacity:1}body.cuta
 #dock button{padding:6px 8px 5px}
 #dock button b{display:block;font-weight:500;font-size:13px;letter-spacing:.12em}
 #dock button small{display:block;color:var(--mut);font-size:10px;letter-spacing:.04em;margin-top:2px}
-#dock button:hover,#rates button:hover,#admin .arow button:hover{border-color:var(--sig)}
-#dock button.on,#rates button.on,#admin .arow button.on{border-color:var(--sig);color:var(--sig)}
+#dock button:hover,#rates button:hover,#admin .arow button:hover,#sheet .rowbtn:hover,#sheet .sell:hover{border-color:var(--sig)}
+#dock button.on,#rates button.on,#admin .arow button.on,#sheet .rowbtn.on{border-color:var(--sig);color:var(--sig)}
+#sheet .sell{margin-top:8px;padding:6px 10px;width:100%}
+#sheet .sell:disabled{opacity:.35;cursor:default}
 #dock button:disabled{opacity:.35;cursor:default}
 #bar{height:3px;margin-top:8px;background:rgba(232,216,208,.18)}
 #bar i{display:block;height:100%;width:0;background:var(--sig)}
@@ -117,10 +130,11 @@ body.cutaway #layers .ly-grow,body.cutaway #layers .ly-equip{opacity:1}body.cuta
 <div class="hud" id="fps"></div>
 <div class="hud panel" id="legend"></div>
 <div class="hud panel" id="layers"></div>
-<div class="hud panel" id="tiers"></div>
+<div class="hud panel hit" id="sheet"></div>
+<div class="hud panel hit" id="tiers"></div>
 <div class="hud panel hit" id="dock"></div>
 <div class="hud" id="toasts"></div>
-<div class="hud" id="hint">选中裸地，点种薯。播种起垄、出苗培土、封垄开花、杀秧，再起薯入仓<br>拖动 平移 · 右键 旋转 · 滚轮 缩放 · 1–4 层级 · C 剖面 · N 昼夜 · M 地图 · H 隐藏 · F2 管理 · V 资产</div>
+<div class="hud" id="hint">选中裸地，点种薯。收获进仓库，再出售入营收<br>拖动 平移 · 右键 旋转 · 滚轮 缩放 · 1–4 远近 · C 剖面 · N 昼夜 · M 地图 · H 隐藏 · F2 管理 · V 资产</div>
 <div id="viewer"><div class="bar"><div><h2>资产</h2><div class="sub">当前的薯田阶段、机器和田块。每张卡片是名字加上现在的样子。点一张就能指着它改。这是查看，不能上传。</div></div><button type="button" id="viewer-close">关闭</button></div><div class="sec">商品薯阶段</div><div class="grid" id="view-stages"></div><div class="sec">机器</div><div class="grid" id="view-machines"></div><div class="sec">田块</div><div class="grid" id="view-tiles"></div></div>
 <div class="hud" id="scale"><span id="scaletxt"></span><div id="scalebar"></div></div>
 <script>__BUNDLE__</script>
