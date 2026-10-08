@@ -1,0 +1,21 @@
+{
+  "name": "satellite-farm",
+  "type": "module",
+  "version": "0.1.0",
+  "description": "Playable slice of a ring-band colony farm. One 4 km plot: plant, grow, automated harvest, revenue.",
+  "main": "index.html",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test test/sim.test.mjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "esbuild": "^0.28.2",
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^25.12.0"
+  }
+}
