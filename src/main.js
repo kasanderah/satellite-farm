@@ -11,9 +11,9 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { HorizontalTiltShiftShader } from 'three/addons/shaders/HorizontalTiltShiftShader.js';
 import { VerticalTiltShiftShader } from 'three/addons/shaders/VerticalTiltShiftShader.js';
-import { PALETTE, CROPS, TEX_ID, L, fields, harvesters, haulers, drones, step, TRUNKS_X, TRUNKS_Z, depots, inCrater, ROADS, RING, LAYERS, CUT, wrapX, PLOT, economy, focus, signals, log, plantField, quote, setTimeScale, setPaused, paused, exportSnapshot, applySnapshot, fieldAtWorld, fieldAt, simTime, worldDay, stores, rigs, fieldVisual, cropWatch, POTATO_DAYS, warehouse, buildings, sellLot, placeBuilding, rigReadout, SHOP, buySeed, SEED_PER_FIELD, resetGame } from './_shared.js';
+import { PALETTE, CROPS, TEX_ID, L, fields, harvesters, haulers, drones, step, TRUNKS_X, TRUNKS_Z, depots, inCrater, ROADS, RING, LAYERS, CUT, wrapX, PLOT, economy, focus, signals, log, plantField, quote, setTimeScale, setPaused, paused, exportSnapshot, applySnapshot, fieldAtWorld, fieldAt, simTime, worldDay, stores, rigs, fieldVisual, cropWatch, POTATO_DAYS, warehouse, buildings, sellLot, placeBuilding, rigReadout, SHOP, buySeed, buyItem, SEED_PER_FIELD, FERT_PER_FIELD, resetGame, CULTURES, DECK_CLIMATE, tanks, cultureWatch, startCulture, tendCulture, harvestCulture, BUILDING_KINDS } from './_shared.js';
 import { NOISE, FARM, CURVE_DECL, CURVE_PROJECT } from './glsl.js';
-import { harvesterKit, haulerKit, droneKit, personKit, conveyorKit, depotKit, hubKit, plantGeometry, mastKit, irrigatorKit, growRackKit, tankKit, pumpKit, pipeRackKit, tractorKit, planterKit, hillerKit, topperKit, potatoLifterKit, shedKit } from './prefabs.js';
+import { harvesterKit, haulerKit, droneKit, personKit, conveyorKit, depotKit, hubKit, plantGeometry, mastKit, irrigatorKit, growRackKit, tankKit, pumpKit, pipeRackKit, tractorKit, planterKit, hillerKit, topperKit, potatoLifterKit, shedKit, warehouseKit, garageKit, processKit, cultureTankKit, armKit } from './prefabs.js';
 
 const Q = new URLSearchParams(location.search);
 const VIEW = Q.get('view') || '', PREWARM = +Q.get('t') || 0, NOPOST = Q.has('nopost'), SHOWFPS = Q.has('fps');
@@ -638,7 +638,12 @@ const rigMesh = {
   topper: instanced(topperKit(), 2),
   lifter: instanced(potatoLifterKit(), 2),
 };
-const shedSet = instanced(shedKit(), 24);
+const buildingSets = {
+  warehouse: instanced(warehouseKit(), 8),
+  garage: instanced(garageKit(), 8),
+  process: instanced(processKit(), 8),
+  shed: instanced(shedKit(), 8),
+};
 const parked = Array.from({ length: PARKED }, (_, n) => ({ x: HUBC + 85 + (n % 7) * 14.6, z: HUBC + 150 + Math.floor(n / 7) * 22, ang: -Math.PI / 2 }));
 const haulSet = instanced(haulerKit(), haulers.length);
 const droneSet = instanced(droneKit(), drones.length, false);
@@ -683,6 +688,10 @@ function rebuildInfra(cx, cz) {
 // 每一层的内容由 DECK_BUILDERS[layer.content] 生成；以后加「水处理层」「仓储层」等，只需在 LAYERS 里加一项并在这里写一个函数
 const RACK_CAP = 2600, MOD_CAP = 80, PIPE_CAP = 60, CART_CAP = 30, CREW_CAP = 60;
 const rackSet = instanced(growRackKit(), RACK_CAP), tankSet = instanced(tankKit(), MOD_CAP), pumpSet = instanced(pumpKit(), MOD_CAP), pipeSet = instanced(pipeRackKit(), PIPE_CAP);
+const cultureSet = instanced(cultureTankKit(), 8), armSet = instanced(armKit(), 1);
+if (cultureSet.light) cultureSet.light.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(8 * 3), 3);
+const DECK_SITE = { x: 980, z: -40 };
+let tankPos = [], armX = DECK_SITE.x;
 rackSet.light.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(RACK_CAP * 3), 3);
 const cartSet = instanced(haulerKit(), CART_CAP), crewSet = instanced(personKit(), CREW_CAP);
 const deckSlabs = new THREE.Group(); scene.add(deckSlabs);
@@ -690,6 +699,23 @@ const RACK_COLS = ['sage', 'moss', 'oliveDp', 'tealGy', 'olive'].map(k => C(k).m
 const deckCarts = [], deckCrew = [];
 const DECK_BUILDERS = {
   // 培育层：成排立体栽培架（12 m 一段），每 6 排一条 6 m 主通道，通道里有 AGV 小车和巡检人员
+  protein(L0) {
+    const y = L0.floor;
+    tankPos = [];
+    for (let i = 0; i < tanks.length; i++) {
+      const x = cut.x + 40 + i * 12, z = cut.z;
+      tankPos.push({ x, z, y });
+      setInst(cultureSet, i, x, y, z, 0);
+      const spec = CULTURES.find(c => c.id === tanks[i].species);
+      const tint = !spec ? C('rego') : spec.id === 'bsf' ? C('sage') : C('ochre');
+      if (cultureSet.light) cultureSet.light.setColorAt(i, tint);
+    }
+    if (cultureSet.light?.instanceColor) cultureSet.light.instanceColor.needsUpdate = true;
+    setCount(cultureSet, tanks.length);
+    armX = tankPos[0] ? tankPos[0].x : cut.x + 40;
+    setInst(armSet, 0, armX, y, cut.z - 5, Math.PI / 2);
+    setCount(armSet, 1);
+  },
   racks(L0, rects) {
     let n = 0; const y = L0.floor;
     for (const [x0, x1, z0, z1] of rects) {
@@ -757,7 +783,7 @@ vec3 secAlbedo(){
 const floorMat = MAT.dark;
 function buildCut() {
   deckSlabs.clear(); deckCarts.length = 0; deckCrew.length = 0;
-  for (const s2 of [rackSet, tankSet, pumpSet, pipeSet]) setCount(s2, 0);
+  for (const s2 of [rackSet, tankSet, pumpSet, pipeSet, cultureSet, armSet]) setCount(s2, 0);
   if (!cut.on) return;
   const ax0 = cut.x - CUT.AX, ax1 = cut.x + CUT.AX, az0 = cut.z - CUT.AZ, az1 = cut.z + CUT.AZ, I = cutInner();
   const G = LAYERS[1], E = LAYERS[2];
@@ -876,9 +902,16 @@ function pitchOf(d) {
   for (let i = 0; i < PITCH.length - 1; i++) { const [d0, p0] = PITCH[i], [d1, p1] = PITCH[i + 1]; if (d <= d1) { const t = Math.min(1, Math.max(0, (ld - Math.log(d0)) / (Math.log(d1) - Math.log(d0)))); const s = t * t * (3 - 2 * t); return (p0 + (p1 - p0) * s) * DEG; } }
   return PITCH[PITCH.length - 1][1] * DEG;
 }
-const camS = { x: HUBC, z: HUBC, d: 4200, yaw: 0, pOff: 0, lookUp: 0, fovAdd: 0 }, camT = { ...camS };
+const camS = { x: HUBC, z: HUBC, y: 0, d: 4200, yaw: 0, pOff: 0, lookUp: 0, fovAdd: 0, deck: false }, camT = { ...camS };
 // 环带：拉远时镜头逐渐抬头、视角变宽 → 看到环带在前方升起、在天空中拱起，两侧是环壁，环壁外是太空与母星
 function placeCamera() {
+  if (camS.deck) {
+    const yaw = camS.yaw, stand = Math.max(8, camS.d);
+    cam.position.set(camS.x + Math.sin(yaw) * stand, camS.y + 2.6, camS.z + Math.cos(yaw) * stand);
+    cam.lookAt(camS.x, camS.y + 1.05, camS.z);
+    cam.fov = 46; cam.near = 0.15; cam.far = 220; cam.updateProjectionMatrix();
+    return;
+  }
   const p = pitchOf(camS.d) + camS.pOff;
   cam.position.set(camS.x + Math.sin(camS.yaw) * Math.cos(p) * camS.d, Math.sin(p) * camS.d, camS.z + Math.cos(camS.yaw) * Math.cos(p) * camS.d);
   cam.lookAt(camS.x, 0, camS.z);
@@ -889,7 +922,7 @@ function placeCamera() {
 }
 // 交互：左键平移 / 右键旋转 / 滚轮缩放 / WASD / QE / N 昼夜 / M 地图模式 / H 隐藏界面
 let drag = null, ptr = null, selected = null, selNote = '';
-let mode = 'plan', watchRig = null, pickedLot = null;
+let mode = 'plan', watchRig = null, pickedLot = null, shopPick = 'seed', deckTank = 0;
 const raycaster = new THREE.Raycaster();
 function pickFlat(cx, cy) {
   const ndc = new THREE.Vector2((cx / innerWidth) * 2 - 1, -(cy / innerHeight) * 2 + 1);
@@ -914,8 +947,8 @@ function onMapClick(cx, cy) {
   if (mode === 'build') {
     if (!p) { toast('点在自己的田区里'); return; }
     const r = placeBuilding(p.x, p.z);
-    if (!r.ok) toast('只能建在自己的田区里');
-    else { toast('仓棚已放下'); saveSoon(); paintSheet(); }
+    if (!r.ok) toast(r.reason === 'field' ? '房子建在中枢地块上' : '只能建在自己的田区里');
+    else { toast(`${r.building.name}已放下`); saveSoon(); paintSheet(); }
     return;
   }
   if (!p) { selectField(null); return; }
@@ -972,7 +1005,7 @@ addEventListener('keydown', e => {
   if (e.key === 'n' || e.key === 'N') nightT = nightT > 0.5 ? 0 : 1;
   if (e.key === 'm' || e.key === 'M') mapT = mapT > 0.5 ? 0 : 1;
   if (e.key === 'h' || e.key === 'H') document.body.classList.toggle('nohud');
-  if (e.key === 'c' || e.key === 'C') setCut(!cut.on, camT.x, camT.z);
+  if (e.key === 'c' || e.key === 'C') visitDeck(!camS.deck);
   if (e.key === 'F2' || e.key === '\\') { e.preventDefault(); toggleAdmin(); }
   if (e.key === 'v' || e.key === 'V') toggleViewer();
   if (e.key === 'Escape') { $('admin').classList.remove('on'); $('viewer').classList.remove('on'); }
@@ -1048,7 +1081,32 @@ function paintLock() {
   el.classList.add('on');
   el.innerHTML = `<b>${r.label}</b><small><em>${info.speed.toFixed(1)}</em> m/s</small><small>${info.doing}${where ? ' · ' + where : ''}</small><div id="rigbar"><i style="width:${pct}%"></i></div><small>本趟 ${pct}%</small>`;
 }
+function leaveDeck() {
+  if (!camS.deck && !cut.on) return;
+  camS.deck = camT.deck = false;
+  camS.y = camT.y = 0;
+  setCut(false);
+}
+function visitDeck(on) {
+  if (!on) { leaveDeck(); showPlan(); return; }
+  watchRig = null;
+  setCut(true, DECK_SITE.x, DECK_SITE.z);
+  const row = tankPos[1] || tankPos[0] || { x: cut.x + 58, z: cut.z, y: LAYERS[1].floor };
+  camT.x = camS.x = row.x;
+  camT.z = camS.z = row.z;
+  camT.y = camS.y = row.y;
+  camT.d = camS.d = 14;
+  camT.yaw = camS.yaw = Math.PI;
+  camT.pOff = camS.pOff = 0;
+  camT.lookUp = camS.lookUp = 0;
+  camT.fovAdd = camS.fovAdd = 0;
+  camT.deck = camS.deck = true;
+  mode = 'deck';
+  paintModes();
+  paintSheet();
+}
 function showPlan() {
+  leaveDeck();
   watchRig = null;
   mode = 'plan';
   const f = selected?.owned ? selected : fieldAt(focus.i, focus.j);
@@ -1084,21 +1142,41 @@ function paintSheet() {
   } else if (mode === 'store') {
     const potato = CROPS.find(c => c.id === 'potato');
     const price = quote(CROPS.indexOf(potato));
-    const lots = warehouse.map(lot => `<button type="button" class="rowbtn${pickedLot === lot.id ? ' on' : ''}" data-lot="${lot.id}"><b>${lot.name}</b><small>${fieldCode(lot)} · ${fmt(lot.liters)} L</small></button>`).join('');
-    el.innerHTML = `<div class="who"><b>仓库</b><span>选中一仓薯，再出售。出售才计入营收。</span></div><div class="price"><span>${potato.name}</span><em>牌价 ${fmt(price)}</em></div><p class="note">牌价是这一茬的记账价。行情以后接在这里，现在不会变。</p>${lots || '<p class="note">仓里还没有薯。</p>'}<button type="button" class="sell" id="sell"${pickedLot == null ? ' disabled' : ''}>出售</button>`;
+    const quotes = [`<div class="price"><span>${potato.name}</span><em>牌价 ${fmt(price)}</em></div>`].concat(CULTURES.map(c => `<div class="price"><span>${c.name}</span><em>牌价 ${fmt(c.price)}</em></div>`)).join('');
+    const lots = warehouse.map(lot => {
+      const where = lot.i == null || lot.j == null ? '培育层' : fieldCode(lot);
+      return `<button type="button" class="rowbtn${pickedLot === lot.id ? ' on' : ''}" data-lot="${lot.id}"><b>${lot.name}</b><small>${where} · ${fmt(lot.liters)} ${lot.unit || 'L'}</small></button>`;
+    }).join('');
+    el.innerHTML = `<div class="who"><b>仓库</b><span>中枢仓库。选中一批，再出售。</span></div>${quotes}<p class="note">牌价是记账价。行情以后接在这里，现在不会变。</p>${lots || '<p class="note">仓里还是空的。</p>'}<button type="button" class="sell" id="sell"${pickedLot == null ? ' disabled' : ''}>出售</button>`;
   } else if (mode === 'shop') {
-    const item = SHOP.find(s => s.id === 'seed');
-    el.innerHTML = `<div class="who"><b>商店</b><span>用营收买种薯。商品薯仍在仓库出售。</span></div><div class="price"><span>${item.name}</span><em>${fmt(item.price)}</em></div><p class="note">库存 ${stores.seed}。种一块田用 ${SEED_PER_FIELD}。</p><div class="buyline"><input id="shop-qty" class="qty" type="text" inputmode="numeric" value="1" aria-label="购买数量" autocomplete="off"><button type="button" class="sell" id="buy">购买</button></div>`;
+    const rows = SHOP.map(item => `<button type="button" class="rowbtn${shopPick === item.id ? ' on' : ''}" data-shop="${item.id}"><b>${item.name}</b><small>${fmt(item.price)} · 库存 ${stores[item.id]}</small></button>`).join('');
+    const item = SHOP.find(s => s.id === shopPick) || SHOP[0];
+    const use = item.id === 'seed' ? `种一块田用 ${SEED_PER_FIELD}。` : `种一块田用 ${FERT_PER_FIELD}。`;
+    el.innerHTML = `<div class="who"><b>商店</b><span>用营收买。商品薯和蛋白仍在仓库出售。</span></div>${rows}<p class="note">${use}</p><div class="buyline"><input id="shop-qty" class="qty" type="text" inputmode="numeric" value="1" aria-label="购买数量" autocomplete="off"><button type="button" class="sell" id="buy">购买</button></div>`;
     const qty = $('shop-qty');
     qty.addEventListener('focus', ev => ev.target.select());
     qty.addEventListener('mouseup', ev => ev.preventDefault());
     qty.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); $('buy').click(); } });
   } else if (mode === 'build') {
-    const placed = buildings.map(b => `<button type="button" class="rowbtn" data-shed="${b.id}"><b>${b.name}</b><small>${Math.round(b.x)}, ${Math.round(b.z)}</small></button>`).join('');
-    el.innerHTML = `<div class="who"><b>建设</b><span>在自己的田区里点地面，放下仓棚</span></div><p class="note">只有这一种房子。它落在田区里，仓里的薯记在这栋仓棚上。</p>${placed || '<p class="note">还没有房子。</p>'}`;
+    const placed = buildings.map(b => `<button type="button" class="rowbtn" data-shed="${b.id}"><b>${b.name}</b><small>中枢 · ${Math.round(b.x)}, ${Math.round(b.z)}</small></button>`).join('');
+    el.innerHTML = `<div class="who"><b>建设</b><span>功能房只放在中枢地块上</span></div><p class="note">田里种薯。仓库、机库和加工棚落在中枢。</p>${placed || '<p class="note">中枢上还没有房子。</p>'}`;
+  } else if (mode === 'deck') {
+    const rows = tanks.map(t => {
+      const w = cultureWatch(t);
+      const line = w ? `${w.name} · 第 ${Math.floor(w.day)} / ${w.days} 日${w.tended ? ' · 臂已照料' : ''}${w.ready ? ' · 可收' : ''}` : '空槽';
+      return `<button type="button" class="rowbtn${deckTank === t.id ? ' on' : ''}" data-tank="${t.id}"><b>槽 ${t.id + 1}</b><small>${line}</small></button>`;
+    }).join('');
+    el.innerHTML = `<div class="who"><b>培育层</b><span>${DECK_CLIMATE.temp}°C · 湿度 ${DECK_CLIMATE.rh}%</span></div><p class="note">设定值，不是天气。饲料 ${stores.feed}。选一种，臂去照料，到日再收。</p>${rows}<div class="buyline"><button type="button" class="sell" data-spawn="grub">养蛴螬</button><button type="button" class="sell" data-spawn="bsf">养黑水虻</button></div><div class="buyline"><button type="button" class="sell" id="tend">照料</button><button type="button" class="sell" id="harvest">收获</button></div>`;
   }
 }
 function setMode(id) {
+  if (id !== 'deck' && camS.deck) {
+    camS.deck = camT.deck = false;
+    camS.y = camT.y = 0;
+    camS.d = camT.d = 720;
+    camS.pOff = camT.pOff = -8 * DEG;
+    setCut(false);
+  }
   mode = id;
   if (id === 'plan') { showPlan(); return; }
   if (id !== 'machines') watchRig = null;
@@ -1120,14 +1198,42 @@ $('sheet').addEventListener('click', e => {
     const b = buildings.find(x => x.id === +shed.dataset.shed);
     if (!b) return;
     watchRig = null;
-    camT.x = b.x; camT.z = b.z; camT.d = 80;
+    if (camS.deck) leaveDeck();
+    camT.x = camS.x = b.x; camT.z = camS.z = b.z; camT.d = camS.d = 80;
+    if (b.kind === 'warehouse') setMode('store');
+    return;
+  }
+  const shopRow = e.target.closest('[data-shop]');
+  if (shopRow) { shopPick = shopRow.dataset.shop; paintSheet(); return; }
+  const tankRow = e.target.closest('[data-tank]');
+  if (tankRow) { deckTank = +tankRow.dataset.tank; paintSheet(); return; }
+  const spawn = e.target.closest('[data-spawn]');
+  if (spawn) {
+    const started = startCulture(deckTank, spawn.dataset.spawn);
+    if (!started.ok) toast(started.reason === 'feed' ? '饲料不足' : started.reason === 'busy' ? '这口槽已经在养' : '不能开始');
+    else { toast(`${started.name}已入槽`); saveSoon(); if (cut.on) buildCut(); }
+    paintSheet();
+    return;
+  }
+  if (e.target.id === 'tend') {
+    const tended = tendCulture(deckTank);
+    if (!tended.ok) toast('这口槽是空的');
+    else toast('机械臂过去照料');
+    paintSheet();
+    return;
+  }
+  if (e.target.id === 'harvest') {
+    const got = harvestCulture(deckTank);
+    if (!got.ok) toast(got.reason === 'early' ? '还没到收获日' : '这口槽是空的');
+    else { toast(`<b>入仓</b>${got.lot.name}`); saveSoon(); if (cut.on) buildCut(); }
+    paintSheet();
     return;
   }
   if (e.target.id === 'buy') {
-    const bought = buySeed($('shop-qty')?.value);
+    const bought = buyItem(shopPick, $('shop-qty')?.value);
     if (!bought.ok && bought.reason === 'money') toast('营收不够');
     else if (!bought.ok) toast('请填购买数量');
-    else toast(`<b>−${fmt(bought.cost)}</b>种薯 ${bought.n}`);
+    else toast(`<b>−${fmt(bought.cost)}</b>${bought.name} ${bought.n}`);
     paintSheet();
     paintKpi();
     saveSoon();
@@ -1144,7 +1250,8 @@ $('sheet').addEventListener('click', e => {
 });
 paintModes();
 // 分层面板：列出 LAYERS（剖面打开时，被剖开的层高亮）
-$('layers').innerHTML = `<div class="lh">分层 · LAYERS <em>C 剖面</em></div>` + LAYERS.map(l => `<div class="ly ly-${l.id}"><i></i><span>${l.name}</span><small>${l.en}</small><em>${l.floor === 0 ? '±0 m' : l.floor.toFixed(0) + ' m'}</em></div>`).join('');
+$('layers').innerHTML = `<div class="lh">分层 · LAYERS <em>C 下到培育层</em></div>` + LAYERS.map(l => `<div class="ly ly-${l.id}"${l.id === 'grow' ? ' data-deck="1"' : ''}><i></i><span>${l.name}</span><small>${l.en}</small><em>${l.floor === 0 ? '±0 m' : l.floor.toFixed(0) + ' m'}</em></div>`).join('');
+$('layers').addEventListener('click', e => { if (e.target.closest('[data-deck]')) visitDeck(!camS.deck); });
 const pv = new THREE.Vector3();
 function project(x, y, z) {
   const cx = U.uCurve.value.x, R0 = RING.R, th = (x - cx) / R0, r = R0 - y;   // 与 curveWorld 相同的环带卷曲
@@ -1173,7 +1280,7 @@ function updateLabels(d) {
   for (const r of rigs) if (r.busy) want.push({ x: r.x, z: r.z, y: 6, pr: 3, a: Math.min(1, Math.max(0, (1400 - d) / 500)), html: `<b>${r.label}</b>`, cls: 'veh' });
   if (cut.on && d < 2200) {
     const I = cutInner(), a = 1 - Math.min(1, Math.max(0, (d - 1500) / 500));
-    want.push({ x: cut.x + CUT.AX * 0.55, z: cut.z - CUT.AZ + 18, y: LAYERS[1].floor, pr: -2, a, html: `<b>${LAYERS[1].name} · ${LAYERS[1].en}</b><small>${LAYERS[1].floor} m · 立体栽培架 ${rackSet.light.count} 组</small>`, cls: 'hub deck' });
+    want.push({ x: cut.x + 58, z: cut.z, y: LAYERS[1].floor + 2, pr: -2, a, html: `<b>${LAYERS[1].name}</b><small>${DECK_CLIMATE.temp}°C · 湿度 ${DECK_CLIMATE.rh}% · 蛴螬 / 黑水虻</small>`, cls: 'hub deck' });
     want.push({ x: (I.x0 + I.x1) / 2, z: I.z0 + 20, y: LAYERS[2].floor, pr: -2, a, html: `<b>${LAYERS[2].name} · ${LAYERS[2].en}</b><small>${LAYERS[2].floor} m · 储液 / 泵站 / 管廊</small>`, cls: 'hub deck' });
   }
   want.push({ x: HUBC, z: HUBC, pr: -1, a: (d > 260 && d <= 1500) ? 1 : 0, html: `<b>中枢 · CENTRAL HUB</b><small>试验卫星 · 农神VIII</small>`, cls: 'hub' });
@@ -1265,9 +1372,9 @@ function updateDock() {
   let stat = selNote;
   if (!stat) {
     if (!f.owned) stat = '邻区快照 · 只读';
-    else if (stores.seed < SEED_PER_FIELD) stat = '种薯不足。打开商店买一份。';
-    else if (stores.fertilizer < 1 && !watch) stat = '肥料不足';
     else if (watch) stat = `中熟商品薯 · ${watch.label} · 播后 ${Math.floor(watch.day)} / ${watch.days} 日`;
+    else if (stores.seed < SEED_PER_FIELD) stat = '种薯不足。打开商店买一份。';
+    else if (stores.fertilizer < FERT_PER_FIELD) stat = '肥料不足。打开商店买一份。';
     else if (f.state === 0) stat = '裸地 · 点种薯，播种机起垄';
     else stat = '定格冠层 · 可改种商品薯';
   }
@@ -1558,7 +1665,33 @@ function frame(now) {
     const r = rigs.find(x => x.id === +el.parentElement.dataset.rig);
     if (r) el.textContent = rigLine(r);
   });
-  { const n = Math.min(buildings.length, 24); for (let i = 0; i < n; i++) setInst(shedSet, i, buildings[i].x, 0, buildings[i].z, buildings[i].ang || 0); setCount(shedSet, d < 2200 ? n : 0); }
+  if (mode === 'deck') document.querySelectorAll('#sheet [data-tank] small').forEach(el => {
+    const tank = tanks[+el.parentElement.dataset.tank];
+    const w = cultureWatch(tank);
+    el.textContent = w ? `${w.name} · 第 ${Math.floor(w.day)} / ${w.days} 日${w.tended ? ' · 臂已照料' : ''}${w.ready ? ' · 可收' : ''}` : '空槽';
+  });
+  for (const kind of Object.keys(buildingSets)) {
+    const list = buildings.filter(b => (b.kind || 'shed') === kind);
+    const set = buildingSets[kind];
+    const n = d < 2200 ? Math.min(list.length, 8) : 0;
+    for (let i = 0; i < n; i++) setInst(set, i, list[i].x, 0, list[i].z, list[i].ang || 0);
+    setCount(set, n);
+  }
+  if (cut.on && tankPos.length) {
+    const focusTank = tanks[deckTank]?.species ? deckTank : tanks.findIndex(t => t.species);
+    const goal = tankPos[focusTank >= 0 ? focusTank : 0];
+    if (goal) {
+      armX += (goal.x - armX) * Math.min(1, dt * 1.4);
+      setInst(armSet, 0, armX, goal.y, goal.z - 5, Math.PI / 2);
+      setCount(armSet, 1);
+      for (let i = 0; i < tanks.length && i < tankPos.length; i++) {
+        const spec = CULTURES.find(c => c.id === tanks[i].species);
+        const tint = !spec ? C('rego') : spec.id === 'bsf' ? C('sage') : C('ochre');
+        if (cultureSet.light) cultureSet.light.setColorAt(i, tint);
+      }
+      if (cultureSet.light?.instanceColor) cultureSet.light.instanceColor.needsUpdate = true;
+    }
+  }
   const mpp = d * 2 * Math.tan(15 * DEG) / innerHeight; const [m, px] = niceScale(mpp);
   $('scalebar').style.width = px.toFixed(0) + 'px'; $('scaletxt').textContent = m >= 1000 ? (m / 1000) + ' km' : m + ' m';
   updateLabels(d);
@@ -1582,7 +1715,10 @@ requestAnimationFrame(frame);
 addEventListener('resize', () => { cam.aspect = innerWidth / innerHeight; cam.updateProjectionMatrix(); R.setSize(innerWidth, innerHeight); composer.setSize(innerWidth, innerHeight); gtao.setSize(innerWidth, innerHeight); });
 window.__farm = {
   economy, stores, focus, fields, harvesters, rigs, log, CROPS, PLOT, quote, fieldAtWorld, project, pick: pickFlat,
-  warehouse, buildings, sellLot, placeBuilding, buySeed, resetGame, shop: SHOP,
+  warehouse, buildings, sellLot, placeBuilding, buySeed, buyItem, resetGame, shop: SHOP,
+  cultures: CULTURES, tanks, climate: DECK_CLIMATE, startCulture, tendCulture, harvestCulture, cultureWatch,
+  deck(on) { visitDeck(on == null ? !camS.deck : !!on); },
+  get onDeck() { return !!camS.deck; },
   snapshot: exportSnapshot, plant: doPlant, select: (i, j) => selectField(fieldAt(i, j)),
   setTimeScale, setPaused,
   get selected() { return selected; },
@@ -1595,6 +1731,10 @@ window.__farm = {
     if (yawDeg != null) camT.yaw = camS.yaw = yawDeg * DEG;
     if (dist != null) camT.d = camS.d = dist;
     if (pitch != null) camT.pOff = camS.pOff = pitch * DEG;
+  },
+  look(x, z) {
+    if (Number.isFinite(x)) camT.x = camS.x = x;
+    if (Number.isFinite(z)) camT.z = camS.z = z;
   },
   get locked() { return watchRig; },
   advance(seconds, scale = economy.timeScale) {

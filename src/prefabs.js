@@ -96,7 +96,62 @@ function tractorBase(k) {
     k.cyl('light', 0.24, 0.24, 0.34, [x, 0.52, s * 1.05], [Math.PI / 2, 0, 0], 'rego', 8);
   }
 }
-// 仓棚：玩家在自己田区里放下的一栋小平房，材质仍是那四套共享材质。
+// 中枢上的三栋功能房，仍用那四套共享材质，不另开一套造型。
+export function warehouseKit() {
+  const k = new Kit();
+  k.box('dark', 22, 0.4, 14, [0, 0.2, 0], [0, 0, 0], 'deep', 0.02);
+  k.box('light', 20, 7.2, 12, [0, 4, 0], [0, 0, 0], 'haze');
+  k.box('dark', 20.4, 0.35, 12.4, [0, 7.7, 0]);
+  k.box('light', 21, 0.5, 13, [0, 8.1, 0], [0, 0, 0], 'regoLt');
+  k.box('glass', 6, 2.2, 0.15, [0, 3.2, 6.05]);
+  k.box('emis', 0.12, 0.35, 4, [10.05, 5.4, 0], [0, 0, 0], glow('paper', 5));
+  k.box('dark', 3.2, 3.4, 0.2, [-4, 1.9, 6.1]);
+  return k.build();
+}
+export function garageKit() {
+  const k = new Kit();
+  k.box('dark', 28, 0.35, 16, [0, 0.18, 0], [0, 0, 0], 'deep', 0.02);
+  k.box('light', 28, 5.5, 1.2, [0, 3.1, -7.2], [0, 0, 0], 'regoLt');
+  k.box('dark', 1.1, 5.2, 14, [-13.4, 2.8, 0]);
+  k.box('dark', 1.1, 5.2, 14, [13.4, 2.8, 0]);
+  k.box('dark', 28, 0.45, 14.4, [0, 5.6, -1]);
+  for (const x of [-7, 0, 7]) k.box('emis', 3.2, 0.12, 0.12, [x, 5.2, 6.4], [0, 0, 0], glow('harvest', 4));
+  return k.build();
+}
+export function processKit() {
+  const k = new Kit();
+  k.box('dark', 12, 0.32, 8, [0, 0.16, 0]);
+  k.box('light', 11.2, 4.2, 7.2, [0, 2.4, 0], [0, 0, 0], 'haze');
+  k.box('dark', 11.4, 0.28, 7.4, [0, 4.6, 0]);
+  k.cyl('light', 1.3, 1.5, 3.2, [3.2, 6.4, -1.5], [0, 0, 0], 'regoLt', 16);
+  k.box('glass', 2.2, 1.6, 0.12, [-2.4, 2.2, 3.65]);
+  k.box('emis', 0.1, 0.2, 1.4, [5.65, 3.2, 0], [0, 0, 0], glow('paper', 5));
+  return k.build();
+}
+// 培育层的浅槽。黑水虻用敞口料盘，蛴螬用同一只槽加基质，不另做拖拉机。
+export function cultureTankKit() {
+  const k = new Kit();
+  k.box('dark', 6.4, 0.28, 3.2, [0, 0.14, 0], [0, 0, 0], 'deep', 0.03);
+  k.box('dark', 6.4, 0.7, 0.12, [0, 0.55, 1.54]);
+  k.box('dark', 6.4, 0.7, 0.12, [0, 0.55, -1.54]);
+  k.box('dark', 0.12, 0.7, 3.2, [3.14, 0.55, 0]);
+  k.box('dark', 0.12, 0.7, 3.2, [-3.14, 0.55, 0]);
+  k.box('light', 5.8, 0.32, 2.7, [0, 0.42, 0], [0, 0, 0], 'ochre');
+  k.box('emis', 0.08, 0.08, 2.2, [0, 0.95, 1.5], [0, 0, 0], glow('data', 5));
+  return k.build();
+}
+// 槽边的机械臂：立柱加两节臂，沿一排槽移动。
+export function armKit() {
+  const k = new Kit();
+  k.box('dark', 1.6, 0.28, 1.2, [0, 0.14, 0]);
+  k.cyl('dark', 0.16, 0.2, 2.2, [0, 1.3, 0], [0, 0, 0], null, 8);
+  k.box('light', 2.4, 0.18, 0.18, [1.0, 2.35, 0], [0, 0, 0.35], 'haze');
+  k.box('light', 1.5, 0.14, 0.14, [2.35, 1.55, 0], [0, 0, -0.7], 'regoLt');
+  k.box('dark', 0.28, 0.22, 0.42, [3.05, 1.05, 0]);
+  k.cyl('emis', 0.06, 0.06, 0.08, [0, 2.45, 0.16], [0, 0, 0], glow('data', 10), 6);
+  return k.build();
+}
+// 仓棚：旧档里田上的那一栋。新游戏不再往田里放，材质仍是那四套。
 export function shedKit() {
   const k = new Kit();
   k.box('dark', 9.4, 0.32, 6.4, [0, 0.16, 0]);

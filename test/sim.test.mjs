@@ -5,7 +5,8 @@ import {
   plantField, step, economy, quote, log, exportSnapshot, applySnapshot, RING,
   stores, worldDay, cropWatch, fieldVisual, setPaused, setTimeScale,
   DAY_SECONDS, MACHINE_MPS, warehouse, sellLot, placeBuilding, buildings, rigReadout,
-  SHOP, buySeed, SEED_PER_FIELD, resetGame, paused,
+  SHOP, buySeed, buyItem, SEED_PER_FIELD, resetGame, paused, onHubParcel,
+  CULTURES, startCulture, harvestCulture,
 } from '../src/_shared.js';
 
 test('one colonist plot is about 4 km on the ring', () => {
@@ -52,7 +53,7 @@ test('a potato follows one 120-day clock through ridges, vines, vine-kill, and p
   const planted = plantField(bare, 'potato');
   assert.equal(planted.ok, true);
   assert.equal(stores.seed, 5);
-  assert.equal(stores.fertilizer, 5);
+  assert.equal(stores.fertilizer, 0);
   assert.equal(cropWatch(bare).phase, 'plant');
   assert.equal(rigs.find(r => r.kind === 'planter').busy, true);
   const days = (n, scale = 1) => step(n * DAY_SECONDS, 0, scale);
@@ -117,8 +118,10 @@ test('a potato follows one 120-day clock through ridges, vines, vine-kill, and p
   step(3 * DAY_SECONDS, 0, 12);
   assert.equal(worldDay, held, 'pause holds the world clock');
   setPaused(false);
-  assert.equal(placeBuilding(bare.x0 + 20, bare.z0 + 20).ok, true);
+  assert.equal(placeBuilding(bare.x0 + 20, bare.z0 + 20).reason, 'field');
   assert.equal(placeBuilding(neighbor.x0 + 20, neighbor.z0 + 20).ok, false);
+  const hubPad = fieldAt(L.HUBX * L.PER + 3, L.HUBZ * L.PER);
+  assert.equal(placeBuilding(hubPad.x0 + 48, hubPad.z0 + 48).ok, true);
   const snap = exportSnapshot();
   assert.equal(snap.schema, 2);
   assert.equal(snap.plotId, 'nongshen-viii/plot-01');
@@ -126,7 +129,8 @@ test('a potato follows one 120-day clock through ridges, vines, vine-kill, and p
   assert.equal(snap.stores.seed, 5);
   assert.equal(snap.timeScale, 2.5);
   assert.equal(snap.warehouse.length, 0);
-  assert.equal(snap.buildings.length, 1);
+  assert.equal(snap.buildings.length, buildings.length);
+  assert.ok(snap.buildings.some(b => b.kind === 'warehouse'));
   assert.ok(snap.fields.length > 400);
   economy.revenue = 0;
   stores.seed = 1;
@@ -134,7 +138,8 @@ test('a potato follows one 120-day clock through ridges, vines, vine-kill, and p
   assert.equal(applySnapshot(snap), true);
   assert.equal(economy.revenue, paid);
   assert.equal(stores.seed, 5);
-  assert.equal(buildings.length, 1);
+  assert.equal(buildings.length, snap.buildings.length);
+  assert.ok(buildings.every(b => b.kind !== 'shed' || Math.abs(b.x - (bare.x0 + 20)) > 2));
   assert.equal(economy.timeScale, 2.5);
   assert.equal(fieldAt(bare.i, bare.j).state, 0);
   assert.equal(applySnapshot({ schema: 2, plotId: 'other', fields: [] }), false);
@@ -213,11 +218,14 @@ test('a working machine stays on its field, and the next machine starts from tha
 });
 
 test('the shop sells seed potatoes, and an empty stock does not start a field', () => {
-  assert.equal(SHOP.length, 1);
+  assert.equal(SHOP.length, 2);
   assert.equal(SHOP[0].name, '种薯');
   assert.equal(SHOP[0].id, 'seed');
   const price = SHOP[0].price;
   assert.equal(price, 1800);
+  const fert = SHOP.find(s => s.id === 'fertilizer');
+  assert.equal(fert.name, '肥料');
+  assert.equal(fert.price, 900);
   assert.equal(SEED_PER_FIELD, 1);
   economy.revenue = 0;
   const broke = buySeed(1);
@@ -260,7 +268,7 @@ test('reset drops the shed and returns a field that can be planted', () => {
   stores.seed = 0;
   stores.fertilizer = 6;
   if (open) assert.equal(plantField(open, 'potato').reason, 'seed');
-  assert.equal(placeBuilding(bare.x0 + 24, bare.z0 + 24).ok, true);
+  assert.equal(placeBuilding(bare.x0 + 24, bare.z0 + 24).reason, 'field');
   economy.revenue = 500;
   setTimeScale(4);
   setPaused(true);
@@ -270,11 +278,79 @@ test('reset drops the shed and returns a field that can be planted', () => {
   assert.equal(economy.revenue, 0);
   assert.equal(worldDay, 0);
   assert.equal(stores.seed, 1);
+  assert.equal(stores.fertilizer, 1);
   assert.equal(warehouse.length, 0);
-  assert.equal(buildings.length, 0);
+  assert.ok(buildings.some(b => b.kind === 'warehouse'));
+  assert.ok(buildings.some(b => b.kind === 'garage'));
+  assert.ok(buildings.some(b => b.kind === 'process'));
+  assert.equal(buildings.some(b => Math.hypot(b.x - (bare.x0 + 24), b.z - (bare.z0 + 24)) < 8), false);
   assert.equal(bare.live, false);
   assert.equal(bare.state, 0);
   assert.equal(rigs.every(r => !r.busy), true);
   assert.equal(plantField(bare, 'potato').ok, true);
   assert.equal(stores.seed, 0);
+});
+
+test('fertilizer can be bought and then used to plant', () => {
+  const plot = fields.find(f => f.owned && !f.live && f.state !== 3);
+  assert.ok(plot);
+  stores.seed = 1;
+  stores.fertilizer = 0;
+  economy.revenue = 0;
+  assert.equal(plantField(plot, 'potato').reason, 'fertilizer');
+  assert.equal(buyItem('fertilizer', 1).reason, 'money');
+  assert.equal(stores.fertilizer, 0);
+  economy.revenue = SHOP.find(s => s.id === 'fertilizer').price;
+  const bought = buyItem('fertilizer', 1);
+  assert.equal(bought.ok, true);
+  assert.equal(bought.stock, 1);
+  assert.equal(economy.revenue, 0);
+  assert.equal(plantField(plot, 'potato').ok, true);
+  assert.equal(stores.fertilizer, 0);
+});
+
+test('a shed saved on a crop field is moved onto the hub', () => {
+  const bare = fieldAt(focus.i, focus.j);
+  const snap = exportSnapshot();
+  snap.buildings = [{ id: 50, kind: 'shed', name: '仓棚', x: bare.x0 + 30, z: bare.z0 + 30, ang: 0 }];
+  assert.equal(applySnapshot(snap), true);
+  const shed = buildings.find(b => b.kind === 'shed');
+  assert.ok(shed);
+  assert.equal(onHubParcel(shed.x, shed.z), true);
+  assert.equal(onHubParcel(bare.x0 + 30, bare.z0 + 30), false);
+  assert.ok(buildings.some(b => b.kind === 'warehouse'));
+  assert.ok(buildings.some(b => b.kind === 'garage'));
+  assert.ok(buildings.some(b => b.kind === 'process'));
+});
+
+test('a protein culture advances on the world clock and sells from the warehouse', () => {
+  assert.equal(CULTURES.find(c => c.id === 'grub').days, 65);
+  assert.equal(CULTURES.find(c => c.id === 'bsf').days, 13);
+  assert.equal(CULTURES.find(c => c.id === 'grub').name, '蛴螬');
+  assert.equal(CULTURES.find(c => c.id === 'bsf').name, '黑水虻');
+  stores.feed = 0;
+  assert.equal(startCulture(0, 'bsf').reason, 'feed');
+  stores.feed = 1;
+  assert.equal(startCulture(0, 'bsf').ok, true);
+  assert.equal(startCulture(0, 'grub').reason, 'busy');
+  assert.equal(harvestCulture(0).reason, 'early');
+  step(12 * DAY_SECONDS, 0, 1);
+  assert.equal(harvestCulture(0).reason, 'early');
+  step(DAY_SECONDS, 0, 1);
+  const got = harvestCulture(0);
+  assert.equal(got.ok, true);
+  assert.equal(got.lot.name, '黑水虻');
+  assert.equal(got.lot.kind, 'protein');
+  assert.equal(got.lot.listPrice, CULTURES.find(c => c.id === 'bsf').price);
+  const before = economy.revenue;
+  assert.equal(sellLot(got.lot.id).listPrice, got.lot.listPrice);
+  assert.equal(economy.revenue, before + got.lot.listPrice);
+  stores.feed = 1;
+  assert.equal(startCulture(1, 'grub').ok, true);
+  step(64 * DAY_SECONDS, 0, 1);
+  assert.equal(harvestCulture(1).reason, 'early');
+  step(DAY_SECONDS, 0, 1);
+  const grub = harvestCulture(1);
+  assert.equal(grub.ok, true);
+  assert.equal(grub.lot.name, '蛴螬');
 });

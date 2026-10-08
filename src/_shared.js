@@ -102,7 +102,7 @@ export function quote(crop) {
 // top / floor：该层顶板底面与地板面的高度（米，地表 = 0，向下为负）；slab：顶板厚度（含土层）
 export const LAYERS = [
   { id: 'surface', name: '地表农田', en: 'SURFACE FIELDS', top: 0, floor: 0, slab: 0 },
-  { id: 'grow', name: '地下培育层', en: 'GROW DECK', top: -4.5, floor: -17, slab: 4.5, content: 'racks' },
+  { id: 'grow', name: '地下培育层', en: 'GROW DECK', top: -4.5, floor: -17, slab: 4.5, content: 'protein' },
   { id: 'equip', name: '设备层', en: 'EQUIPMENT DECK', top: -21, floor: -40, slab: 4, content: 'machinery' },
   { id: 'hull', name: '承压外壳', en: 'PRESSURE HULL', top: -44, floor: -RING.HULL, slab: 4 },
 ];
@@ -189,14 +189,33 @@ export function passWorldDays() {
   return (L.LANES * L.FIELD) / (MACHINE_MPS * DAY_SECONDS);
 }
 export const economy = { revenue: 0, timeScale: 1 };
-// 一块田用一份种薯。新游戏只带这一份，之后到商店买。价格是占位，和营收同一记账单位。
+// 一块田用一份种薯、一份肥料。新游戏只带这一份，之后到商店买。价格是占位，和营收同一记账单位。
 export const SEED_PER_FIELD = 1;
+export const FERT_PER_FIELD = 1;
 export const SHOP = [
   { id: 'seed', name: '种薯', price: 1800 },
+  { id: 'fertilizer', name: '肥料', price: 900 },
 ];
-const START_FERTILIZER = 6;
+const START_FERTILIZER = FERT_PER_FIELD;
 const START_SPRAY = 6;
-export const stores = { seed: SEED_PER_FIELD, fertilizer: START_FERTILIZER, spray: START_SPRAY };
+const START_FEED = 2;
+export const stores = { seed: SEED_PER_FIELD, fertilizer: START_FERTILIZER, spray: START_SPRAY, feed: START_FEED };
+// 培育层两种蛋白。天数取自发表的幼虫历期，牌价是占位，不跟行情走。
+// 蛴螬：白星花金龟 Protaetia brevitarsis 幼虫，30°C 发酵基质上幼虫期 64.8 日，这里记 65 日。
+// 黑水虻：Hermetia illucens，30°C 配方饲料上幼虫期 12.8 日，这里记 13 日。
+export const CULTURES = [
+  { id: 'grub', name: '蛴螬', days: 65, price: 2600 },
+  { id: 'bsf', name: '黑水虻', days: 13, price: 1400 },
+];
+export const DECK_CLIMATE = { temp: 30, rh: 70 };
+export const TANK_COUNT = 4;
+export const tanks = Array.from({ length: TANK_COUNT }, (_, id) => ({ id, species: null, startedAt: 0, tended: false }));
+export const BUILDING_KINDS = {
+  warehouse: { id: 'warehouse', name: '仓库' },
+  garage: { id: 'garage', name: '机库' },
+  process: { id: 'process', name: '加工棚' },
+  shed: { id: 'shed', name: '仓棚' },
+};
 export const warehouse = [];
 export const buildings = [];
 let nextLot = 1;
@@ -533,10 +552,20 @@ export function rigReadout(r) {
     if (score < best) { best = score; maize = f; }
   }
   if (maize) { maize.crop = CROPS.findIndex(c => c.id === 'maize'); maize.demo = true; armCutter(maize, 3, 48); }
+  const hubPad = (di, dj) => {
+    const f = fieldAt(L.HUBX * L.PER + di, L.HUBZ * L.PER + dj);
+    return { x: f.x0 + L.FIELD / 2, z: f.z0 + L.FIELD / 2 };
+  };
+  const garageAt = hubPad(3, 2);
   ['planter', 'hiller', 'topper', 'lifter'].forEach((kind, n) => {
-    const x = 36 + n * 22, z = 176;
+    const x = garageAt.x - 18 + n * 12, z = garageAt.z + 22;
     rigs.push({ id: n, kind, label: JOBS[kind].label, busy: false, f: null, mode: 'park', lane: 0, u: 0, parkX: x, parkZ: z, x, z, ang: -Math.PI / 2 });
   });
+  for (const [di, dj, kind] of [[3, 1, 'warehouse'], [3, 2, 'garage'], [3, 3, 'process']]) {
+    const at = hubPad(di, dj);
+    const spec = BUILDING_KINDS[kind];
+    buildings.push({ id: nextBuilding++, kind, name: spec.name, x: at.x, z: at.z, ang: 0, starter: true });
+  }
   for (const f of fields) {
     if (signals.length >= 56) break;
     if (f.owned || f.crop < 0 || f.state < 2 || f.state > 3) continue;
@@ -544,13 +573,14 @@ export function rigReadout(r) {
     signals.push({ x: f.x0 + L.FIELD / 2, z: f.z0 + L.FIELD / 2 });
   }
 }
-// 开局田块。重开时回到这里，不把玩家种过的薯和放下的仓棚留下来。
+// 开局田块和中枢上的三栋功能房。重开时回到这里，田上的仓棚不留下来。
+const starterBuildings = buildings.filter(b => b.starter).map(b => ({ kind: b.kind, name: b.name, x: b.x, z: b.z, ang: b.ang || 0 }));
 const openingFields = fields.filter(f => f.owned).map(f => ({
   idx: f.idx, crop: f.crop, state: f.state, g: f.g, s: f.s, timer: f.timer || 0,
   live: !!f.live, hold: !!f.hold, frozen: !!f.frozen, paid: !!f.paid, sprayed: !!f.sprayed, claimed: !!f.claimed,
 }));
 
-export function fieldAtWorld(x, z) {
+function fieldUnder(x, z, includeHub) {
   let qx = x - L.X0;
   qx = ((qx % RING.CIRC) + RING.CIRC) % RING.CIRC;
   const qy = z - L.Z0;
@@ -559,11 +589,14 @@ export function fieldAtWorld(x, z) {
   if (by < 0 || by >= L.NBZ || bx < 0 || bx >= L.NBX) return null;
   const blx = qx - bx * L.BP, bly = qy - by * L.BP;
   if (blx > L.BLOCK || bly > L.BLOCK) return null;
-  if (bx === L.HUBX && by === L.HUBZ) return null;
+  if (!includeHub && bx === L.HUBX && by === L.HUBZ) return null;
   const fi = Math.floor(blx / (L.FIELD + L.ROAD)), fj = Math.floor(bly / (L.FIELD + L.ROAD));
   const locx = blx - fi * (L.FIELD + L.ROAD), locz = bly - fj * (L.FIELD + L.ROAD);
   if (locx < 0 || locz < 0 || locx > L.FIELD || locz > L.FIELD) return null;
   return fieldAt(bx * L.PER + fi, by * L.PER + fj);
+}
+export function fieldAtWorld(x, z) {
+  return fieldUnder(x, z, false);
 }
 
 function manhattan(ax, az, aVert, ex, ez, eVert) {
@@ -648,11 +681,81 @@ export function inPlayerPlot(x, z) {
   const wx = wrapX(x);
   return wx >= PLOT.x0 && wx <= PLOT.x1 && z >= PLOT.z0 && z <= PLOT.z1;
 }
-export function placeBuilding(x, z) {
+export function onHubParcel(x, z) {
+  if (!inPlayerPlot(x, z)) return false;
+  const f = fieldUnder(x, z, true);
+  if (!f || f.crop >= 0) return false;
+  return Math.floor(f.i / L.PER) === L.HUBX && Math.floor(f.j / L.PER) === L.HUBZ;
+}
+function blankTanks() {
+  for (const t of tanks) { t.species = null; t.startedAt = 0; t.tended = false; }
+}
+function restoreStarters() {
+  buildings.length = 0;
+  nextBuilding = 1;
+  for (const s of starterBuildings) buildings.push({ id: nextBuilding++, kind: s.kind, name: s.name, x: s.x, z: s.z, ang: s.ang || 0, starter: true });
+}
+function ensureStarters() {
+  for (const s of starterBuildings) {
+    if (buildings.some(b => b.kind === s.kind)) continue;
+    buildings.push({ id: nextBuilding++, kind: s.kind, name: s.name, x: s.x, z: s.z, ang: s.ang || 0, starter: true });
+  }
+}
+function movedOntoHub(x, z) {
+  if (onHubParcel(x, z)) return { x, z };
+  const pad = starterBuildings[buildings.length % Math.max(1, starterBuildings.length)] || { x: 0, z: 0 };
+  return { x: pad.x + 16, z: pad.z + 14 };
+}
+export function placeBuilding(x, z, kind = 'process') {
   if (!inPlayerPlot(x, z)) return { ok: false, reason: 'plot' };
-  const b = { id: nextBuilding++, kind: 'shed', name: '仓棚', x, z, ang: 0 };
+  if (!onHubParcel(x, z)) return { ok: false, reason: 'field' };
+  const spec = BUILDING_KINDS[kind] || BUILDING_KINDS.process;
+  const b = { id: nextBuilding++, kind: spec.id, name: spec.name, x, z, ang: 0 };
   buildings.push(b);
   return { ok: true, building: b };
+}
+export function cultureWatch(tank) {
+  if (!tank?.species) return null;
+  const spec = CULTURES.find(c => c.id === tank.species);
+  if (!spec) return null;
+  const day = Math.max(0, worldDay - (tank.startedAt || 0));
+  return { day, days: spec.days, ready: day >= spec.days - 1e-9, name: spec.name, id: spec.id, tended: !!tank.tended };
+}
+export function startCulture(tankId, speciesId) {
+  const tank = tanks[tankId];
+  const spec = CULTURES.find(c => c.id === speciesId);
+  if (!tank || !spec) return { ok: false, reason: 'tank' };
+  if (tank.species) return { ok: false, reason: 'busy' };
+  if (stores.feed < 1) return { ok: false, reason: 'feed' };
+  stores.feed -= 1;
+  tank.species = spec.id;
+  tank.startedAt = worldDay;
+  tank.tended = false;
+  return { ok: true, name: spec.name, day: worldDay };
+}
+export function tendCulture(tankId) {
+  const tank = tanks[tankId];
+  if (!tank?.species) return { ok: false, reason: 'empty' };
+  tank.tended = true;
+  return { ok: true, tank: tank.id };
+}
+export function harvestCulture(tankId) {
+  const tank = tanks[tankId];
+  const watch = cultureWatch(tank);
+  if (!tank?.species || !watch) return { ok: false, reason: 'empty' };
+  if (!watch.ready) return { ok: false, reason: 'early' };
+  const spec = CULTURES.find(c => c.id === tank.species);
+  const lot = {
+    id: nextLot++, crop: spec.id, name: spec.name, kind: 'protein',
+    liters: spec.id === 'bsf' ? 420 : 180, unit: 'kg',
+    listPrice: spec.price, i: null, j: null, t: worldDay,
+  };
+  warehouse.push(lot);
+  log.push({ type: 'store', pay: 0, listPrice: lot.listPrice, crop: spec.id, name: spec.name, i: null, j: null, t: worldDay });
+  tank.species = null;
+  tank.startedAt = 0;
+  tank.tended = false;
+  return { ok: true, lot };
 }
 export function resetGame() {
   const by = new Map(openingFields.map(s => [s.idx, s]));
@@ -665,7 +768,6 @@ export function resetGame() {
     delete f.jobS;
   }
   warehouse.length = 0;
-  buildings.length = 0;
   log.length = 0;
   economy.revenue = 0;
   paused = false;
@@ -675,23 +777,30 @@ export function resetGame() {
   stores.seed = SEED_PER_FIELD;
   stores.fertilizer = START_FERTILIZER;
   stores.spray = START_SPRAY;
+  stores.feed = START_FEED;
   nextLot = 1;
-  nextBuilding = 1;
+  blankTanks();
+  restoreStarters();
   for (const r of rigs) parkRig(r);
   syncPotatoLive();
   rebuildDemo();
   assignIdleRigs();
 }
-export function buySeed(qty) {
-  const item = SHOP.find(s => s.id === 'seed');
+export function buyItem(id, qty) {
+  const item = SHOP.find(s => s.id === id);
   const n = Math.floor(Number(qty));
   if (!item || !Number.isFinite(n) || n < 1 || n > 999) return { ok: false, reason: 'qty' };
   const cost = item.price * n;
   if (!(economy.revenue >= cost)) return { ok: false, reason: 'money', cost };
   economy.revenue -= cost;
-  stores.seed += n;
+  stores[item.id] += n;
   log.push({ type: 'buy', pay: cost, name: item.name, n, t: worldDay });
-  return { ok: true, cost, n, seed: stores.seed };
+  return { ok: true, cost, n, id: item.id, name: item.name, stock: stores[item.id] };
+}
+export function buySeed(qty) {
+  const bought = buyItem('seed', qty);
+  if (bought.ok) bought.seed = bought.stock;
+  return bought;
 }
 export function sellLot(id) {
   const i = warehouse.findIndex(lot => lot.id === id);
@@ -707,9 +816,9 @@ export function plantField(f, cropId) {
   const crop = typeof cropId === 'number' ? cropId : CROPS.findIndex(c => c.id === cropId);
   if (crop < 0 || !CROPS[crop].plantable) return { ok: false, reason: 'crop' };
   if (stores.seed < SEED_PER_FIELD) return { ok: false, reason: 'seed' };
-  if (stores.fertilizer < 1) return { ok: false, reason: 'fertilizer' };
+  if (stores.fertilizer < FERT_PER_FIELD) return { ok: false, reason: 'fertilizer' };
   stores.seed -= SEED_PER_FIELD;
-  stores.fertilizer -= 1;
+  stores.fertilizer -= FERT_PER_FIELD;
   f.crop = crop; f.state = 1; f.g = 0; f.s = 0; f.timer = 0;
   f.live = true; f.hold = false; f.frozen = false;
   f.plantedAt = worldDay; f.paid = false; f.sprayed = false; f.claimed = false;
@@ -727,9 +836,10 @@ export function exportSnapshot() {
     worldDay,
     revenue: economy.revenue,
     timeScale: economy.timeScale,
-    stores: { seed: stores.seed, fertilizer: stores.fertilizer, spray: stores.spray },
+    stores: { seed: stores.seed, fertilizer: stores.fertilizer, spray: stores.spray, feed: stores.feed },
     warehouse: warehouse.map(lot => ({ ...lot })),
     buildings: buildings.map(b => ({ id: b.id, kind: b.kind, name: b.name, x: +b.x.toFixed(2), z: +b.z.toFixed(2), ang: b.ang || 0 })),
+    tanks: tanks.map(t => ({ id: t.id, species: t.species, startedAt: t.startedAt || 0, tended: !!t.tended })),
     fields: fields.filter(f => f.owned).map(f => ({
       i: f.i, j: f.j, crop: f.crop, dir: f.dir, state: f.state,
       g: +f.g.toFixed(4), s: +f.s.toFixed(4), timer: +(+f.timer || 0).toFixed(3),
@@ -778,6 +888,7 @@ export function applySnapshot(data) {
     stores.seed = Number.isFinite(+data.stores.seed) ? +data.stores.seed : 0;
     stores.fertilizer = +data.stores.fertilizer || 0;
     stores.spray = +data.stores.spray || 0;
+    stores.feed = Number.isFinite(+data.stores.feed) ? +data.stores.feed : START_FEED;
   }
   if (data.timeScale) setTimeScale(data.timeScale);
   warehouse.length = 0;
@@ -787,9 +898,23 @@ export function applySnapshot(data) {
   }
   buildings.length = 0;
   for (const b of data.buildings || []) {
-    buildings.push({ id: +b.id || nextBuilding++, kind: b.kind || 'shed', name: b.name || '仓棚', x: +b.x || 0, z: +b.z || 0, ang: +b.ang || 0 });
+    const kind = BUILDING_KINDS[b.kind] ? b.kind : 'shed';
+    const at = movedOntoHub(+b.x || 0, +b.z || 0);
+    buildings.push({ id: +b.id || nextBuilding++, kind, name: b.name || BUILDING_KINDS[kind].name, x: at.x, z: at.z, ang: +b.ang || 0 });
     nextBuilding = Math.max(nextBuilding, (+b.id || 0) + 1);
   }
+  ensureStarters();
+  if (Array.isArray(data.tanks)) {
+    blankTanks();
+    for (const t of data.tanks) {
+      const tank = tanks[t.id];
+      if (!tank) continue;
+      const spec = CULTURES.find(c => c.id === t.species);
+      tank.species = spec ? spec.id : null;
+      tank.startedAt = +t.startedAt || 0;
+      tank.tended = !!t.tended;
+    }
+  } else blankTanks();
   worldDay = +(data.worldDay ?? data.simTime) || 0;
   simTime = worldDay;
   rebuildDemo();
