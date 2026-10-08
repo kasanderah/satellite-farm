@@ -5,7 +5,7 @@ import {
   plantField, step, economy, quote, log, exportSnapshot, applySnapshot, RING,
   stores, worldDay, cropWatch, fieldVisual, setPaused, setTimeScale,
   DAY_SECONDS, MACHINE_MPS, warehouse, sellLot, placeBuilding, buildings, rigReadout,
-  SHOP, buySeed, SEED_PER_FIELD,
+  SHOP, buySeed, SEED_PER_FIELD, resetGame, paused,
 } from '../src/_shared.js';
 
 test('one colonist plot is about 4 km on the ring', () => {
@@ -252,4 +252,29 @@ test('the shop sells seed potatoes, and an empty stock does not start a field', 
   stores.seed = 4;
   assert.equal(applySnapshot(bareSave), true);
   assert.equal(stores.seed, 4);
+});
+
+test('reset drops the shed and returns a field that can be planted', () => {
+  const bare = fieldAt(focus.i, focus.j);
+  const open = fields.find(f => f.owned && !f.live && f.state !== 3);
+  stores.seed = 0;
+  stores.fertilizer = 6;
+  if (open) assert.equal(plantField(open, 'potato').reason, 'seed');
+  assert.equal(placeBuilding(bare.x0 + 24, bare.z0 + 24).ok, true);
+  economy.revenue = 500;
+  setTimeScale(4);
+  setPaused(true);
+  resetGame();
+  assert.equal(paused, false);
+  assert.equal(economy.timeScale, 1);
+  assert.equal(economy.revenue, 0);
+  assert.equal(worldDay, 0);
+  assert.equal(stores.seed, 1);
+  assert.equal(warehouse.length, 0);
+  assert.equal(buildings.length, 0);
+  assert.equal(bare.live, false);
+  assert.equal(bare.state, 0);
+  assert.equal(rigs.every(r => !r.busy), true);
+  assert.equal(plantField(bare, 'potato').ok, true);
+  assert.equal(stores.seed, 0);
 });

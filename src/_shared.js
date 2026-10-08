@@ -194,7 +194,9 @@ export const SEED_PER_FIELD = 1;
 export const SHOP = [
   { id: 'seed', name: '种薯', price: 1800 },
 ];
-export const stores = { seed: SEED_PER_FIELD, fertilizer: 6, spray: 6 };
+const START_FERTILIZER = 6;
+const START_SPRAY = 6;
+export const stores = { seed: SEED_PER_FIELD, fertilizer: START_FERTILIZER, spray: START_SPRAY };
 export const warehouse = [];
 export const buildings = [];
 let nextLot = 1;
@@ -542,6 +544,11 @@ export function rigReadout(r) {
     signals.push({ x: f.x0 + L.FIELD / 2, z: f.z0 + L.FIELD / 2 });
   }
 }
+// 开局田块。重开时回到这里，不把玩家种过的薯和放下的仓棚留下来。
+const openingFields = fields.filter(f => f.owned).map(f => ({
+  idx: f.idx, crop: f.crop, state: f.state, g: f.g, s: f.s, timer: f.timer || 0,
+  live: !!f.live, hold: !!f.hold, frozen: !!f.frozen, paid: !!f.paid, sprayed: !!f.sprayed, claimed: !!f.claimed,
+}));
 
 export function fieldAtWorld(x, z) {
   let qx = x - L.X0;
@@ -646,6 +653,34 @@ export function placeBuilding(x, z) {
   const b = { id: nextBuilding++, kind: 'shed', name: '仓棚', x, z, ang: 0 };
   buildings.push(b);
   return { ok: true, building: b };
+}
+export function resetGame() {
+  const by = new Map(openingFields.map(s => [s.idx, s]));
+  for (const f of fields) {
+    const s = by.get(f.idx);
+    if (!s) continue;
+    f.crop = s.crop; f.state = s.state; f.g = s.g; f.s = s.s; f.timer = s.timer;
+    f.live = s.live; f.hold = s.hold; f.frozen = s.frozen; f.paid = s.paid; f.sprayed = s.sprayed; f.claimed = s.claimed;
+    f.plantedAt = 0;
+    delete f.jobS;
+  }
+  warehouse.length = 0;
+  buildings.length = 0;
+  log.length = 0;
+  economy.revenue = 0;
+  paused = false;
+  worldDay = 0;
+  simTime = 0;
+  setTimeScale(1);
+  stores.seed = SEED_PER_FIELD;
+  stores.fertilizer = START_FERTILIZER;
+  stores.spray = START_SPRAY;
+  nextLot = 1;
+  nextBuilding = 1;
+  for (const r of rigs) parkRig(r);
+  syncPotatoLive();
+  rebuildDemo();
+  assignIdleRigs();
 }
 export function buySeed(qty) {
   const item = SHOP.find(s => s.id === 'seed');

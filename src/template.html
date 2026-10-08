@@ -78,7 +78,12 @@ body.cutaway #layers .ly-grow,body.cutaway #layers .ly-equip{opacity:1}body.cuta
 #admin{top:98px;left:20px;display:none;flex-direction:column;gap:8px;padding:10px 12px;min-width:228px}
 #admin.on{display:flex}
 #admin .ah{display:flex;justify-content:space-between;font-size:10px;letter-spacing:.2em;color:var(--mut)}
-#admin.on ~ #stores{top:214px}
+#admin.on ~ #stores{top:268px}
+#admin .ask{display:none;margin:0;font-size:11px;letter-spacing:.06em;color:var(--mut);line-height:1.5}
+#admin #reset-go{display:none}
+#admin.on-reset .ask,#admin.on-reset #reset-go{display:flex}
+#admin.on-reset .ask{display:block}
+#admin.on-reset #reset-row{display:none}
 #rates{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 #rates input{width:72px;font-family:inherit;font-size:12px;color:var(--fg);background:transparent;border:1px solid var(--line);padding:3px 6px;letter-spacing:.06em}
 #stores{top:100px;left:22px;font-size:11px;letter-spacing:.12em;color:var(--mut);line-height:1.6}
@@ -136,7 +141,7 @@ body.cutaway #layers .ly-grow,body.cutaway #layers .ly-equip{opacity:1}body.cuta
 <div class="hud panel" id="rigread"></div>
 <div class="hud" id="clock"></div>
 <button type="button" class="hud hit" id="admin-toggle">管理</button>
-<div class="hud panel hit" id="admin"><div class="ah"><span>管理</span><span>F2</span></div><div id="rates"></div><div class="arow"><button type="button" id="pause">暂停</button><button type="button" id="assets-open">资产</button></div></div>
+<div class="hud panel hit" id="admin"><div class="ah"><span>管理</span><span>F2</span></div><div id="rates"></div><div class="arow"><button type="button" id="pause">暂停</button><button type="button" id="assets-open">资产</button></div><p class="ask" id="reset-ask">清空本机存档，回到开局？仓棚和仓库都会去掉。</p><div class="arow" id="reset-go"><button type="button" id="reset-yes">清空</button><button type="button" id="reset-no">留下</button></div><div class="arow" id="reset-row"><button type="button" id="reset">重开</button></div></div>
 <div class="hud" id="stores"></div>
 <div class="hud" id="fps"></div>
 <div class="hud panel" id="legend"></div>

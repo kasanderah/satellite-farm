@@ -11,7 +11,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { HorizontalTiltShiftShader } from 'three/addons/shaders/HorizontalTiltShiftShader.js';
 import { VerticalTiltShiftShader } from 'three/addons/shaders/VerticalTiltShiftShader.js';
-import { PALETTE, CROPS, TEX_ID, L, fields, harvesters, haulers, drones, step, TRUNKS_X, TRUNKS_Z, depots, inCrater, ROADS, RING, LAYERS, CUT, wrapX, PLOT, economy, focus, signals, log, plantField, quote, setTimeScale, setPaused, paused, exportSnapshot, applySnapshot, fieldAtWorld, fieldAt, simTime, worldDay, stores, rigs, fieldVisual, cropWatch, POTATO_DAYS, warehouse, buildings, sellLot, placeBuilding, rigReadout, SHOP, buySeed, SEED_PER_FIELD } from './_shared.js';
+import { PALETTE, CROPS, TEX_ID, L, fields, harvesters, haulers, drones, step, TRUNKS_X, TRUNKS_Z, depots, inCrater, ROADS, RING, LAYERS, CUT, wrapX, PLOT, economy, focus, signals, log, plantField, quote, setTimeScale, setPaused, paused, exportSnapshot, applySnapshot, fieldAtWorld, fieldAt, simTime, worldDay, stores, rigs, fieldVisual, cropWatch, POTATO_DAYS, warehouse, buildings, sellLot, placeBuilding, rigReadout, SHOP, buySeed, SEED_PER_FIELD, resetGame } from './_shared.js';
 import { NOISE, FARM, CURVE_DECL, CURVE_PROJECT } from './glsl.js';
 import { harvesterKit, haulerKit, droneKit, personKit, conveyorKit, depotKit, hubKit, plantGeometry, mastKit, irrigatorKit, growRackKit, tankKit, pumpKit, pipeRackKit, tractorKit, planterKit, hillerKit, topperKit, potatoLifterKit, shedKit } from './prefabs.js';
 
@@ -933,7 +933,7 @@ function toast(html) {
   setTimeout(() => d.remove(), 4800);
 }
 function doPlant(id) {
-  if (!selected?.owned || selected.state === 3) return { ok: false, reason: 'busy' };
+  if (!selected?.owned) { toast('不能播种'); return { ok: false, reason: 'plot' }; }
   const r = plantField(selected, id);
   if (!r.ok) {
     const why = r.reason === 'seed' ? '种薯不足' : r.reason === 'fertilizer' ? '肥料不足' : r.reason === 'busy' ? '这块田正在长' : '不能播种';
@@ -1265,6 +1265,8 @@ function updateDock() {
   let stat = selNote;
   if (!stat) {
     if (!f.owned) stat = '邻区快照 · 只读';
+    else if (stores.seed < SEED_PER_FIELD) stat = '种薯不足。打开商店买一份。';
+    else if (stores.fertilizer < 1 && !watch) stat = '肥料不足';
     else if (watch) stat = `中熟商品薯 · ${watch.label} · 播后 ${Math.floor(watch.day)} / ${watch.days} 日`;
     else if (f.state === 0) stat = '裸地 · 点种薯，播种机起垄';
     else stat = '定格冠层 · 可改种商品薯';
@@ -1273,10 +1275,9 @@ function updateDock() {
   $('selstat').textContent = stat;
   const p = watch ? Math.max(0, Math.min(1, watch.day / watch.days)) : 0;
   $('selbar').style.width = (p * 100).toFixed(1) + '%';
-  const busy = !f.owned || !!watch || f.state === 3 || stores.fertilizer < 1;
   document.querySelectorAll('#selbtns button').forEach(b => {
-    b.disabled = busy;
-    b.classList.toggle('on', !!watch);
+    b.disabled = !f.owned;
+    b.classList.toggle('on', !!watch && stores.seed >= SEED_PER_FIELD);
   });
 }
 function paintRates() {
@@ -1314,6 +1315,24 @@ function paintPause() {
   $('clock').textContent = paused ? `第 ${Math.floor(worldDay)} 日 · 暂停` : `第 ${Math.floor(worldDay)} 日`;
 }
 $('pause').addEventListener('click', () => { setPaused(!paused); paintPause(); });
+function askReset(on) { $('admin').classList.toggle('on-reset', on); }
+$('reset').addEventListener('click', () => askReset(true));
+$('reset-no').addEventListener('click', () => askReset(false));
+$('reset-yes').addEventListener('click', () => {
+  askReset(false);
+  resetGame();
+  try { localStorage.removeItem(SAVE_KEY); } catch (e) { /* private mode */ }
+  clearTimeout(saveSoon.t);
+  seenLog = 0;
+  shownRev = -1;
+  watchRig = null;
+  selectField(fieldAt(focus.i, focus.j), '');
+  showPlan();
+  paintKpi();
+  paintRates();
+  paintPause();
+  saveNow();
+});
 $('assets-open').addEventListener('click', () => { $('admin').classList.remove('on'); toggleViewer(); });
 paintPause();
 let viewerBuilt = false;
@@ -1562,7 +1581,7 @@ requestAnimationFrame(frame);
 addEventListener('resize', () => { cam.aspect = innerWidth / innerHeight; cam.updateProjectionMatrix(); R.setSize(innerWidth, innerHeight); composer.setSize(innerWidth, innerHeight); gtao.setSize(innerWidth, innerHeight); });
 window.__farm = {
   economy, stores, focus, fields, harvesters, rigs, log, CROPS, PLOT, quote, fieldAtWorld, project, pick: pickFlat,
-  warehouse, buildings, sellLot, placeBuilding, buySeed, shop: SHOP,
+  warehouse, buildings, sellLot, placeBuilding, buySeed, resetGame, shop: SHOP,
   snapshot: exportSnapshot, plant: doPlant, select: (i, j) => selectField(fieldAt(i, j)),
   setTimeScale, setPaused,
   get selected() { return selected; },
