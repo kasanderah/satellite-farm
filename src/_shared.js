@@ -532,8 +532,9 @@ export function exportSnapshot() {
 }
 function rebuildDemo() {
   harvesters.length = 0;
+  // 只把开局那一台演示收割机接回来。环上其余 state 3 是冻结的邻区画面，不能各配一台，否则信号点缓冲越界，整帧画不出来。
   for (const f of fields) {
-    if (f.state !== 3 || f.crop < 0 || CROPS[f.crop].id === 'potato') continue;
+    if (!f.demo || f.state !== 3 || f.crop < 0 || CROPS[f.crop].id === 'potato') continue;
     f.claimed = false;
     armCutter(f, 3, 48);
   }

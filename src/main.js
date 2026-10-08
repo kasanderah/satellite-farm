@@ -1471,7 +1471,7 @@ function frame(now) {
   setCount(harvSet, d < 1500 ? n : 0);
   for (const r of rigs) {
     const set = rigMesh[r.kind];
-    if (!set || d >= 1500 || inCut(r.x, r.z, 8)) { setCount(set, 0); continue; }
+    if (!set || d >= 1500 || inCut(r.x, r.z, 8)) { if (set) setCount(set, 0); continue; }
     r.va = r.va === undefined ? r.ang : r.va + Math.atan2(Math.sin(r.ang - r.va), Math.cos(r.ang - r.va)) * Math.min(1, dt * 8);
     setInst(set, 0, r.x, 0, r.z, r.va, r.kind === 'lifter' ? 1.45 : 2.4);
     setCount(set, 1);
@@ -1490,7 +1490,9 @@ function frame(now) {
   irrigs.forEach((ir, i) => { const f = ir.f, u = 8 + (Math.sin(t * 0.02 + ir.ph * 6.283) * 0.5 + 0.5) * (L.FIELD - 16); const [x, z] = f.dir === 0 ? [f.x0 + u, f.z0 + 64] : [f.x0 + 64, f.z0 + u]; setInst(irrSet, i, x, 0, z, f.dir === 0 ? 0 : Math.PI / 2); });
   setCount(irrSet, d < 2500 ? irrigs.length : 0);
   // 远景信号点
-  harvesters.forEach((h, i) => dotPos.set([h.x, 4, h.z], i * 3)); drones.forEach((dr, i) => dotPos.set([dr.x, dr.y, dr.z], (harvesters.length + i) * 3)); dotGeo.attributes.position.needsUpdate = true;
+  harvesters.forEach((h, i) => { if ((i + 1) * 3 <= dotPos.length) dotPos.set([h.x, 4, h.z], i * 3); });
+  drones.forEach((dr, i) => { const o = (harvesters.length + i) * 3; if (o + 3 <= dotPos.length) dotPos.set([dr.x, dr.y, dr.z], o); });
+  dotGeo.attributes.position.needsUpdate = true;
   // 尘土粒子
   for (let i = 0; i < DUSTN; i++) if (dustLife[i] > 0) { dustLife[i] -= dt * 0.55; dustPos[i * 3] += dustVel[i * 3] * dt; dustPos[i * 3 + 1] += dustVel[i * 3 + 1] * dt; dustPos[i * 3 + 2] += dustVel[i * 3 + 2] * dt; dustVel[i * 3 + 1] *= 0.98; if (dustLife[i] < 0) { dustLife[i] = 0; dustPos[i * 3 + 1] = -999; } }
   dustGeo.attributes.position.needsUpdate = true; dustGeo.attributes.life.needsUpdate = true;
