@@ -238,27 +238,25 @@ export function stageNum(day) {
   if (day < 114) return 5;
   return 6;
 }
-function passProgress(day, at) {
-  const dur = passWorldDays();
-  const u = day - at;
-  if (u < 0) return null;
-  if (u >= dur) return L.LANES;
-  return (u / dur) * L.LANES;
-}
-export function workFront(day) {
-  const jobs = [0, 20, 100, 114];
+const JOB_ORDER = ['planter', 'hiller', 'topper', 'lifter'];
+const ACT = { planter: '播种', hiller: '培土', topper: '杀秧', lifter: '起薯' };
+function blankJobs() { return { planter: 0, hiller: 0, topper: 0, lifter: 0 }; }
+function ensureJobs(f) { if (!f.jobS) f.jobS = blankJobs(); }
+// 田面上的作业前沿是这台机器真正走过的距离，不是钟点推出来的。没做完就停在那儿。
+function visualFront(f) {
+  const day = Math.max(0, worldDay - (f.plantedAt || 0));
+  ensureJobs(f);
   let front = 0;
-  for (const at of jobs) {
-    if (day < at) break;
-    const p = passProgress(day, at);
-    if (p != null) front = p;
+  for (const kind of JOB_ORDER) {
+    if (day < JOBS[kind].at) break;
+    front = f.jobS[kind];
   }
   return front;
 }
 export function fieldVisual(f) {
   if (f && f.live && !f.paid && f.crop >= 0 && CROPS[f.crop].id === 'potato') {
     const day = Math.max(0, worldDay - f.plantedAt);
-    if (day < POTATO_DAYS) return { crop: f.crop, g: stageNum(day) + 0.2, s: workFront(day), dir: f.dir };
+    if (day < POTATO_DAYS) return { crop: f.crop, g: stageNum(day) + 0.2, s: visualFront(f), dir: f.dir };
   }
   return { crop: f.crop, g: f.state === 0 ? 0 : f.g, s: (f.state === 3 || f.state === 4) ? f.s : 0, dir: f.dir };
 }
@@ -266,7 +264,7 @@ export function cropWatch(f) {
   if (!f?.live || f.paid || f.crop < 0 || CROPS[f.crop].id !== 'potato') return null;
   const day = Math.max(0, worldDay - f.plantedAt);
   const phase = potatoPhase(Math.min(day, POTATO_DAYS - 0.001));
-  return { day, phase, label: PHASE_LABEL[phase], front: workFront(day), days: POTATO_DAYS };
+  return { day, phase, label: PHASE_LABEL[phase], front: visualFront(f), days: POTATO_DAYS };
 }
 
 // 与 v3.1 相同次数的随机数，好让后面的运输车 / 无人机还落在原来的位置上
@@ -303,37 +301,183 @@ function armCutter(f, lane, u) {
   harvesters.push(h);
   return h;
 }
-function poseOn(f, s) {
-  const capped = Math.min(Math.max(s, 0), L.LANES - 0.001);
-  const lane = Math.floor(capped);
-  const frac = capped - lane;
-  const dirp = lane % 2 === 0;
-  const u = dirp ? frac * L.FIELD : (1 - frac) * L.FIELD;
-  const [x, z] = toWorld(f, u, laneV(lane));
+// 偶数行朝 +u，奇数行朝 −u。车头是模型的 +X，ang 0 朝世界 +X。
+function laneForward(f, dirp) {
   const along = dirp ? 0 : Math.PI;
-  const ang = f.dir === 0 ? along : (dirp ? Math.PI / 2 : -Math.PI / 2);
-  return { x, z, ang };
+  return f.dir === 0 ? along : (dirp ? Math.PI / 2 : -Math.PI / 2);
 }
-function placeRigs() {
-  const live = [];
-  for (const f of fields) if (f.live && !f.paid && f.crop >= 0 && CROPS[f.crop].id === 'potato') live.push(f);
+function workPose(f, lane, u) {
+  const [x, z] = toWorld(f, u, laneV(lane));
+  return { x, z, ang: laneForward(f, lane % 2 === 0) };
+}
+// 地头 U 形：从这一行的尽头绕到下一行，车头跟着弯道，结束时正对下一行。a 为 0–1。
+function headlandSample(f, lane, a) {
+  const dirp = lane % 2 === 0;
+  const radius = L.LANE / 2;
+  const sweep = Math.min(1, Math.max(0, a)) * Math.PI;
+  const bulge = dirp ? 1 : -1;
+  const u0 = dirp ? L.FIELD : 0;
+  const v0 = laneV(lane);
+  const cv = v0 + radius;
+  const u = u0 + bulge * Math.sin(sweep) * radius;
+  const v = cv - Math.cos(sweep) * radius;
+  const [x, z] = toWorld(f, u, v);
+  let heading;
+  if (a >= 1 - 1e-6) heading = laneForward(f, !dirp);
+  else if (a <= 1e-6) heading = laneForward(f, dirp);
+  else {
+    const du = bulge * Math.cos(sweep) * radius;
+    const dv = Math.sin(sweep) * radius;
+    const dx = f.dir === 0 ? du : dv;
+    const dz = f.dir === 0 ? dv : du;
+    heading = Math.atan2(dz, dx);
+  }
+  return { x, z, ang: heading };
+}
+const potatoLive = [];
+function syncPotatoLive() {
+  potatoLive.length = 0;
+  for (const f of fields) if (f.live && !f.paid && f.crop >= 0 && CROPS[f.crop].id === 'potato') potatoLive.push(f);
+}
+function trackPotato(f) { if (!potatoLive.includes(f)) potatoLive.push(f); }
+function dropPotato(f) {
+  const i = potatoLive.indexOf(f);
+  if (i >= 0) potatoLive.splice(i, 1);
+}
+function jobReady(f, kind) {
+  if (!f || !f.live || f.paid || f.crop < 0 || CROPS[f.crop].id !== 'potato') return false;
+  if (worldDay - f.plantedAt < JOBS[kind].at) return false;
+  ensureJobs(f);
+  return f.jobS[kind] < L.LANES - 1e-3;
+}
+function pickField(kind) {
+  let best = null;
+  for (const f of potatoLive) {
+    if (!jobReady(f, kind)) continue;
+    if (!best || f.plantedAt < best.plantedAt || (f.plantedAt === best.plantedAt && f.idx < best.idx)) best = f;
+  }
+  return best;
+}
+function parkRig(r) {
+  r.busy = false; r.f = null; r.mode = 'park';
+  r.x = r.parkX; r.z = r.parkZ; r.ang = -Math.PI / 2;
+}
+function beginJob(r, f) {
+  ensureJobs(f);
+  const s = Math.min(Math.max(f.jobS[r.kind], 0), L.LANES - 1e-4);
+  const lane = Math.floor(s);
+  const frac = s - lane;
+  const dirp = lane % 2 === 0;
+  r.f = f; r.busy = true; r.mode = 'work'; r.lane = lane;
+  r.u = dirp ? frac * L.FIELD : (1 - frac) * L.FIELD;
+  const pose = workPose(f, lane, r.u);
+  r.x = pose.x; r.z = pose.z; r.ang = pose.ang;
+}
+function startTravel(r, f) {
+  r.mode = 'travel'; r.f = f; r.busy = true;
+  const s = Math.min(Math.max(f.jobS[r.kind], 0), L.LANES - 1e-4);
+  const pose = workPose(f, Math.floor(s), (Math.floor(s) % 2 === 0)
+    ? (s - Math.floor(s)) * L.FIELD
+    : (1 - (s - Math.floor(s))) * L.FIELD);
+  r.tx = pose.x; r.tz = pose.z;
+}
+function assignIdleRigs() {
   for (const r of rigs) {
-    const spec = JOBS[r.kind];
-    const dur = passWorldDays();
-    let best = null, bestU = 1e9;
-    for (const f of live) {
-      const u = worldDay - f.plantedAt - spec.at;
-      if (u < 0 || u >= dur) continue;
-      if (u < bestU) { bestU = u; best = f; }
-    }
-    if (!best) { r.busy = false; r.f = null; r.x = r.parkX; r.z = r.parkZ; r.ang = -Math.PI / 2; continue; }
-    const pose = poseOn(best, ((worldDay - best.plantedAt - spec.at) / dur) * L.LANES);
-    r.busy = true; r.f = best; r.x = pose.x; r.z = pose.z; r.ang = pose.ang;
+    if (r.mode === 'work' || r.mode === 'turn' || r.mode === 'travel') continue;
+    const f = pickField(r.kind);
+    if (!f) { if (r.mode !== 'park') parkRig(r); continue; }
+    beginJob(r, f);
   }
 }
-function settlePotatoes() {
-  for (const f of fields) {
-    if (!f.live || f.paid || f.crop < 0 || CROPS[f.crop].id !== 'potato') continue;
+function finishPass(r) {
+  const f = r.f;
+  if (f?.jobS) f.jobS[r.kind] = L.LANES;
+  const nxt = pickField(r.kind);
+  if (!nxt) { parkRig(r); return; }
+  startTravel(r, nxt);
+}
+function stepWork(r, dt) {
+  const f = r.f;
+  if (!f || !f.live || f.paid) { parkRig(r); return; }
+  ensureJobs(f);
+  let rem = MACHINE_MPS * dt;
+  const dirp = r.lane % 2 === 0;
+  const dest = dirp ? L.FIELD : 0;
+  const room = Math.abs(dest - r.u);
+  if (rem < room - 1e-8) {
+    r.u += (dirp ? 1 : -1) * rem;
+    f.jobS[r.kind] = r.lane + (dirp ? r.u / L.FIELD : (L.FIELD - r.u) / L.FIELD);
+    const pose = workPose(f, r.lane, r.u);
+    r.x = pose.x; r.z = pose.z; r.ang = pose.ang;
+    return;
+  }
+  r.u = dest;
+  f.jobS[r.kind] = r.lane + 1;
+  rem -= room;
+  if (r.lane + 1 >= L.LANES) {
+    finishPass(r);
+    if (r.mode === 'travel' && rem > 0) stepTravel(r, rem / MACHINE_MPS);
+    return;
+  }
+  r.mode = 'turn'; r.turnDist = 0; r.turnLen = Math.PI * (L.LANE / 2);
+  const pose = headlandSample(f, r.lane, 0);
+  r.x = pose.x; r.z = pose.z; r.ang = pose.ang;
+  if (rem > 0) stepTurn(r, rem / MACHINE_MPS);
+}
+function stepTurn(r, dt) {
+  const f = r.f;
+  if (!f || !f.live || f.paid) { parkRig(r); return; }
+  let rem = MACHINE_MPS * dt;
+  const left = r.turnLen - r.turnDist;
+  if (rem < left - 1e-8) {
+    r.turnDist += rem;
+    const pose = headlandSample(f, r.lane, r.turnDist / r.turnLen);
+    r.x = pose.x; r.z = pose.z; r.ang = pose.ang;
+    return;
+  }
+  rem -= Math.max(0, left);
+  r.lane += 1;
+  const dirp = r.lane % 2 === 0;
+  r.u = dirp ? 0 : L.FIELD;
+  r.mode = 'work';
+  f.jobS[r.kind] = r.lane;
+  const pose = workPose(f, r.lane, r.u);
+  r.x = pose.x; r.z = pose.z; r.ang = pose.ang;
+  if (rem > 0) stepWork(r, rem / MACHINE_MPS);
+}
+function stepTravel(r, dt) {
+  const f = r.f;
+  if (!f || !jobReady(f, r.kind)) {
+    const nxt = pickField(r.kind);
+    if (!nxt) { parkRig(r); return; }
+    startTravel(r, nxt);
+  }
+  const dx = r.tx - r.x, dz = r.tz - r.z;
+  const dist = Math.hypot(dx, dz);
+  const step = MACHINE_MPS * dt;
+  if (dist < 1.25 || step >= dist - 1e-6) {
+    const extra = step > dist ? (step - dist) / MACHINE_MPS : 0;
+    beginJob(r, r.f);
+    if (extra > 0) stepWork(r, extra);
+    return;
+  }
+  r.x += dx / dist * step; r.z += dz / dist * step; r.ang = Math.atan2(dz, dx);
+}
+function stepRigs(dt) {
+  for (const r of rigs) {
+    if ((r.mode === 'work' || r.mode === 'turn') && r.f && (!r.f.live || r.f.paid)) parkRig(r);
+  }
+  assignIdleRigs();
+  for (const r of rigs) {
+    if (r.mode === 'work') stepWork(r, dt);
+    else if (r.mode === 'turn') stepTurn(r, dt);
+    else if (r.mode === 'travel') stepTravel(r, dt);
+  }
+}
+function settlePotatoCalendar() {
+  for (let i = potatoLive.length - 1; i >= 0; i--) {
+    const f = potatoLive[i];
+    if (!f.live || f.paid) { potatoLive.splice(i, 1); continue; }
     const day = worldDay - f.plantedAt;
     if (!f.sprayed && day >= JOBS.topper.at) {
       f.sprayed = true;
@@ -351,9 +495,21 @@ function settlePotatoes() {
       warehouse.push(lot);
       log.push({ type: 'store', pay: 0, listPrice: lot.listPrice, crop: crop.id, name: crop.name, i: f.i, j: f.j, t: worldDay });
       f.live = false; f.hold = true; f.state = 0; f.g = 0; f.s = 0; f.claimed = false;
+      potatoLive.splice(i, 1);
     }
   }
-  placeRigs();
+}
+export function rigReadout(r) {
+  if (!r) return null;
+  const moving = !paused && (r.mode === 'work' || r.mode === 'turn' || r.mode === 'travel');
+  const speed = moving ? MACHINE_MPS * economy.timeScale : 0;
+  let doing = '停在机库';
+  if (r.mode === 'turn') doing = '地头转弯';
+  else if (r.mode === 'travel') doing = '开往下一田';
+  else if (r.mode === 'work') doing = ACT[r.kind] || '作业';
+  let frac = 0;
+  if (r.f?.jobS && JOBS[r.kind]) frac = Math.max(0, Math.min(1, r.f.jobS[r.kind] / L.LANES));
+  return { speed, doing, frac };
 }
 
 // 镜头落在中枢旁一块可播种的裸地上。远处留一台不入账的收割机，近景镜头仍有机器可读。
@@ -372,7 +528,7 @@ function settlePotatoes() {
   if (maize) { maize.crop = CROPS.findIndex(c => c.id === 'maize'); maize.demo = true; armCutter(maize, 3, 48); }
   ['planter', 'hiller', 'topper', 'lifter'].forEach((kind, n) => {
     const x = 36 + n * 22, z = 176;
-    rigs.push({ id: n, kind, label: JOBS[kind].label, busy: false, f: null, parkX: x, parkZ: z, x, z, ang: -Math.PI / 2 });
+    rigs.push({ id: n, kind, label: JOBS[kind].label, busy: false, f: null, mode: 'park', lane: 0, u: 0, parkX: x, parkZ: z, x, z, ang: -Math.PI / 2 });
   });
   for (const f of fields) {
     if (signals.length >= 56) break;
@@ -463,12 +619,16 @@ export function stepHarvesters(dt) {
         else { h.mode = 'turn'; h.turnT = 0; }
       }
     } else if (h.mode === 'turn') {
-      // 在田头路上做半径 = 半个作业带宽度的 U 形掉头
+      // 地头 U 形掉头。结束时车头对准下一行，不停在横着或倒着的角度上。
       h.turnT += dt * SIM.CUT / (Math.PI * L.LANE / 2);
-      const a = Math.min(1, h.turnT) * Math.PI, r = L.LANE / 2, cu = dirp ? L.FIELD + L.ROAD / 2 : -L.ROAD / 2, cv = laneV(h.lane) + r;
-      const u = cu + (dirp ? 1 : -1) * Math.sin(a) * r * 0.55, v = cv - Math.cos(a) * r;
-      const [x, z] = toWorld(f, u, v); const nx = x - h.x, nz = z - h.z; if (Math.hypot(nx, nz) > 1e-4) h.ang = Math.atan2(nz, nx); h.x = x; h.z = z;
-      if (h.turnT >= 1) { h.lane++; h.mode = 'cut'; h.u = cu; }
+      const pose = headlandSample(f, h.lane, Math.min(1, h.turnT));
+      h.x = pose.x; h.z = pose.z; h.ang = pose.ang;
+      if (h.turnT >= 1) {
+        h.lane++; h.mode = 'cut';
+        const next = h.lane % 2 === 0;
+        h.u = next ? 0 : L.FIELD;
+        h.ang = laneForward(f, next);
+      }
     }
   }
 }
@@ -502,7 +662,9 @@ export function plantField(f, cropId) {
   f.crop = crop; f.state = 1; f.g = 0; f.s = 0; f.timer = 0;
   f.live = true; f.hold = false; f.frozen = false;
   f.plantedAt = worldDay; f.paid = false; f.sprayed = false; f.claimed = false;
-  placeRigs();
+  f.jobS = blankJobs();
+  trackPotato(f);
+  assignIdleRigs();
   return { ok: true, payout: quote(crop), name: CROPS[crop].name, day: worldDay };
 }
 export function exportSnapshot() {
@@ -522,6 +684,7 @@ export function exportSnapshot() {
       g: +f.g.toFixed(4), s: +f.s.toFixed(4), timer: +(+f.timer || 0).toFixed(3),
       growT: f.growT, live: !!f.live, hold: !!f.hold, plantedAt: f.plantedAt || 0,
       paid: !!f.paid, sprayed: !!f.sprayed,
+      jobs: f.jobS ? { planter: +f.jobS.planter || 0, hiller: +f.jobS.hiller || 0, topper: +f.jobS.topper || 0, lifter: +f.jobS.lifter || 0 } : undefined,
     })),
     harvesters: harvesters.map(h => ({
       id: h.id, mode: h.mode, lane: h.lane, u: +h.u.toFixed(2),
@@ -552,6 +715,12 @@ export function applySnapshot(data) {
     f.growT = s.growT || f.growT; f.live = !!s.live; f.hold = !!s.hold; f.plantedAt = s.plantedAt || 0;
     f.paid = !!s.paid; f.sprayed = !!s.sprayed;
     f.claimed = false; f.frozen = false; f.owned = true;
+    if (s.jobs) {
+      f.jobS = {
+        planter: +s.jobs.planter || 0, hiller: +s.jobs.hiller || 0,
+        topper: +s.jobs.topper || 0, lifter: +s.jobs.lifter || 0,
+      };
+    } else if (f.live) f.jobS = blankJobs();
   }
   economy.revenue = +data.revenue || 0;
   if (data.stores) {
@@ -573,7 +742,9 @@ export function applySnapshot(data) {
   worldDay = +(data.worldDay ?? data.simTime) || 0;
   simTime = worldDay;
   rebuildDemo();
-  placeRigs();
+  for (const r of rigs) parkRig(r);
+  syncPotatoLive();
+  assignIdleRigs();
   return true;
 }
 
@@ -603,12 +774,26 @@ export function stepDrones(t) {
 export function step(dt, t, scale = 1) {
   if (paused) { simTime = worldDay; return; }
   const sc = scale > 0 ? scale : 0;
-  const days = dt * sc / DAY_SECONDS;
-  worldDay += days;
-  simTime = worldDay;
+  const total = dt * sc;
+  const days = total / DAY_SECONDS;
+  const start = worldDay;
   stepFields(days);
-  settlePotatoes();
-  stepHarvesters(dt * sc);
+  // 窗口在这一步中间打开时，机器只走打开之后的那段路，不会把整步都算进去。
+  let used = 0;
+  const SLICE = 0.25;
+  if (total > 0) {
+    while (used < total - 1e-9) {
+      const slice = Math.min(SLICE, total - used);
+      used += slice;
+      worldDay = start + used / DAY_SECONDS;
+      simTime = worldDay;
+      settlePotatoCalendar();
+      stepRigs(slice);
+      stepHarvesters(slice);
+    }
+  }
+  worldDay = start + days;
+  simTime = worldDay;
   stepHaulers(dt);
   stepDrones(t);
 }

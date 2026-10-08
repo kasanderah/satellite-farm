@@ -110,6 +110,13 @@ body.cutaway #layers .ly-grow,body.cutaway #layers .ly-equip{opacity:1}body.cuta
 #dock button.on,#rates button.on,#admin .arow button.on,#sheet .rowbtn.on{border-color:var(--sig);color:var(--sig)}
 #sheet .sell{margin-top:8px;padding:6px 10px;width:100%}
 #sheet .sell:disabled{opacity:.35;cursor:default}
+#rigread{top:18px;left:50%;transform:translateX(-50%);display:none;padding:8px 14px 9px;min-width:176px}
+#rigread.on{display:block}
+#rigread b{display:block;font-weight:500;font-size:13px;letter-spacing:.16em}
+#rigread small{display:block;color:var(--mut);font-size:11px;letter-spacing:.08em;margin-top:3px}
+#rigread em{font-style:normal;color:var(--sig)}
+#rigbar{height:3px;margin-top:6px;background:rgba(232,216,208,.18)}
+#rigbar i{display:block;height:100%;width:0;background:var(--sig)}
 #dock button:disabled{opacity:.35;cursor:default}
 #bar{height:3px;margin-top:8px;background:rgba(232,216,208,.18)}
 #bar i{display:block;height:100%;width:0;background:var(--sig)}
@@ -123,6 +130,7 @@ body.cutaway #layers .ly-grow,body.cutaway #layers .ly-equip{opacity:1}body.cuta
 <div id="labels"></div>
 <div class="hud panel" id="brand"><div class="mk"></div><div><b>环穗</b><small>Ringsheaf</small></div></div>
 <div class="hud panel" id="kpi"></div>
+<div class="hud panel" id="rigread"></div>
 <div class="hud" id="clock"></div>
 <button type="button" class="hud hit" id="admin-toggle">管理</button>
 <div class="hud panel hit" id="admin"><div class="ah"><span>管理</span><span>F2</span></div><div id="rates"></div><div class="arow"><button type="button" id="pause">暂停</button><button type="button" id="assets-open">资产</button></div></div>

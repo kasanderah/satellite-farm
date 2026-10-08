@@ -4,7 +4,7 @@ import {
   CROPS, L, PLOT, FIELD_HA, fields, fieldAt, fieldAtWorld, focus, rigs,
   plantField, step, economy, quote, log, exportSnapshot, applySnapshot, RING,
   stores, worldDay, cropWatch, fieldVisual, setPaused, setTimeScale,
-  DAY_SECONDS, MACHINE_MPS, warehouse, sellLot, placeBuilding, buildings,
+  DAY_SECONDS, MACHINE_MPS, warehouse, sellLot, placeBuilding, buildings, rigReadout,
 } from '../src/_shared.js';
 
 test('one colonist plot is about 4 km on the ring', () => {
@@ -56,8 +56,10 @@ test('a potato follows one 120-day clock through ridges, vines, vine-kill, and p
   assert.equal(rigs.find(r => r.kind === 'planter').busy, true);
   const days = (n, scale = 1) => step(n * DAY_SECONDS, 0, scale);
   step(50, 0, 1);
-  const edge = 50 * MACHINE_MPS / L.FIELD;
-  assert.ok(Math.abs(fieldVisual(bare).s - edge) < 0.05, 'one edge takes about 50 real seconds at 1×');
+  const planterNow = rigs.find(r => r.kind === 'planter');
+  assert.equal(planterNow.mode, 'turn', 'the first headland turn is underway just after one edge');
+  assert.equal(planterNow.f, bare);
+  assert.ok(Math.abs(fieldVisual(bare).s - 1) < 0.05, 'one 128 m edge is done at about 50 real seconds, and the turn does not skip the next lane');
   assert.equal(cropWatch(bare).phase, 'plant');
   days(3 - cropWatch(bare).day);
   assert.equal(cropWatch(bare).phase, 'plant');
@@ -135,4 +137,76 @@ test('a potato follows one 120-day clock through ridges, vines, vine-kill, and p
   assert.equal(economy.timeScale, 2.5);
   assert.equal(fieldAt(bare.i, bare.j).state, 0);
   assert.equal(applySnapshot({ schema: 2, plotId: 'other', fields: [] }), false);
+});
+
+test('a working machine stays on its field, and the next machine starts from that field’s own progress', () => {
+  setTimeScale(1);
+  setPaused(false);
+  stores.seed = 6;
+  stores.fertilizer = 6;
+  const a = fieldAt(focus.i, focus.j);
+  const b = fields.find(f => f.owned && f !== a && !f.live && f.state !== 3);
+  assert.ok(b, 'a second plot field');
+  assert.equal(plantField(a, 'potato').ok, true);
+  const planter = rigs.find(r => r.kind === 'planter');
+  const laneTime = L.FIELD / MACHINE_MPS;
+  const turnTime = Math.PI * (L.LANE / 2) / MACHINE_MPS;
+  const along = a.dir === 0 ? [1, 0] : [0, 1];
+  const across = a.dir === 0 ? [0, 1] : [1, 0];
+  const head = (ang, v) => Math.cos(ang) * v[0] + Math.sin(ang) * v[1];
+  step(laneTime - 0.15, 0, 1);
+  assert.equal(planter.mode, 'work');
+  assert.equal(planter.lane, 0);
+  assert.ok(head(planter.ang, along) > 0.98, 'still facing down the first lane');
+  const first = [];
+  for (let i = 0; i < 30 && !(planter.mode === 'work' && planter.lane === 1); i++) {
+    step(turnTime / 12, 0, 1);
+    if (planter.mode === 'turn') first.push(planter.ang);
+  }
+  assert.ok(first.length > 4, 'the headland turn is visible');
+  assert.equal(planter.lane, 1);
+  assert.ok(head(planter.ang, [-along[0], -along[1]]) > 0.98, 'the turn ends facing down the next lane');
+  const mid = first[Math.floor(first.length / 2)];
+  assert.ok(head(mid, across) > 0.5, `mid-turn noses toward the next lane (${head(mid, across)})`);
+  step(Math.max(0, laneTime - 1), 0, 1);
+  const second = [];
+  for (let i = 0; i < 30 && !(planter.mode === 'work' && planter.lane === 2); i++) {
+    step(turnTime / 12, 0, 1);
+    if (planter.mode === 'turn') second.push(planter.ang);
+  }
+  assert.equal(planter.lane, 2);
+  assert.ok(head(planter.ang, along) > 0.98, 'the return turn also ends facing the next lane');
+  const mid2 = second[Math.floor(second.length / 2)];
+  assert.ok(head(mid2, across) > 0.5, `return turn noses toward the next lane (${head(mid2, across)})`);
+  step(laneTime * 3, 0, 1);
+  const progressed = a.jobS.planter;
+  assert.ok(progressed > 3 && progressed < 8, progressed);
+  assert.equal(planter.f, a);
+  assert.equal(plantField(b, 'potato').ok, true);
+  assert.equal(planter.f, a, 'planting a second field does not pull the machine off');
+  assert.ok(Math.abs(a.jobS.planter - progressed) < 0.02, 'the current step is not marked done');
+  assert.equal(b.jobS.planter, 0, 'the new field does not inherit the other field’s progress');
+  planter.mode = 'park';
+  planter.f = null;
+  planter.busy = false;
+  const held = a.jobS.planter;
+  step(0.05, 0, 1);
+  assert.equal(planter.f, a, 'the machine comes back to the unfinished field');
+  assert.ok(a.jobS.planter < L.LANES - 0.5, 'leaving early does not complete the step');
+  assert.ok(Math.abs(a.jobS.planter - held) < 0.05, 'it resumes from the stored progress');
+  let guard = 0;
+  while (a.jobS.planter < L.LANES - 0.01 && guard < 500) { step(2, 0, 1); guard++; }
+  assert.ok(a.jobS.planter >= L.LANES - 0.01, a.jobS.planter);
+  assert.ok(planter.f === b, 'after the pass it takes the next field');
+  assert.ok(b.jobS.planter < 0.35, b.jobS.planter);
+  const hiller = rigs.find(r => r.kind === 'hiller');
+  const wait = (a.plantedAt + 20) - worldDay;
+  assert.ok(wait > 1, wait);
+  step(wait * DAY_SECONDS, 0, 1);
+  assert.equal(hiller.f, a, 'the hiller starts on the older field');
+  assert.ok(a.jobS.hiller < 0.05, a.jobS.hiller);
+  const read = rigReadout(hiller);
+  assert.ok(read.speed > 2 && read.speed < 3, read.speed);
+  assert.equal(read.doing, '培土');
+  assert.ok(read.frac < 0.05, read.frac);
 });

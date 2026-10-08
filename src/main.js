@@ -11,7 +11,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { HorizontalTiltShiftShader } from 'three/addons/shaders/HorizontalTiltShiftShader.js';
 import { VerticalTiltShiftShader } from 'three/addons/shaders/VerticalTiltShiftShader.js';
-import { PALETTE, CROPS, TEX_ID, L, fields, harvesters, haulers, drones, step, TRUNKS_X, TRUNKS_Z, depots, inCrater, ROADS, RING, LAYERS, CUT, wrapX, PLOT, economy, focus, signals, log, plantField, quote, setTimeScale, setPaused, paused, exportSnapshot, applySnapshot, fieldAtWorld, fieldAt, simTime, worldDay, stores, rigs, fieldVisual, cropWatch, POTATO_DAYS, warehouse, buildings, sellLot, placeBuilding } from './_shared.js';
+import { PALETTE, CROPS, TEX_ID, L, fields, harvesters, haulers, drones, step, TRUNKS_X, TRUNKS_Z, depots, inCrater, ROADS, RING, LAYERS, CUT, wrapX, PLOT, economy, focus, signals, log, plantField, quote, setTimeScale, setPaused, paused, exportSnapshot, applySnapshot, fieldAtWorld, fieldAt, simTime, worldDay, stores, rigs, fieldVisual, cropWatch, POTATO_DAYS, warehouse, buildings, sellLot, placeBuilding, rigReadout } from './_shared.js';
 import { NOISE, FARM, CURVE_DECL, CURVE_PROJECT } from './glsl.js';
 import { harvesterKit, haulerKit, droneKit, personKit, conveyorKit, depotKit, hubKit, plantGeometry, mastKit, irrigatorKit, growRackKit, tankKit, pumpKit, pipeRackKit, tractorKit, planterKit, hillerKit, topperKit, potatoLifterKit, shedKit } from './prefabs.js';
 
@@ -1033,9 +1033,20 @@ $('tiers').innerHTML = MODES.map(([id, zh, en]) => `<button type="button" data-m
 function gotoTier(n) { camT.d = [4800, 900, 160, 34][n - 1]; camT.pOff = 0; camT.lookUp = 0; camT.fovAdd = 0; }
 function fieldCode(f) { return `F-${String(f.i).padStart(3, '0')}${String(f.j).padStart(2, '0')}`; }
 function rigLine(r) {
+  const info = rigReadout(r);
   if (!r.busy || !r.f) return '停在机库';
-  const watch = cropWatch(r.f);
-  return `正在 ${fieldCode(r.f)} · ${watch ? watch.label : '作业'}`;
+  return `${info.doing} · ${fieldCode(r.f)} · ${Math.round(info.frac * 100)}%`;
+}
+function paintLock() {
+  const el = $('rigread');
+  if (!el) return;
+  if (!watchRig) { el.classList.remove('on'); return; }
+  const r = watchRig;
+  const info = rigReadout(r);
+  const pct = Math.round(info.frac * 100);
+  const where = r.f ? fieldCode(r.f) : '';
+  el.classList.add('on');
+  el.innerHTML = `<b>${r.label}</b><small><em>${info.speed.toFixed(1)}</em> m/s</small><small>${info.doing}${where ? ' · ' + where : ''}</small><div id="rigbar"><i style="width:${pct}%"></i></div><small>本趟 ${pct}%</small>`;
 }
 function showPlan() {
   watchRig = null;
@@ -1516,6 +1527,7 @@ function frame(now) {
   updateLabels(d);
   paintKpi();
   updateDock();
+  paintLock();
   if (selected && selected.crop >= 0) { U.uSelOn.value = 1; U.uSel.value.set(selected.x0, selected.x0 + L.FIELD, selected.z0, selected.z0 + L.FIELD); }
   else U.uSelOn.value = 0;
   drainLog();
@@ -1541,6 +1553,13 @@ window.__farm = {
   get mode() { return mode; },
   get camera() { return { x: camS.x, z: camS.z, d: camS.d }; },
   watch: () => cropWatch(selected),
+  lock(id) { setMode('machines'); lockRig(id); paintLock(); },
+  aim(yawDeg, dist, pitch) {
+    if (yawDeg != null) camT.yaw = camS.yaw = yawDeg * DEG;
+    if (dist != null) camT.d = camS.d = dist;
+    if (pitch != null) camT.pOff = camS.pOff = pitch * DEG;
+  },
+  get locked() { return watchRig; },
   advance(seconds, scale = economy.timeScale) {
     const n = Math.max(1, Math.round(seconds / 0.05));
     for (let i = 0; i < n; i++) step(seconds / n, t, scale);
