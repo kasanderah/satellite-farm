@@ -178,11 +178,14 @@ export const toWorld = (f, u, v) => f.dir === 0 ? [f.x0 + u, f.z0 + v] : [f.x0 +
 
 // ---------- ⑦ 玩家田区：一口世界钟上的中熟商品薯 ----------
 // 1× = 每个真实秒 1 个世界日。播种到起薯共 120 个世界日。流速只乘这口钟。
-// 播种机、培土机、杀秧机、收获机的作业窗口也按世界日计，不单独瞬间长成。
-export const SIM = { CUT: 80, MOVE: 75, STUBBLE: 8, TILL: 0 };
+// 机器走过一块田的速度是原先的五分之一。作物阶段仍按世界日，不跟着机器变慢。
+export const SIM = { CUT: 16, MOVE: 15, STUBBLE: 8, TILL: 0 };
+export const MACHINE_SPEED = 0.2;
 export const POTATO_DAYS = 120;
 export const economy = { revenue: 0, timeScale: 1 };
 export const stores = { seed: 6, fertilizer: 6, spray: 6 };
+export let paused = false;
+export function setPaused(v) { paused = !!v; }
 export let simTime = 0;
 export let worldDay = 0;
 export const log = [];
@@ -221,16 +224,22 @@ export function stageNum(day) {
   if (day < 114) return 5;
   return 6;
 }
+function passProgress(day, at, span) {
+  const dur = span / MACHINE_SPEED;
+  const u = day - at;
+  if (u < 0) return null;
+  if (u >= dur) return L.LANES;
+  return (u / dur) * L.LANES;
+}
 export function workFront(day) {
-  const span = (a, b) => Math.max(0, Math.min(1, (day - a) / (b - a))) * L.LANES;
-  if (day < 6) return span(0, 6);
-  if (day < 20) return L.LANES;
-  if (day < 26) return span(20, 26);
-  if (day < 100) return L.LANES;
-  if (day < 106) return span(100, 106);
-  if (day < 114) return L.LANES;
-  if (day < 120) return span(114, 120);
-  return L.LANES;
+  const jobs = [[0, 6], [20, 6], [100, 6], [114, 6]];
+  let front = 0;
+  for (const [at, span] of jobs) {
+    if (day < at) break;
+    const p = passProgress(day, at, span);
+    if (p != null) front = p;
+  }
+  return front;
 }
 export function fieldVisual(f) {
   if (f && f.live && !f.paid && f.crop >= 0 && CROPS[f.crop].id === 'potato') {
@@ -296,14 +305,15 @@ function placeRigs() {
   for (const f of fields) if (f.live && !f.paid && f.crop >= 0 && CROPS[f.crop].id === 'potato') live.push(f);
   for (const r of rigs) {
     const spec = JOBS[r.kind];
+    const dur = spec.span / MACHINE_SPEED;
     let best = null, bestU = 1e9;
     for (const f of live) {
       const u = worldDay - f.plantedAt - spec.at;
-      if (u < 0 || u >= spec.span) continue;
+      if (u < 0 || u >= dur) continue;
       if (u < bestU) { bestU = u; best = f; }
     }
     if (!best) { r.busy = false; r.f = null; r.x = r.parkX; r.z = r.parkZ; r.ang = -Math.PI / 2; continue; }
-    const pose = poseOn(best, workFront(worldDay - best.plantedAt));
+    const pose = poseOn(best, ((worldDay - best.plantedAt - spec.at) / dur) * L.LANES);
     r.busy = true; r.f = best; r.x = pose.x; r.z = pose.z; r.ang = pose.ang;
   }
 }
@@ -540,6 +550,7 @@ export function stepDrones(t) {
   for (const d of drones) { const a = t * d.sp + d.ph; d.x = d.cx + Math.cos(a) * d.R; d.z = d.cz + Math.sin(a * 2) * d.R * 0.5; d.y = d.h + Math.sin(t * 1.3 + d.ph) * 0.8; d.ang = Math.atan2(Math.cos(a * 2) * d.R, -Math.sin(a) * d.R); }
 }
 export function step(dt, t, scale = 1) {
+  if (paused) { simTime = worldDay; return; }
   const days = dt * (scale > 0 ? scale : 0);
   worldDay += days;
   simTime = worldDay;

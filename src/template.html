@@ -63,11 +63,30 @@ body.cutaway #layers .ly-grow,body.cutaway #layers .ly-equip{opacity:1}body.cuta
 .lbl.veh{margin:-34px 0 0 10px;padding:2px 8px;border-left:1px solid var(--sig);background:var(--void)}
 .lbl.veh span{color:var(--sig);margin-left:8px}
 .hit{pointer-events:auto}
-#rates{top:78px;left:20px;display:flex;align-items:center;gap:6px;padding:6px 8px 6px 12px}
-#stores{top:118px;left:22px;font-size:11px;letter-spacing:.12em;color:var(--mut);line-height:1.6}
+#admin-toggle{top:78px;left:22px;font-family:inherit;font-size:10px;letter-spacing:.22em;color:var(--mut);background:transparent;border:0;cursor:pointer;padding:0}
+#admin-toggle:hover{color:var(--fg)}
+#admin{top:98px;left:20px;display:none;flex-direction:column;gap:8px;padding:10px 12px;min-width:228px}
+#admin.on{display:flex}
+#admin .ah{display:flex;justify-content:space-between;font-size:10px;letter-spacing:.2em;color:var(--mut)}
+#admin.on ~ #stores{top:214px}
+#rates{display:flex;align-items:center;gap:6px}
+#stores{top:100px;left:22px;font-size:11px;letter-spacing:.12em;color:var(--mut);line-height:1.6}
 #rates span{font-size:10px;letter-spacing:.22em;color:var(--mut)}
-#rates button,#dock button{font-family:inherit;color:var(--fg);background:transparent;border:1px solid var(--line);cursor:pointer;letter-spacing:.08em}
-#rates button{padding:3px 8px;font-size:12px}
+#rates button,#dock button,#admin .arow button,#viewer .bar button,#viewer .card{font-family:inherit;color:var(--fg);background:transparent;border:1px solid var(--line);cursor:pointer;letter-spacing:.08em}
+#rates button,#admin .arow button{padding:3px 8px;font-size:12px}
+#admin .arow{display:flex;gap:6px}
+#viewer{position:fixed;inset:0;z-index:8;display:none;overflow:auto;padding:28px 32px 64px;background:rgba(10,12,20,.9);color:var(--fg)}
+#viewer.on{display:block}
+#viewer .bar{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:8px}
+#viewer h2{margin:0;font-weight:500;font-size:16px;letter-spacing:.28em}
+#viewer .sub{color:var(--mut);font-size:12px;letter-spacing:.08em;margin-top:6px;line-height:1.6}
+#viewer .sec{font-size:10px;letter-spacing:.22em;color:var(--mut);margin:18px 0 8px}
+#viewer .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}
+#viewer .card{display:block;width:100%;text-align:left;padding:8px;background:rgba(10,12,20,.55)}
+#viewer .card b{display:block;font-weight:500;font-size:13px;letter-spacing:.12em;margin-bottom:6px}
+#viewer canvas{width:100%;height:132px;display:block;background:#12141c}
+#viewer .card.on{border-color:var(--sig)}
+#viewer .bar button{padding:4px 12px}
 #dock{left:20px;bottom:198px;padding:10px 12px 12px;width:300px;display:none}
 #dock.on{display:block}
 #dock .who{display:flex;flex-direction:column;gap:3px;font-size:12px;letter-spacing:.1em}
@@ -76,8 +95,8 @@ body.cutaway #layers .ly-grow,body.cutaway #layers .ly-equip{opacity:1}body.cuta
 #dock button{padding:6px 8px 5px}
 #dock button b{display:block;font-weight:500;font-size:13px;letter-spacing:.12em}
 #dock button small{display:block;color:var(--mut);font-size:10px;letter-spacing:.04em;margin-top:2px}
-#dock button:hover,#rates button:hover{border-color:var(--sig)}
-#dock button.on,#rates button.on{border-color:var(--sig);color:var(--sig)}
+#dock button:hover,#rates button:hover,#admin .arow button:hover{border-color:var(--sig)}
+#dock button.on,#rates button.on,#admin .arow button.on{border-color:var(--sig);color:var(--sig)}
 #dock button:disabled{opacity:.35;cursor:default}
 #bar{height:3px;margin-top:8px;background:rgba(232,216,208,.18)}
 #bar i{display:block;height:100%;width:0;background:var(--sig)}
@@ -92,7 +111,8 @@ body.cutaway #layers .ly-grow,body.cutaway #layers .ly-equip{opacity:1}body.cuta
 <div class="hud panel" id="brand"><div class="mk"></div><div><b>环穗</b><small>Ringsheaf</small></div></div>
 <div class="hud panel" id="kpi"></div>
 <div class="hud" id="clock"></div>
-<div class="hud panel hit" id="rates"></div>
+<button type="button" class="hud hit" id="admin-toggle">管理</button>
+<div class="hud panel hit" id="admin"><div class="ah"><span>管理</span><span>F2</span></div><div id="rates"></div><div class="arow"><button type="button" id="pause">暂停</button><button type="button" id="assets-open">资产</button></div></div>
 <div class="hud" id="stores"></div>
 <div class="hud" id="fps"></div>
 <div class="hud panel" id="legend"></div>
@@ -100,7 +120,8 @@ body.cutaway #layers .ly-grow,body.cutaway #layers .ly-equip{opacity:1}body.cuta
 <div class="hud panel" id="tiers"></div>
 <div class="hud panel hit" id="dock"></div>
 <div class="hud" id="toasts"></div>
-<div class="hud" id="hint">选中裸地，点种薯。播种起垄、出苗培土、封垄开花、杀秧，再起薯入仓<br>拖动 平移 · 右键 旋转 · 滚轮 缩放 · 1–4 层级 · C 剖面 · N 昼夜 · M 地图 · H 隐藏</div>
+<div class="hud" id="hint">选中裸地，点种薯。播种起垄、出苗培土、封垄开花、杀秧，再起薯入仓<br>拖动 平移 · 右键 旋转 · 滚轮 缩放 · 1–4 层级 · C 剖面 · N 昼夜 · M 地图 · H 隐藏 · F2 管理 · V 资产</div>
+<div id="viewer"><div class="bar"><div><h2>资产</h2><div class="sub">当前的薯田阶段、机器和田块。每张卡片是名字加上现在的样子。点一张就能指着它改。这是查看，不能上传。</div></div><button type="button" id="viewer-close">关闭</button></div><div class="sec">商品薯阶段</div><div class="grid" id="view-stages"></div><div class="sec">机器</div><div class="grid" id="view-machines"></div><div class="sec">田块</div><div class="grid" id="view-tiles"></div></div>
 <div class="hud" id="scale"><span id="scaletxt"></span><div id="scalebar"></div></div>
 <script>__BUNDLE__</script>
 </body></html>

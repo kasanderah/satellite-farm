@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   CROPS, L, PLOT, FIELD_HA, fields, fieldAt, fieldAtWorld, focus, rigs,
   plantField, step, economy, quote, log, exportSnapshot, applySnapshot, RING,
-  stores, worldDay, cropWatch, fieldVisual,
+  stores, worldDay, cropWatch, fieldVisual, setPaused,
 } from '../src/_shared.js';
 
 test('one colonist plot is about 4 km on the ring', () => {
@@ -55,7 +55,8 @@ test('a potato follows one 120-day clock through ridges, vines, vine-kill, and p
   assert.equal(rigs.find(r => r.kind === 'planter').busy, true);
   step(3, 0, 1);
   assert.equal(cropWatch(bare).phase, 'plant');
-  assert.ok(fieldVisual(bare).s > 2, 'ridges form behind the planter');
+  const front = fieldVisual(bare).s;
+  assert.ok(front > 0.7 && front < 1.4, 'planter crosses at one fifth of the old six-day pass');
   assert.ok(fieldVisual(bare).g < 2, 'still bare ridges, not a canopy');
   step(10, 0, 1);
   assert.equal(cropWatch(bare).phase, 'ridge');
@@ -92,6 +93,11 @@ test('a potato follows one 120-day clock through ridges, vines, vine-kill, and p
   const day = worldDay;
   step(2, 0, 4);
   assert.ok(Math.abs(worldDay - day - 8) < 1e-6, '4× moves the same world clock');
+  setPaused(true);
+  const held = worldDay;
+  step(3, 0, 12);
+  assert.equal(worldDay, held, 'pause holds the world clock');
+  setPaused(false);
   const snap = exportSnapshot();
   assert.equal(snap.schema, 2);
   assert.equal(snap.plotId, 'nongshen-viii/plot-01');

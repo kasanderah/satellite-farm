@@ -96,6 +96,11 @@ function tractorBase(k) {
     k.cyl('light', 0.24, 0.24, 0.34, [x, 0.52, s * 1.05], [Math.PI / 2, 0, 0], 'rego', 8);
   }
 }
+export function tractorKit() {
+  const k = new Kit();
+  tractorBase(k);
+  return k.build();
+}
 // 播种机：拖拉机拖着覆土起垄器，种薯落下后垄脊合上
 export function planterKit() {
   const k = new Kit();

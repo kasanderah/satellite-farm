@@ -11,9 +11,9 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { HorizontalTiltShiftShader } from 'three/addons/shaders/HorizontalTiltShiftShader.js';
 import { VerticalTiltShiftShader } from 'three/addons/shaders/VerticalTiltShiftShader.js';
-import { PALETTE, CROPS, TEX_ID, L, fields, harvesters, haulers, drones, step, TRUNKS_X, TRUNKS_Z, depots, inCrater, ROADS, RING, LAYERS, CUT, wrapX, PLOT, economy, focus, signals, log, plantField, quote, setTimeScale, exportSnapshot, applySnapshot, fieldAtWorld, fieldAt, simTime, worldDay, stores, rigs, fieldVisual, cropWatch, POTATO_DAYS } from './_shared.js';
+import { PALETTE, CROPS, TEX_ID, L, fields, harvesters, haulers, drones, step, TRUNKS_X, TRUNKS_Z, depots, inCrater, ROADS, RING, LAYERS, CUT, wrapX, PLOT, economy, focus, signals, log, plantField, quote, setTimeScale, setPaused, paused, exportSnapshot, applySnapshot, fieldAtWorld, fieldAt, simTime, worldDay, stores, rigs, fieldVisual, cropWatch, POTATO_DAYS } from './_shared.js';
 import { NOISE, FARM, CURVE_DECL, CURVE_PROJECT } from './glsl.js';
-import { harvesterKit, haulerKit, droneKit, personKit, conveyorKit, depotKit, hubKit, plantGeometry, mastKit, irrigatorKit, growRackKit, tankKit, pumpKit, pipeRackKit, planterKit, hillerKit, topperKit, potatoLifterKit } from './prefabs.js';
+import { harvesterKit, haulerKit, droneKit, personKit, conveyorKit, depotKit, hubKit, plantGeometry, mastKit, irrigatorKit, growRackKit, tankKit, pumpKit, pipeRackKit, tractorKit, planterKit, hillerKit, topperKit, potatoLifterKit } from './prefabs.js';
 
 const Q = new URLSearchParams(location.search);
 const VIEW = Q.get('view') || '', PREWARM = +Q.get('t') || 0, NOPOST = Q.has('nopost'), SHOWFPS = Q.has('fps');
@@ -301,59 +301,53 @@ vec3 farmAlbedo(vec2 p){
     bool cut = laneCut(uv, d.b);
     float patchy = (n1 - 0.5) * 0.12 + (n2 - 0.5) * 0.05;
     float pst = floor(g + 0.001);
-    if (pst >= 1.0 && tex == 2) {                    // 商品薯：16 m 垄，播放镜头里也能看见阶段
-      float rowP = 16.0;
-      float phP = across / rowP;
-      float visP = 1.0 - smoothstep(0.35, 0.85, fwidth(phP));
-      float profP = 0.5 + 0.5 * cos(6.2832 * phP);
-      float slopeP = -sin(6.2832 * phP);
+    if (pst >= 1.0 && tex == 2) {                    // 商品薯：与其它田块同一套行距和颗粒，只换阶段颜色
       bool worked = laneCut(uv, d.b);
-      vec3 soil = g_soil * (0.82 + 0.22 * profP * visP) * (1.0 + patchy);
-      vec3 shoot = mix(g_oliveDp, g_moss, 0.4);
-      vec3 canopy = mix(g_oliveDp, g_olive, 0.62);
-      vec3 flower = vec3(0.74, 0.62, 0.84);
-      float flk = smoothstep(0.78, 0.94, hash12(floor(uv * vec2(0.55, 0.85))));
-      float crest = smoothstep(0.42, 0.86, profP);
-      vec3 haulm = mix(g_soil, mix(g_ochre, g_rust, 0.5), 0.75);
-      haulm *= 0.84 + 0.16 * cos(uv.x * 2.6);
+      vec3 soil = g_soil * (0.78 + 0.1 * prof * rowVis) * (1. + patchy);
+      float cover = pst < 1.5 ? 0.0 : pst < 2.5 ? 0.22 : pst < 3.5 ? 0.72 : pst < 4.5 ? 0.84 : 0.0;
+      vec3 young = mix(g_oliveDp, g_moss, 0.35);
+      vec3 ripe = mix(g_oliveDp, g_olive, 0.55);
+      vec3 crop = mix(young, ripe, smoothstep(1.5, 3.5, pst)) * (1. + patchy * 1.4);
+      float w = mix(0.12, 0.6, cover);
+      vec3 gap = mix(soil, crop * 0.55, cover * 0.45);
+      float mask = smoothstep(1. - w - 0.12, 1. - w + 0.12, prof);
+      vec3 canopy = mix(mix(gap, crop, w), mix(gap, crop, mask), rowVis);
+      float al = uv.x / max(P.w, 0.05);
+      float nearF = 1. - smoothstep(0.22, 0.65, max(fwidth(al), fwidth(ph)));
+      float flk = smoothstep(0.72, 0.94, hash12(floor(vec2(al, ph))));
+      vec3 flower = vec3(0.73, 0.60, 0.82);
+      vec3 bloom = mix(canopy, flower, flk * nearF * 0.85 + 0.08 * (1. - nearF));
+      float lane = floor(uv.y / LANE), lv = mod(uv.y, LANE) - LANE * 0.5;
+      vec3 stub = mix(soil, mix(g_ochre, g_rust, 0.45), 0.62) * (1. + patchy);
+      stub *= mod(lane, 2.) < 0.5 ? 1.05 : 0.9;
+      float fine = 0.5 + 0.5 * cos(6.2832 * uv.y / 0.6);
+      float nearS = 1. - smoothstep(0.2, 0.55, fwidth(uv.y / 0.6));
+      stub *= 1. - 0.1 * fine * nearS;
+      vec2 rc = uv * vec2(2.2, 7.0);
+      float speck = smoothstep(0.62, 0.95, hash12(floor(rc)));
+      float swath = (1. - smoothstep(1.2, 3.4, abs(lv))) * (0.55 + 0.45 * n1);
+      stub = mix(stub, mix(g_ochre, g_rust, 0.35), clamp(mix(0.2, speck * 0.7 + swath * 0.45, nearS), 0., 0.75));
       if (pst < 1.5) {
-        vec3 soilTone = worked ? g_rego * 0.92 : g_soil * 0.78;
-        col = mix(soilTone, mix(soilTone * 0.72, soilTone * 1.22, profP), max(visP, worked ? 0.65 : 0.0));
-        gTilt = acrossW * slopeP * (worked ? 1.35 : 0.15) * max(visP, 0.35);
+        col = soil;
+        gTilt = acrossW * slope * (worked ? 0.85 : 0.35) * rowVis;
         gRough = 0.97;
-      } else if (pst < 2.5) {
-        vec3 shootTone = mix(g_soil, shoot, 0.62);
-        col = mix(shootTone, mix(g_soil, shoot, crest), max(visP, 0.35));
-        gTilt = acrossW * slopeP * (worked ? 1.3 : 0.9) * max(visP, 0.25);
-        canopyHere = true;
-      } else if (pst < 3.5) {
-        col = mix(canopy, mix(g_soil * 0.85, canopy, smoothstep(0.15, 0.7, profP)), visP);
-        gTilt = acrossW * slopeP * 0.45 * visP;
-        canopyHere = true;
-        gRough = 0.68;
       } else if (pst < 4.5) {
-        vec3 wash = mix(canopy, flower, 0.62);
-        col = mix(wash, mix(wash, flower, flk), max(visP, 0.25));
-        gTilt = acrossW * slopeP * 0.3 * visP;
+        col = pst < 3.5 ? canopy : bloom;
+        gTilt = acrossW * slope * (pst < 2.5 ? 0.85 : 0.55) * rowVis;
         canopyHere = true;
-        gRough = 0.64;
+        gRough = pst < 2.5 ? 0.9 : 0.68;
       } else if (pst < 5.5) {
-        vec3 vine = mix(canopy, flower, 0.5);
-        vec3 dead = mix(g_rust, g_ochre, 0.35);
         bool shredded = worked || d.b >= 9.5;
-        col = shredded ? mix(dead, dead * (0.82 + 0.18 * profP), max(visP, 0.4)) : vine;
-        if (!shredded) canopyHere = true;
-        gTilt = acrossW * slopeP * 0.28 * visP;
-        gRough = shredded ? 0.92 : 0.66;
+        if (shredded) { col = stub; gTilt = acrossW * slope * 0.35 * rowVis; gRough = 0.92; }
+        else { col = bloom; gTilt = acrossW * slope * 0.55 * rowVis; canopyHere = true; gRough = 0.66; }
       } else if (worked) {
-        vec3 opened = mix(g_straw, g_regoLt, 0.25);
-        float tub = smoothstep(0.62, 0.9, hash12(floor(uv * vec2(0.35, 0.45))));
-        col = mix(opened * 0.82, g_straw * 1.35, tub * 0.85);
-        gTilt = acrossW * slopeP * 0.12 * visP;
-        gRough = 0.9;
+        float tub = smoothstep(0.78, 0.96, hash12(floor(rc * 0.65)));
+        col = mix(soil * 1.05, g_straw * 1.15, mix(0.12, tub, nearS) * 0.9);
+        gTilt = acrossW * slope * 0.18 * rowVis;
+        gRough = 0.94;
       } else {
-        col = mix(g_rust, g_ochre, 0.35);
-        gTilt = acrossW * slopeP * 0.22 * visP;
+        col = stub;
+        gTilt = acrossW * slope * 0.28 * rowVis;
         gRough = 0.92;
       }
     } else if (cut) {                                       // 残茬：作业带一深一浅（收割方向不同），带车辙
@@ -960,6 +954,9 @@ addEventListener('keydown', e => {
   if (e.key === 'm' || e.key === 'M') mapT = mapT > 0.5 ? 0 : 1;
   if (e.key === 'h' || e.key === 'H') document.body.classList.toggle('nohud');
   if (e.key === 'c' || e.key === 'C') setCut(!cut.on, camT.x, camT.z);
+  if (e.key === 'F2' || e.key === '\\') { e.preventDefault(); toggleAdmin(); }
+  if (e.key === 'v' || e.key === 'V') toggleViewer();
+  if (e.key === 'Escape') { $('admin').classList.remove('on'); $('viewer').classList.remove('on'); }
   if ('1234'.includes(e.key)) gotoTier(+e.key);
 });
 addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
@@ -1167,6 +1164,130 @@ for (const c of CROPS) if (c.plantable) {
 $('rates').innerHTML = `<span>世界钟</span>` + [1, 4, 12].map(r => `<button type="button" data-rate="${r}">${r}×</button>`).join('');
 $('rates').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; setTimeScale(+b.dataset.rate); paintRates(); saveSoon(); });
 paintRates();
+function toggleAdmin() { $('admin').classList.toggle('on'); }
+$('admin-toggle').addEventListener('click', toggleAdmin);
+function paintPause() {
+  $('pause').textContent = paused ? '继续' : '暂停';
+  $('pause').classList.toggle('on', paused);
+  $('clock').textContent = paused ? `第 ${Math.floor(worldDay)} 日 · 暂停` : `第 ${Math.floor(worldDay)} 日`;
+}
+$('pause').addEventListener('click', () => { setPaused(!paused); paintPause(); });
+$('assets-open').addEventListener('click', () => { $('admin').classList.remove('on'); toggleViewer(); });
+paintPause();
+let viewerBuilt = false;
+const THW = 220, THH = 140;
+let thumbRT = null;
+function thumbTarget() {
+  if (!thumbRT) thumbRT = new THREE.WebGLRenderTarget(THW, THH, { type: THREE.UnsignedByteType, colorSpace: THREE.SRGBColorSpace });
+  return thumbRT;
+}
+function blitThumb(canvas) {
+  const buf = new Uint8Array(THW * THH * 4);
+  R.readRenderTargetPixels(thumbTarget(), 0, 0, THW, THH, buf);
+  const ctx = canvas.getContext('2d');
+  const img = ctx.createImageData(THW, THH);
+  for (let y = 0; y < THH; y++) img.data.set(buf.subarray((THH - 1 - y) * THW * 4, (THH - y) * THW * 4), y * THW * 4);
+  ctx.putImageData(img, 0, 0);
+}
+function shoot(cam, canvas, keep, prepare) {
+  const vis = scene.children.map(c => [c, c.visible]);
+  const curve = U.uCurve.value.clone();
+  const gpos = ground.position.clone();
+  const clear = R.getClearColor(new THREE.Color());
+  const alpha = R.getClearAlpha();
+  const target = R.getRenderTarget();
+  const shadows = R.shadowMap.enabled;
+  for (const c of scene.children) c.visible = keep.has(c);
+  R.shadowMap.enabled = false;
+  try {
+    if (prepare) prepare();
+    R.setRenderTarget(thumbTarget());
+    R.setClearColor(0x12141c, 1);
+    R.clear(true, true, true);
+    R.render(scene, cam);
+    blitThumb(canvas);
+  } finally {
+    for (const [c, v] of vis) c.visible = v;
+    U.uCurve.value.copy(curve);
+    ground.position.copy(gpos);
+    R.setClearColor(clear, alpha);
+    R.setRenderTarget(target);
+    R.shadowMap.enabled = shadows;
+  }
+}
+function shootField(f, canvas, poke) {
+  const o = (f.j * NFX + f.i) * 4;
+  const prev = poke ? fieldData.slice(o, o + 4) : null;
+  if (poke) {
+    fieldData[o] = poke.crop; fieldData[o + 1] = poke.g; fieldData[o + 2] = poke.s; fieldData[o + 3] = poke.dir;
+    fieldTex.needsUpdate = true;
+  }
+  const cx = f.x0 + L.FIELD * 0.5, cz = f.z0 + L.FIELD * 0.5;
+  const cam = new THREE.OrthographicCamera(-9, 9, 9 * THH / THW, -9 * THH / THW, 0.1, 90);
+  cam.position.set(cx, 28, cz); cam.up.set(0, 0, -1); cam.lookAt(cx, 0, cz);
+  shoot(cam, canvas, new Set([ground, sun, sun.target, hemi]), () => {
+    U.uCurve.value.set(cx, 0, RING.R);
+    ground.position.set(Math.round(cx / (RING.CIRC / 760)) * (RING.CIRC / 760), 0, 0);
+  });
+  if (prev) { fieldData.set(prev, o); fieldTex.needsUpdate = true; }
+}
+function shootMachine(builder, canvas) {
+  const group = new THREE.Group();
+  const kit = builder();
+  for (const k of ['light', 'dark', 'glass', 'emis']) if (kit[k]) group.add(new THREE.Mesh(kit[k], MAT[k]));
+  const box = new THREE.Box3().setFromObject(group);
+  const center = box.getCenter(new THREE.Vector3());
+  const size = box.getSize(new THREE.Vector3());
+  const ax = U.uCurve.value.x;
+  group.position.set(ax - center.x, -box.min.y, -center.z);
+  scene.add(group);
+  const look = new THREE.Vector3(ax, Math.max(size.y, 1) * 0.42, 0);
+  const dist = Math.max(size.x, size.y, size.z, 3.5) * 1.5;
+  const cam = new THREE.PerspectiveCamera(32, THW / THH, 0.05, 400);
+  cam.position.set(look.x + dist * 0.95, look.y + dist * 0.46, look.z + dist * 0.72);
+  cam.lookAt(look);
+  shoot(cam, canvas, new Set([group, sun, sun.target, hemi]));
+  scene.remove(group);
+  group.traverse(o => { if (o.geometry) o.geometry.dispose(); });
+}
+function assetCard(name) {
+  const el = document.createElement('button');
+  el.type = 'button'; el.className = 'card';
+  el.innerHTML = '<b></b><canvas width="220" height="140"></canvas>';
+  el.querySelector('b').textContent = name;
+  el.addEventListener('click', () => {
+    document.querySelectorAll('#viewer .card').forEach(c => c.classList.remove('on'));
+    el.classList.add('on');
+  });
+  return el;
+}
+function buildViewer() {
+  if (viewerBuilt) return;
+  for (const id of ['view-stages', 'view-machines', 'view-tiles']) $(id).replaceChildren();
+  const potato = CROPS.findIndex(c => c.id === 'potato');
+  const host = fieldAt(focus.i, focus.j);
+  for (const [name, g] of [['裸垄', 1.2], ['出苗', 2.2], ['封垄', 3.2], ['开花', 4.2], ['碎秧', 5.2], ['起薯', 6.2]]) {
+    const el = assetCard(name); $('view-stages').appendChild(el);
+    shootField(host, el.querySelector('canvas'), { crop: potato, g, s: L.LANES, dir: 0 });
+  }
+  for (const [name, kit] of [['拖拉机', tractorKit], ['播种机', planterKit], ['培土机', hillerKit], ['杀秧机', topperKit], ['收获机', potatoLifterKit]]) {
+    const el = assetCard(name); $('view-machines').appendChild(el);
+    shootMachine(kit, el.querySelector('canvas'));
+  }
+  const tileName = { drill: '条播田块', wide: '宽行田块', ridges: '垄作田块', paddy: '水田', beds: '菜畦' };
+  for (const tex of Object.keys(tileName)) {
+    const f = fields.find(ff => ff.crop >= 0 && CROPS[ff.crop].tex === tex && ff.g > 0.35 && ff.state !== 0 && ff.state !== 3);
+    if (!f) continue;
+    const el = assetCard(tileName[tex]); $('view-tiles').appendChild(el);
+    shootField(f, el.querySelector('canvas'));
+  }
+  viewerBuilt = true;
+}
+function toggleViewer() {
+  const open = $('viewer').classList.toggle('on');
+  if (open) buildViewer();
+}
+$('viewer-close').addEventListener('click', () => $('viewer').classList.remove('on'));
 if (!VIEW && !Q.has('fresh')) loadNow();
 if (!VIEW) selectField(fieldAt(focus.i, focus.j));
 addEventListener('beforeunload', saveNow);
@@ -1279,7 +1400,7 @@ function frame(now) {
   else U.uSelOn.value = 0;
   drainLog();
   if (frames === 0) {
-    $('clock').textContent = `第 ${Math.floor(worldDay)} 日 · ${economy.timeScale}×`;
+    $('clock').textContent = paused ? `第 ${Math.floor(worldDay)} 日 · 暂停` : `第 ${Math.floor(worldDay)} 日`;
     $('fps').textContent = `${fpsShow.toFixed(0)} FPS`;
   }
   window.__stats = { fps: fpsShow, t, sim: simTime, d, revenue: economy.revenue, g: selected && selected.g, state: selected && selected.state, plants: Object.values(plantMeshes).reduce((a, m) => a + (m.visible ? m.count : 0), 0), harvesters: harvesters.length, active: harvesters.filter(h => h.mode === 'cut').length, calls: R.info.render.calls, tris: R.info.render.triangles };
