@@ -1151,7 +1151,7 @@ function paintSheet() {
   } else if (mode === 'shop') {
     const rows = SHOP.map(item => `<button type="button" class="rowbtn${shopPick === item.id ? ' on' : ''}" data-shop="${item.id}"><b>${item.name}</b><small>${fmt(item.price)} · 库存 ${stores[item.id]}</small></button>`).join('');
     const item = SHOP.find(s => s.id === shopPick) || SHOP[0];
-    const use = item.id === 'seed' ? `种一块田用 ${SEED_PER_FIELD}。` : `种一块田用 ${FERT_PER_FIELD}。`;
+    const use = item.id === 'seed' ? `种一块田用 ${SEED_PER_FIELD}。` : item.id === 'fertilizer' ? `种一块田用 ${FERT_PER_FIELD}。` : '开一槽用 1。';
     el.innerHTML = `<div class="who"><b>商店</b><span>用营收买。商品薯和蛋白仍在仓库出售。</span></div>${rows}<p class="note">${use}</p><div class="buyline"><input id="shop-qty" class="qty" type="text" inputmode="numeric" value="1" aria-label="购买数量" autocomplete="off"><button type="button" class="sell" id="buy">购买</button></div>`;
     const qty = $('shop-qty');
     qty.addEventListener('focus', ev => ev.target.select());

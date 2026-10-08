@@ -195,6 +195,7 @@ export const FERT_PER_FIELD = 1;
 export const SHOP = [
   { id: 'seed', name: '种薯', price: 1800 },
   { id: 'fertilizer', name: '肥料', price: 900 },
+  { id: 'feed', name: '饲料', price: 800 },
 ];
 const START_FERTILIZER = FERT_PER_FIELD;
 const START_SPRAY = 6;

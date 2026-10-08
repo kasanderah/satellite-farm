@@ -22,7 +22,7 @@ Art cameras, same as the sample: `index.html?view=far`, `mid`, `near`, `cut`, `u
 
 The only crop in this slice is a mid-season ware potato (中熟商品薯). It takes **120 world days** from planting to harvest. Stages follow that clock. Clicking does not skip a stage. At 1×, the planter, hiller, haulm topper, and harvester move at about 2.8 m/s, so one 128 m field edge takes about 50 real seconds.
 
-The opening view sits on an empty field next to the hub. The salmon edge is the selected field. You start with one seed potato and one dose of fertilizer, enough for that first field, plus a vine-kill spray. The shop sells more 种薯 and 肥料. A new game also starts with feed for two protein cultures.
+The opening view sits on an empty field next to the hub. The salmon edge is the selected field. You start with one seed potato and one dose of fertilizer, enough for that first field, plus a vine-kill spray. The shop sells more 种薯, 肥料, and 饲料. A new game starts with feed for two protein cultures. More feed is the third shop row, at a placeholder price of 800.
 
 1. Click 中熟商品薯. That spends one seed potato and one fertilizer. A tractor-drawn planter drops the seed and closes the soil into ridges.
 2. The field stays bare ridges until emergence. Green shoots show on the ridges. A hiller then throws soil back onto the ridges.
@@ -40,11 +40,11 @@ The buttons along the bottom are the play modes:
 - **区域** returns to the field you are planting: select a field, then plant the potato. From the protein deck, 区域 brings you back up.
 - **仓库** is the store on the hub. Harvested potatoes and protein lots sit here. Select a lot and sell it to add that lot's listed price to 营收. Each row has a **牌价**. That number is a placeholder for a future market price. It does not change, and there is no price simulation.
 - **建设** places a functional building, and only on the hub parcel. A crop field refuses it. The opening hub already has a warehouse, a garage where the surface machines park, and a small processing shed. They use the same materials as the other structures.
-- **商店** sells 种薯 and 肥料. Buying spends 营收.
+- **商店** sells 种薯, 肥料, and 饲料. Buying spends 营收. 饲料 is 800. One culture spends one.
 
 ## Protein deck
 
-Press **C**, or click the grow row in the layers panel, to stand on the underground grow deck. **C** or **区域** comes back up. The deck is a second production, not a tractor loop: four culture tanks and one arm. Pick 蛴螬 or 黑水虻, start a tank (that spends one feed), send the arm to tend it, and harvest when the culture reaches its day on the same world clock. 蛴螬 takes 65 world days. 黑水虻 takes 13. The harvest is a protein lot in the warehouse, sold at its own 牌价. If the tank is already running, the line says so. If feed is gone, starting stops. The deck shows a set climate, 30°C and 70% humidity. That is a setpoint, not weather. The surface stays at its constant temperature.
+Press **C**, or click the grow row in the layers panel, to stand on the underground grow deck. **C** or **区域** comes back up. The deck is a second production, not a tractor loop: four culture tanks and one arm. Pick 蛴螬 or 黑水虻, start a tank (that spends one feed), send the arm to tend it, and harvest when the culture reaches its day on the same world clock. 蛴螬 takes 65 world days. 黑水虻 takes 13. The harvest is a protein lot in the warehouse, sold at its own 牌价. If the tank is already running, the line says so. If feed is gone, starting stops until you buy 饲料. The deck and the shop both show how much feed is left. The deck shows a set climate, 30°C and 70% humidity. That is a setpoint, not weather. The surface stays at its constant temperature.
 
 ## Admin
 

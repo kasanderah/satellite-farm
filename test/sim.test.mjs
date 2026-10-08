@@ -6,7 +6,7 @@ import {
   stores, worldDay, cropWatch, fieldVisual, setPaused, setTimeScale,
   DAY_SECONDS, MACHINE_MPS, warehouse, sellLot, placeBuilding, buildings, rigReadout,
   SHOP, buySeed, buyItem, SEED_PER_FIELD, resetGame, paused, onHubParcel,
-  CULTURES, startCulture, harvestCulture,
+  CULTURES, tanks, startCulture, harvestCulture,
 } from '../src/_shared.js';
 
 test('one colonist plot is about 4 km on the ring', () => {
@@ -218,7 +218,7 @@ test('a working machine stays on its field, and the next machine starts from tha
 });
 
 test('the shop sells seed potatoes, and an empty stock does not start a field', () => {
-  assert.equal(SHOP.length, 2);
+  assert.equal(SHOP.length, 3);
   assert.equal(SHOP[0].name, '种薯');
   assert.equal(SHOP[0].id, 'seed');
   const price = SHOP[0].price;
@@ -226,6 +226,9 @@ test('the shop sells seed potatoes, and an empty stock does not start a field', 
   const fert = SHOP.find(s => s.id === 'fertilizer');
   assert.equal(fert.name, '肥料');
   assert.equal(fert.price, 900);
+  const feedItem = SHOP.find(s => s.id === 'feed');
+  assert.equal(feedItem.name, '饲料');
+  assert.equal(feedItem.price, 800);
   assert.equal(SEED_PER_FIELD, 1);
   economy.revenue = 0;
   const broke = buySeed(1);
@@ -353,4 +356,22 @@ test('a protein culture advances on the world clock and sells from the warehouse
   const grub = harvestCulture(1);
   assert.equal(grub.ok, true);
   assert.equal(grub.lot.name, '蛴螬');
+});
+
+test('feed can be bought and then used to start a culture', () => {
+  const empty = tanks.findIndex(t => !t.species);
+  assert.ok(empty >= 0);
+  stores.feed = 0;
+  economy.revenue = 0;
+  assert.equal(startCulture(empty, 'bsf').reason, 'feed');
+  assert.equal(buyItem('feed', 1).reason, 'money');
+  assert.equal(stores.feed, 0);
+  const price = SHOP.find(s => s.id === 'feed').price;
+  economy.revenue = price;
+  const bought = buyItem('feed', 1);
+  assert.equal(bought.ok, true);
+  assert.equal(bought.stock, 1);
+  assert.equal(economy.revenue, 0);
+  assert.equal(startCulture(empty, 'grub').ok, true);
+  assert.equal(stores.feed, 0);
 });
