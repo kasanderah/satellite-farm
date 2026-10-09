@@ -11,7 +11,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { HorizontalTiltShiftShader } from 'three/addons/shaders/HorizontalTiltShiftShader.js';
 import { VerticalTiltShiftShader } from 'three/addons/shaders/VerticalTiltShiftShader.js';
-import { PALETTE, CROPS, TEX_ID, L, fields, harvesters, haulers, drones, step, TRUNKS_X, TRUNKS_Z, depots, inCrater, ROADS, RING, LAYERS, CUT, wrapX, PLOT, economy, focus, signals, log, plantField, quote, setTimeScale, setPaused, paused, exportSnapshot, applySnapshot, fieldAtWorld, fieldAt, fieldOrigin, simTime, worldDay, stores, rigs, fieldVisual, cropWatch, POTATO_DAYS, warehouse, buildings, sellLot, placeBuilding, removeBuilding, rigReadout, SHOP, buySeed, buyItem, SEED_PER_FIELD, FERT_PER_FIELD, resetGame, CULTURES, DECK_CLIMATE, tanks, cultureWatch, startCulture, tendCulture, harvestCulture, BUILDING_KINDS } from './_shared.js';
+import { PALETTE, CROPS, TEX_ID, L, fields, harvesters, haulers, drones, step, TRUNKS_X, TRUNKS_Z, depots, inCrater, ROADS, RING, LAYERS, CUT, wrapX, PLOT, economy, focus, signals, log, plantField, quote, setTimeScale, setPaused, paused, exportSnapshot, applySnapshot, fieldAtWorld, fieldAt, fieldOrigin, simTime, worldDay, stores, rigs, fieldVisual, cropWatch, POTATO_DAYS, warehouse, buildings, sellLot, placeBuilding, removeBuilding, rigReadout, SHOP, buySeed, buyItem, SEED_PER_FIELD, FERT_PER_FIELD, resetGame, CULTURES, DECK_CLIMATE, tanks, cultureWatch, startCulture, tendCulture, harvestCulture, BUILDING_KINDS, CULTURE_CELLS } from './_shared.js';
 import { NOISE, FARM, CURVE_DECL, CURVE_PROJECT } from './glsl.js';
 import { harvesterKit, haulerKit, droneKit, personKit, conveyorKit, depotKit, hubKit, plantGeometry, mastKit, irrigatorKit, growRackKit, tankKit, pumpKit, pipeRackKit, tractorKit, planterKit, hillerKit, topperKit, potatoLifterKit, shedKit, warehouseKit, garageKit, processKit, cultureTankKit, armKit, deckLightKit } from './prefabs.js';
 
@@ -52,6 +52,7 @@ const U = {
   uCamDist: { value: 1000 },
   uSel: { value: new THREE.Vector4(0, 0, 0, 0) },
   uSelOn: { value: 0 },
+  uOpen: { value: 0 },
   uPlot: { value: new THREE.Vector4(PLOT.x0, PLOT.x1, PLOT.z0, PLOT.z1) },
 };
 // 按期望法线确定三角形绕序（正面朝外，避免被背面剔除 / 双面材质翻转法线）
@@ -250,7 +251,7 @@ MAT.ground.onBeforeCompile = (s) => {
   s.fragmentShader = s.fragmentShader
     .replace('#include <common>', `#include <common>
 varying vec3 vWP;
-uniform float uTime, uSunTan, uCarto, uMap, uNight, uCamDist, uCutOn, uSelOn; uniform vec2 uSunXZ; uniform vec4 uPlantWin, uCut, uSel, uPlot;
+uniform float uTime, uSunTan, uCarto, uMap, uNight, uCamDist, uCutOn, uSelOn, uOpen; uniform vec2 uSunXZ; uniform vec4 uPlantWin, uCut, uSel, uPlot;
 ${Object.keys(GC).map(k => 'uniform vec3 g_' + k + ';').join('\n')}
 ${NOISE}
 ${FARM}
@@ -485,6 +486,7 @@ vec3 farmAlbedo(vec2 p){
 }
 `)
     .replace('#include <color_fragment>', `#include <color_fragment>
+ if (uOpen > 0.5 && vWP.x >= uPlot.x && vWP.x <= uPlot.y && vWP.z >= uPlot.z && vWP.z <= uPlot.w) discard;
  if (uCutOn > 0.5 && abs(vWP.x - uCut.x) < uCut.z && abs(vWP.z - uCut.y) < uCut.w) discard;
  vec3 albedo = farmAlbedo(vWP.xz);
  if (uSelOn > 0.5 && vWP.x >= uSel.x && vWP.x <= uSel.y && vWP.z >= uSel.z && vWP.z <= uSel.w) {
@@ -649,6 +651,7 @@ function rebuildPlants(cx, cz, W) {
   const fj0 = Math.max(0, Math.floor((cz - W - L.Z0) / (L.BP / L.PER)) - 1), fj1 = Math.min(NFZ - 1, Math.floor((cz + W - L.Z0) / (L.BP / L.PER)) + 1);
   for (let j = fj0; j <= fj1; j++) for (let i = fi0; i <= fi1; i++) {
     const f = fields[j * NFX + i]; if (f.crop < 0) continue;
+    if (viewLayer !== 'surface' && f.inPlot) continue;
     const cr = CROPS[f.crop], im = plantMeshes[cr.shape];
     const xa = Math.max(f.x0, cx - W), xb = Math.min(f.x0 + L.FIELD, cx + W), za = Math.max(f.z0, cz - W), zb = Math.min(f.z0 + L.FIELD, cz + W);
     if (xa >= xb || za >= zb) continue;
@@ -730,12 +733,25 @@ let convSegs = [], convSet = null, convAt = { x: 1e9, z: 1e9, on: false };
   for (let t = L.HUBX - R0; t <= L.HUBX + R0 + 1; t++) for (let p = TRUNKS_Z[0] + 20; p < TRUNKS_Z[L.NBZ] - 20; p += 40) if (!near(TRUNKS_X[t], p)) segs.push([TRUNKS_X[t], p, Math.PI / 2]);   // 跨环
   convSegs = segs; convSet = instanced(conveyorKit(), segs.length);
 }
+function inOwnPlot(x, z) {
+  const wx = wrapX(x);
+  return wx >= PLOT.x0 && wx <= PLOT.x1 && z >= PLOT.z0 && z <= PLOT.z1;
+}
+function syncDepots() {
+  const open = viewLayer !== 'surface';
+  let n = 0;
+  for (const d of depots) {
+    if (open && inOwnPlot(d.x, d.z)) continue;
+    setInst(depotSet, n++, d.x, 0, d.z, 0);
+  }
+  setCount(depotSet, n);
+}
 // 只实例化镜头附近 1.8 km 内的段落；轨道层（>1800 m）完全不画，地面着色器里的输送带基座足够
 function updateConveyors(d) {
   if (d > 1600) { if (convAt.on) { setCount(convSet, 0); convAt.on = false; } return; }
   if (convAt.on && Math.hypot(camS.x - convAt.x, camS.z - convAt.z) < Math.min(300, d * 0.4 + 60) && Math.abs(d - convAt.d) < d * 0.3) return;
   const W = Math.min(1100, d * 0.85 + 250);
-  let n = 0; for (const [x, z, a] of convSegs) if (Math.abs(x - camS.x) < W && Math.abs(z - camS.z) < W && !inCut(x, z, 22)) setInst(convSet, n++, x, 0, z, a);
+  let n = 0; for (const [x, z, a] of convSegs) if (Math.abs(x - camS.x) < W && Math.abs(z - camS.z) < W && !inCut(x, z, 22) && !(viewLayer !== 'surface' && inOwnPlot(x, z))) setInst(convSet, n++, x, 0, z, a);
   setCount(convSet, n); convAt = { x: camS.x, z: camS.z, on: true, d };
 }
 
@@ -746,10 +762,10 @@ let infraAt = { x: 1e9, z: 1e9 }; const irrigs = [];
 function rebuildInfra(cx, cz) {
   infraAt = { x: cx, z: cz }; let n = 0; const R0 = 1500;
   const xs = ROADS.filter(r => Math.abs(r - cx) < R0), zs = ROADS.filter(r => Math.abs(r - cz) < R0 && r > RING.Z_IN && r < RING.Z_OUT);
-  for (const x of xs) for (const z of zs) { if (n >= MAST_CAP) break; if (inCut(x, z, 6) || (Math.abs(x - HUBC) < 270 && Math.abs(z - HUBC) < 270)) continue; setInst(mastSet, n++, x + 2.5, 0, z + 2.5, 0); }
+  for (const x of xs) for (const z of zs) { if (n >= MAST_CAP) break; if (inCut(x, z, 6) || (Math.abs(x - HUBC) < 270 && Math.abs(z - HUBC) < 270) || (viewLayer !== 'surface' && inOwnPlot(x, z))) continue; setInst(mastSet, n++, x + 2.5, 0, z + 2.5, 0); }
   setCount(mastSet, n);
   irrigs.length = 0;
-  for (const f of fields) { if (irrigs.length >= IRR_CAP) break; if (f.crop < 0 || Math.abs(f.x0 + 64 - cx) > R0 || Math.abs(f.z0 + 64 - cz) > R0 || inCut(f.x0 + 64, f.z0 + 64, 90)) continue; if (((f.i * 7 + f.j * 13) % 9) === 0 && !inCrater(f.x0 + 64, f.z0 + 64, 80)) irrigs.push({ f, ph: (f.i * 0.37 + f.j * 0.71) % 1 }); }
+  for (const f of fields) { if (irrigs.length >= IRR_CAP) break; if (f.crop < 0 || Math.abs(f.x0 + 64 - cx) > R0 || Math.abs(f.z0 + 64 - cz) > R0 || inCut(f.x0 + 64, f.z0 + 64, 90)) continue; if (viewLayer !== 'surface' && f.inPlot) continue; if (((f.i * 7 + f.j * 13) % 9) === 0 && !inCrater(f.x0 + 64, f.z0 + 64, 80)) irrigs.push({ f, ph: (f.i * 0.37 + f.j * 0.71) % 1 }); }
 }
 // ---------------- 剖面（C 键）：台阶状剖切盒，露出地下培育层与设备层 ----------------
 // 每一层的内容由 DECK_BUILDERS[layer.content] 生成；以后加「水处理层」「仓储层」等，只需在 LAYERS 里加一项并在这里写一个函数
@@ -773,7 +789,8 @@ function placeTanks() {
   const y = LAYERS[1].floor;
   tankPos = [];
   for (let i = 0; i < tanks.length; i++) {
-    const at = cellCenter(L.HUBX, L.HUBZ, i, 1);
+    const c = CULTURE_CELLS[Math.min(i, CULTURE_CELLS.length - 1)];
+    const at = cellCenter(c.bi, c.bj, c.fi, c.fj);
     tankPos.push(at);
     setInst(cultureSet, i, at.x, y, at.z, 0);
     const spec = CULTURES.find(c => c.id === tanks[i].species);
@@ -928,6 +945,44 @@ function setCut(on, x, z) {
   buildCut(); infraAt = { x: 1e9, z: 1e9 }; convAt.on = false; plantWin = { x: 1e9, z: 1e9, w: 0 };
   document.body.classList.toggle('cutaway', on);
 }
+// 下到培育层时，只揭开玩家自己这块地表。断面沿田区四边，从地表落到当前层的地板。
+const plotSection = new THREE.Group(); plotSection.visible = false; scene.add(plotSection);
+function buildPlotSection() {
+  plotSection.clear();
+  const y1 = 0.05, yLip = -2.05, y0 = layerFloor() - 0.15;
+  if (!(y0 < -1)) return;
+  const x0 = PLOT.x0, x1 = PLOT.x1, z0 = PLOT.z0, z1 = PLOT.z1;
+  const T = 22;
+  const pos = [], nor = [], sa = [];
+  const push = (verts, nrm) => {
+    const q = pushQuad([], ...verts, nrm);
+    for (const [px, py, pz, s3] of q) { pos.push(px, py, pz); nor.push(nrm[0], nrm[1], nrm[2]); sa.push(s3); }
+  };
+  const run = (xa, za, xb, zb, nx, nz) => {
+    const len = Math.hypot(xb - xa, zb - za), n = Math.max(1, Math.ceil(len / 64));
+    const ix = nx, iz = nz;
+    for (let i = 0; i < n; i++) {
+      const a = i / n, b = (i + 1) / n;
+      const ax = xa + (xb - xa) * a, az = za + (zb - za) * a;
+      const bx = xa + (xb - xa) * b, bz = za + (zb - za) * b;
+      const sA = a * len, sB = b * len;
+      push([[ax, y0, az, sA], [bx, y0, bz, sB], [bx, y1, bz, sB], [ax, y1, az, sA]], [nx, 0, nz]);
+      const ax2 = ax + ix * T, az2 = az + iz * T, bx2 = bx + ix * T, bz2 = bz + iz * T;
+      push([[ax2, yLip, az2, sA], [bx2, yLip, bz2, sB], [bx, yLip, bz, sB], [ax, yLip, az, sA]], [0, 1, 0]);
+    }
+  };
+  run(x0, z0, x1, z0, 0, 1);
+  run(x1, z1, x0, z1, 0, -1);
+  run(x0, z1, x0, z0, 1, 0);
+  run(x1, z0, x1, z1, -1, 0);
+  const sg = new THREE.BufferGeometry();
+  sg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  sg.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  sg.setAttribute('sa', new THREE.Float32BufferAttribute(sa, 1));
+  const sm = new THREE.Mesh(sg, secMat);
+  sm.castShadow = sm.receiveShadow = true; sm.frustumCulled = false;
+  plotSection.add(sm);
+}
 
 // ---------------- 远景：信号点（收割机 = 橙，无人机 = 青）、区站图标、网络线 ----------------
 const dotGeo = new THREE.BufferGeometry();
@@ -1019,6 +1074,7 @@ function pitchOf(d) {
 const camS = { x: HUBC, z: HUBC, y: 0, d: 4200, yaw: 0, pOff: 0, lookUp: 0, fovAdd: 0, deck: false }, camT = { ...camS };
 let viewLayer = 'surface';
 let followLock = null;
+buildPlotSection();
 function layerNow() { return LAYERS.find(l => l.id === viewLayer) || LAYERS[0]; }
 function layerFloor() { return layerNow().floor; }
 // 环带：拉远时镜头逐渐抬头、视角变宽 → 看到环带在前方升起、在天空中拱起，两侧是环壁，环壁外是太空与母星
@@ -1041,25 +1097,19 @@ function applyDeckView() {
   const on = viewLayer !== 'surface';
   const grow = viewLayer === 'grow';
   camS.deck = camT.deck = on;
-  ground.visible = !on;
+  ground.visible = true;
+  U.uOpen.value = on ? 1 : 0;
+  plotSection.visible = on;
   deckFloor.visible = on;
   deckFloor.position.y = layerFloor();
   railMesh.visible = grow && tankPos.length > 1;
   cableMesh.visible = grow && tankPos.length > 1;
   for (const m of hubMeshes) m.visible = !on;
-  setShown(depotSet, !on);
-  setShown(convSet, !on);
-  setShown(mastSet, !on);
-  setShown(irrSet, !on);
-  setShown(harvSet, !on);
-  setShown(haulSet, !on);
-  setShown(droneSet, !on);
   setShown(peopleSet, !on);
   for (const k in buildingSets) setShown(buildingSets[k], !on);
   for (const k in rigMesh) setShown(rigMesh[k], !on);
-  for (const k in plantMeshes) setShown(plantMeshes[k], !on);
   if (netMesh) netMesh.visible = !on;
-  icons.visible = !on; dots.visible = !on; dust.visible = !on;
+  icons.visible = !on;
   deckSlabs.visible = !on && !!cut.on;
   const lab = grow || !!cut.on;
   setShown(cultureSet, lab);
@@ -1242,12 +1292,20 @@ function paintLock() {
   el.classList.add('on');
   el.innerHTML = `<b>${r.label}</b><small><em>${info.speed.toFixed(1)}</em> m/s</small><small>${info.doing}${where ? ' · ' + where : ''}</small><div id="rigbar"><i style="width:${pct}%"></i></div><small>本趟 ${pct}%</small>`;
 }
+function refreshLayerProps() {
+  buildPlotSection();
+  syncDepots();
+  plantWin = { x: 1e9, z: 1e9, w: 0 };
+  infraAt = { x: 1e9, z: 1e9 };
+  convAt.on = false;
+}
 function leaveDeck() {
   if (viewLayer === 'surface' && !cut.on) return;
   viewLayer = 'surface';
   camS.deck = camT.deck = false;
   camS.y = camT.y = 0;
   setCut(false);
+  refreshLayerProps();
   if (typeof paintLayers === 'function') paintLayers();
 }
 function holdCamera() {
@@ -1263,6 +1321,7 @@ function showLayer(id) {
   if (cut.on) setCut(false);
   viewLayer = next;
   camS.deck = camT.deck = next !== 'surface';
+  refreshLayerProps();
   if (next === 'grow') placeTanks();
   if (next === 'grow') mode = 'deck';
   else if (mode === 'deck') mode = 'plan';
@@ -1355,6 +1414,7 @@ function setMode(id) {
     viewLayer = 'surface';
     camS.deck = camT.deck = false;
     if (cut.on) setCut(false);
+    refreshLayerProps();
     paintLayers();
   }
   mode = id;
@@ -1826,7 +1886,8 @@ function frame(now) {
   sun.color.set('#ffd9b0').lerp(new THREE.Color('#9fb4d0'), nt); sun.intensity = 3.6 * (1 - nt) + 0.35 * nt;
   hemi.color.set('#5f7480'); hemi.groundColor.set('#2a2622');
   hemi.intensity = 0.42 * (1 - nt) + 0.22 * nt; scene.environmentIntensity = 0.45 * (1 - nt) + 0.12 * nt;
-  if (camS.deck) {
+  const insideDeck = camS.deck && cam.position.y < 2;
+  if (insideDeck) {
     sun.color.lerp(new THREE.Color('#d5dee8'), 0.8);
     sun.intensity = 1.7;
     hemi.color.set('#d0d8e0'); hemi.groundColor.set('#3a4148'); hemi.intensity = 0.95;
@@ -1834,10 +1895,10 @@ function frame(now) {
   }
   // 拉远时雾色变亮：被阳光照透的大气，让远处的环带拱顶发亮（远景的高光端主要来自这里）
   scene.fog.color.copy(FOG_DAY).lerp(FOG_FAR, THREE.MathUtils.smoothstep(d, 900, 4000)).lerp(FOG_NIGHT, nt);
-  if (camS.deck) scene.fog.color.lerp(FOG_DECK, 0.42);
+  if (insideDeck) scene.fog.color.lerp(FOG_DECK, 0.42);
   // 近中景沿用 v3 的空气透视；拉远后雾变薄，让环带拱顶隔着一层大气浮现在天空里
   scene.fog.density = (5.6e-5 + 0.29 / d * Math.pow(d / 4300, 0.3) * (1 - THREE.MathUtils.smoothstep(d, 120, 700))) * (1 + nt * 0.4);
-  if (camS.deck) scene.fog.density *= 0.38;
+  if (insideDeck) scene.fog.density *= 0.38;
   // 阴影相机跟随视野
   const sz = Math.min(1800, Math.max(70, d * 1.15));
   sun.target.position.set(camS.x, 0, camS.z); sun.position.copy(sun.target.position).addScaledVector(sunDir, Math.max(800, sz * 2));
@@ -1860,9 +1921,9 @@ function frame(now) {
   for (const h of harvesters) h._d = Math.hypot(h.x - camS.x, h.z - camS.z);
   nearH = harvesters.filter(h => h._d < Math.max(400, d * 2.2) && h.mode !== 'idle').sort((a, b) => a._d - b._d).slice(0, H_NEAR);
   let n = 0;
-  for (const p of parked) setInst(harvSet, n++, p.x, 0, p.z, p.ang);
+  if (viewLayer === 'surface') for (const p of parked) setInst(harvSet, n++, p.x, 0, p.z, p.ang);
   for (const h of nearH) {
-    if (inCut(h.x, h.z, 8)) continue;
+    if (inCut(h.x, h.z, 8) || (viewLayer !== 'surface' && inOwnPlot(h.x, h.z))) continue;
     h.va = h.va === undefined ? h.ang : h.va + Math.atan2(Math.sin(h.ang - h.va), Math.cos(h.ang - h.va)) * Math.min(1, dt * 8);
     setInst(harvSet, n++, h.x, 0, h.z, h.va);
     if (h.mode === 'cut' && d < 600 && h._d < 300) for (let e = 0; e < 3; e++) emitDust(h.x, h.z, h.va);
@@ -1989,6 +2050,7 @@ window.__farm = {
   get mode() { return mode; },
   get camera() { return { x: camS.x, z: camS.z, y: cam.position.y, d: camS.d, yaw: camS.yaw, pOff: camS.pOff, deck: !!camS.deck, ground: ground.visible, layer: viewLayer }; },
   get layer() { return viewLayer; },
+  get section() { return plotSection.visible ? plotSection.children.length : 0; },
   get hover() { return deckHover && { i: deckHover.i, j: deckHover.j, tank: deckHover.tank, x0: deckHover.x0, x1: deckHover.x1, z0: deckHover.z0, z1: deckHover.z1 }; },
   showLayer,
   get arm() {

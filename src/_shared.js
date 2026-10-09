@@ -211,6 +211,8 @@ export const CULTURES = [
 export const DECK_CLIMATE = { temp: 30, rh: 70 };
 export const TANK_COUNT = 4;
 export const tanks = Array.from({ length: TANK_COUNT }, (_, id) => ({ id, species: null, startedAt: 0, tended: false }));
+// 培育槽不放在中枢。四口槽排在中枢东侧那一区、同一排小格上，臂沿这排走。中枢只留设备。
+export const CULTURE_CELLS = Array.from({ length: TANK_COUNT }, (_, i) => ({ bi: L.HUBX + 1, bj: L.HUBZ, fi: i, fj: 1 }));
 export const BUILDING_KINDS = {
   warehouse: { id: 'warehouse', name: '仓库' },
   garage: { id: 'garage', name: '机库' },

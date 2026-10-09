@@ -6,7 +6,7 @@ import {
   stores, worldDay, cropWatch, fieldVisual, setPaused, setTimeScale,
   DAY_SECONDS, MACHINE_MPS, warehouse, sellLot, placeBuilding, removeBuilding, buildings, rigReadout,
   SHOP, buySeed, buyItem, SEED_PER_FIELD, resetGame, paused, onHubParcel,
-  CULTURES, tanks, startCulture, harvestCulture,
+  CULTURES, tanks, startCulture, harvestCulture, CULTURE_CELLS, inPlotBlock, fieldOrigin,
 } from '../src/_shared.js';
 
 test('one colonist plot is about 4 km on the ring', () => {
@@ -392,4 +392,18 @@ test('a deleted starter stays gone in a new save and comes back on reset', () =>
   assert.ok(buildings.some(b => b.kind === 'warehouse'));
   assert.ok(buildings.some(b => b.kind === 'garage'));
   assert.ok(buildings.some(b => b.kind === 'process'));
+});
+
+test('culture tanks sit in one row off the hub and inside the plot', () => {
+  assert.equal(CULTURE_CELLS.length, 4);
+  const row = CULTURE_CELLS[0];
+  for (const c of CULTURE_CELLS) {
+    assert.equal(c.bj, row.bj);
+    assert.equal(c.fj, row.fj);
+    assert.ok(inPlotBlock(c.bi, c.bj));
+    assert.ok(!(c.bi === L.HUBX && c.bj === L.HUBZ));
+    const [x, z] = fieldOrigin(c.bi * L.PER + c.fi, c.bj * L.PER + c.fj);
+    const cx = x + L.FIELD / 2, cz = z + L.FIELD / 2;
+    assert.ok(Math.hypot(cx, cz) > L.BLOCK / 2);
+  }
 });
