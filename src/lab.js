@@ -1,7 +1,6 @@
 // 环穗 · 资产工坊。设计沙盒，不接主进度。网格和预制件跟游戏同一套。
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js';
 import { PALETTE } from './_shared.js';
 import { LAB_CLASSES, LAB_ENTRIES, CULT_EMPTY, planGrubColumns, GRUB_DEMO_GANTRIES, GRUB_WORK_MPS, GRUB_EMPTY_MPS } from './lab-catalog.js';
 import {
@@ -26,7 +25,6 @@ viewEl.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
 const cam = new THREE.PerspectiveCamera(32, 1, 0.08, 8000);
-RectAreaLightUniformsLib.init();
 const pmrem = new THREE.PMREMGenerator(renderer);
 scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 scene.environmentIntensity = 0.6;
@@ -108,8 +106,16 @@ function salmonRing(w, d, y = 0.28) {
   return g;
 }
 
+const boxCache = new Map();
 function box(w, h, d, x, y, z, mat) {
-  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+  const key = w.toFixed(3) + '|' + h.toFixed(3) + '|' + d.toFixed(3);
+  let geo = boxCache.get(key);
+  if (!geo) {
+    geo = new THREE.BoxGeometry(w, h, d);
+    geo.userData.shared = true;
+    boxCache.set(key, geo);
+  }
+  const m = new THREE.Mesh(geo, mat);
   m.position.set(x, y, z);
   m.castShadow = m.receiveShadow = true;
   return m;
@@ -386,6 +392,18 @@ function buildCultPlot(scheme, opts) {
   const bevel = marathon ? 0.18 : U.bevel;
   const padBuilt = padGeometry(U.unit, U.raise, corner, bevel, marathon);
   const padTop = padBuilt.top;
+  if (!marathon) {
+    const pos = padBuilt.geo.attributes.position;
+    const uv = padBuilt.geo.attributes.uv;
+    const norm = padBuilt.geo.attributes.normal;
+    for (let i = 0; i < pos.count; i++) {
+      if (norm.getY(i) > 0.72) uv.setXY(i, pos.getX(i) / U.unit + 0.5, pos.getZ(i) / U.unit + 0.5);
+      else uv.setXY(i, 0.008, 0.008);
+    }
+    uv.needsUpdate = true;
+    padMat.map = gridMap;
+    padMat.color.set('#ffffff');
+  }
   const core = 4 * U.unit + 3 * U.seam;
   const origin = -core / 2 + U.unit / 2;
   const centers = [0, 1, 2, 3].map(i => origin + i * (U.unit + U.seam));
@@ -425,11 +443,13 @@ function buildCultPlot(scheme, opts) {
     mesh.receiveShadow = true;
     mesh.userData.code = `${U.code}-U${String(p.n).padStart(2, '0')}`;
     g.add(mesh);
-    const grid = new THREE.Mesh(gridGeo, gridMat);
-    grid.position.set(p.x, padTop + 0.012, p.z);
-    grid.receiveShadow = true;
-    grid.castShadow = false;
-    g.add(grid);
+    if (marathon) {
+      const grid = new THREE.Mesh(gridGeo, gridMat);
+      grid.position.set(p.x, padTop + 0.012, p.z);
+      grid.receiveShadow = true;
+      grid.castShadow = false;
+      g.add(grid);
+    }
     if (marathon) {
       const y = padTop + 0.028;
       const e = U.unit / 2 - glowInset;
@@ -508,11 +528,18 @@ function buildCultPlot(scheme, opts) {
   }
   const paintLabels = () => {
     if (!g.userData.alive) return;
+    const shared = new Map();
     for (const label of labels) {
+      let tex = shared.get(label.text);
+      if (!tex) {
+        tex = labelTexture(label.text, marathon ? '#f3fff4' : '#24272c');
+        tex.userData.shared = true;
+        shared.set(label.text, tex);
+      }
       const prev = label.mesh.material.map;
-      label.mesh.material.map = labelTexture(label.text, marathon ? '#f3fff4' : '#24272c');
+      label.mesh.material.map = tex;
       label.mesh.material.needsUpdate = true;
-      if (prev) prev.dispose();
+      if (prev && prev !== tex) prev.dispose();
     }
   };
   paintLabels();
@@ -540,12 +567,6 @@ function buildCultPlot(scheme, opts) {
       segment(a - cursor, 0, U.clear, cursor);
       segment(b - a, U.doorH, U.clear, a);
       addDoor(horizontal, sign, (a + b) / 2, fixed);
-      const doorCenter = (a + b) / 2;
-      const lampAt = -sign * (U.wall + 1.4);
-      const lamp = new THREE.PointLight(weak ? '#ffcc66' : (marathon ? '#c070ff' : '#9ee8de'), 1, weak ? 46 : 18, 2);
-      lamp.position.set(horizontal ? doorCenter : fixed + lampAt, U.doorH * 0.62, horizontal ? fixed + lampAt : doorCenter);
-      g.add(lamp);
-      groups.door.lights.push(lamp);
       doors += 1;
       cursor = b;
     }
@@ -617,14 +638,6 @@ function buildCultPlot(scheme, opts) {
   const stripY = U.clear - 1.05;
   const stripLen = core * 0.94;
   const rects = [];
-  const hang = (light, x, y, z, turn) => {
-    light.position.set(x, y, z);
-    light.rotation.set(-Math.PI / 2, 0, turn ? Math.PI / 2 : 0);
-    g.add(light);
-    rects.push(light);
-    groups.strip.lights.push(light);
-  };
-  const stripColor = weak ? '#8a1824' : marathon ? '#e7ffe8' : '#d8fff8';
   for (const c of centers) {
     for (const mesh of [
       addStrip(stripLen, 0.28, 1.35, 0, stripY + 0.12, c, housingMat),
@@ -632,33 +645,24 @@ function buildCultPlot(scheme, opts) {
       addStrip(1.35, 0.28, stripLen, c, stripY + 0.18, 0, housingMat),
       addStrip(0.55, 0.07, stripLen, c, stripY - 0.02, 0, stripMat),
     ]) groups.strip.meshes.push(mesh);
-    hang(new THREE.RectAreaLight(stripColor, 1, stripLen, 2.4), 0, stripY - 0.4, c, false);
-    hang(new THREE.RectAreaLight(stripColor, 1, stripLen, 2.4), c, stripY - 0.32, 0, true);
   }
   stripMat.side = THREE.DoubleSide;
   glowMat.side = THREE.DoubleSide;
   wallGlowMat.side = THREE.DoubleSide;
   const padColor = weak ? '#6a1420' : marathon ? '#e9ffe8' : '#e7f7f4';
-  const padLights = pads.map(p => {
+  const padLights = [];
+  for (const ix of [0, 2]) for (const iz of [0, 2]) {
     const L = new THREE.PointLight(padColor, 1, 0, 2);
-    L.position.set(p.x, U.clear - 2.4, p.z);
+    L.position.set((centers[ix] + centers[ix + 1]) / 2, U.clear - 3.2, (centers[iz] + centers[iz + 1]) / 2);
     g.add(L);
     groups.strip.lights.push(L);
-    return L;
-  });
+    padLights.push(L);
+  }
   const wallLights = [];
   for (const c of [centers[0], centers[3]]) {
     for (const sign of [-1, 1]) {
-      const inset = sign * (U.plot / 2 - U.wall - 2.2);
       const face = sign * (U.plot / 2 - U.wall - 0.04);
       for (const horiz of [true, false]) {
-        const x = horiz ? c : inset;
-        const z = horiz ? inset : c;
-        const L = new THREE.PointLight(marathon ? '#d8ffe4' : '#d5eee8', 1, 0, 2);
-        L.position.set(x, 8.2, z);
-        g.add(L);
-        wallLights.push(L);
-        groups.wall.lights.push(L);
         const plate = horiz
           ? box(7.2, 0.28, 0.07, c, 8.2, face, wallGlowMat)
           : box(0.07, 0.28, 7.2, face, 8.2, c, wallGlowMat);
@@ -728,7 +732,8 @@ function buildCultPlot(scheme, opts) {
         wallGlowMat.emissiveIntensity = 0;
         slitMat.emissiveIntensity = 0.9;
         gridMat.color.set('#9aa09c');
-        for (const light of padLights) light.intensity = 650;
+        padMat.color.set('#ffffff');
+        for (const light of padLights) light.intensity = 2600;
         for (const light of wallLights) light.intensity = 0;
         for (const light of rects) light.intensity = 0.09;
         for (const light of groups.door.lights) light.intensity = 520;
@@ -750,7 +755,8 @@ function buildCultPlot(scheme, opts) {
       wallGlowMat.emissiveIntensity = L.stripI * 0.75;
       slitMat.emissiveIntensity = marathon ? L.stripI * 0.95 : L.stripI * 0.55;
       gridMat.color.set(marathon ? (st === 'break' ? '#c8c2b4' : '#ffffff') : L.grid);
-      for (const light of padLights) light.intensity = L.padL;
+      if (!marathon) padMat.color.set(L.grid);
+      for (const light of padLights) light.intensity = L.padL * 4;
       for (const light of wallLights) light.intensity = L.wallL;
       for (const light of rects) light.intensity = L.rect;
       for (const light of groups.door.lights) light.intensity = L.doorL;
@@ -1001,20 +1007,20 @@ function padGeometry(size, height, chamfer, bevel, rounded) {
 }
 
 function labelTexture(text, ink) {
-  const W = 2048, H = 320;
+  const W = 512, H = 96;
   const c = document.createElement('canvas');
   c.width = W;
   c.height = H;
   const g = c.getContext('2d');
   g.clearRect(0, 0, W, H);
   g.fillStyle = ink || '#24272c';
-  g.font = '500 168px BarlowSC, sans-serif';
+  g.font = '500 42px BarlowSC, sans-serif';
   g.textAlign = 'center';
   g.textBaseline = 'middle';
   g.letterSpacing = '14px';
   g.fillText(text, W / 2, H / 2 + 4);
   g.globalCompositeOperation = 'destination-out';
-  g.fillRect(0, H / 2 - 5, W, 9);
+  g.fillRect(0, H / 2 - 2, W, 3);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 8;
@@ -1035,6 +1041,8 @@ function applyStageLight(entry) {
   hemi.groundColor.copy(interior ? C(marathon ? '#0c2414' : '#1c2224') : LIGHT0.hemiGround);
   scene.environmentIntensity = interior ? (marathon ? 0.72 : 0.08) : LIGHT0.env;
   renderer.toneMappingExposure = interior ? (marathon ? 1.05 : 1.02) : LIGHT0.exp;
+  sun.castShadow = !(interior || id === 'grub-trough');
+  renderer.shadowMap.enabled = sun.castShadow;
   if (id === 'grub-trough') {
     sun.intensity = 0;
     sun.color.copy(C('#4a2024'));
@@ -1308,29 +1316,22 @@ function buildGrubTrough() {
     carried.visible = false;
     head.position.y = 3.35;
     const lamp = addG(0.7, 0.1, 0.18, 1.05, legH - 0.32, 0, rigMat);
-    const lampLight = new THREE.SpotLight('#ff2b30', 40, 4.8, 0.32, 0.55, 2);
-    lampLight.position.set(0, legH - 0.45, 0);
-    lampLight.target.position.set(0, 0.35, 0);
-    gantry.add(lampLight, lampLight.target);
+    // 巡灯只发光，不往场景里打光。
     const statusMat = mat({ color: '#2a2418', emissive: statusColor.rest, emissiveIntensity: 3.4, roughness: 0.3, metalness: 0 });
     const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.22, 12, 8), statusMat);
     beacon.position.set(0, legH + 1.02, 0);
     beacon.castShadow = false;
     gantry.add(beacon);
-    const statusLight = new THREE.PointLight(statusColor.rest, 500, 10, 2);
-    statusLight.position.set(0, legH + 1.15, 0);
-    gantry.add(statusLight);
+    // 状态灯同样只靠自发光。
     const labelMat = new THREE.MeshBasicMaterial({ map: phaseTex('停靠'), transparent: true, depthWrite: false });
     labelMat.userData.dispose = true;
     const label = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 0.85), labelMat);
     label.position.set(0, legH + 1.62, 0);
     gantry.add(label);
     groups.rig.meshes.push(lamp, tip);
-    groups.rig.lights.push(lampLight);
     groups.status.meshes.push(beacon, label);
-    groups.status.lights.push(statusLight);
     g.add(gantry);
-    return { gantry, head, carried, fill, lampLight, statusMat, statusLight, label, labelMat, labelText: '停靠' };
+    return { gantry, head, carried, fill, statusMat, label, labelMat, labelText: '停靠' };
   };
 
   const westOf = (row) => (row < 2 ? x0 + pitchX - troughL / 2 + 1.4 : xStart);
@@ -1349,16 +1350,9 @@ function buildGrubTrough() {
     };
     // 西端头廊在槽和地面门外面。换列、送箱、回位只在这里改 Z，其余只沿槽的长边走。
     const westRail = (x0 - troughL / 2) - 7.6;
-    const nearDoorZ = (zz) => Math.abs(zz - doorA.z) <= 0.35 || Math.abs(zz - doorB.z) <= 0.35;
     const axisTo = (kind, x1, z1, speed, mode, extra) => {
       if (Math.abs(z - z1) <= 0.04) {
         if (Math.abs(x - x1) > 0.05) pushMove(kind, x1, z, speed, mode, extra);
-        return;
-      }
-      const onDoorX = Math.abs(x - doorA.x) <= 0.35 && Math.abs(x1 - doorA.x) <= 0.35;
-      if (onDoorX && nearDoorZ(z) && nearDoorZ(z1)) {
-        pushMove(kind, x, z1, speed, mode, extra);
-        if (Math.abs(x - x1) > 0.05) pushMove(kind, x1, z1, speed, mode, extra);
         return;
       }
       if (Math.abs(x - westRail) > 0.05) pushMove(kind, westRail, z, speed, mode, extra);
@@ -1469,8 +1463,9 @@ function buildGrubTrough() {
     vatColor: '#ff2b30',
     rigColor: '#ff2b30',
     plotDim: { strip: '#8a1824', door: '#ffcc66', wall: 'off' },
-    lamp: { type: 'spot', distance: 4.8, angle: 0.32 },
+    lamp: { type: 'emissive', distance: 0 },
     diagonals: rigs.reduce((n, rig) => n + rig.script.segs.filter(s => Math.abs(s.x1 - s.x0) > 0.08 && Math.abs(s.z1 - s.z0) > 0.08).length, 0),
+    doorCuts: rigs.reduce((n, rig) => n + rig.script.segs.filter(s => Math.abs(s.x0 - doorA.x) < 0.4 && Math.abs(s.x1 - doorA.x) < 0.4 && Math.abs(s.z1 - s.z0) > 1).length, 0),
   };
   return {
     group: host,
@@ -1489,7 +1484,7 @@ function buildGrubTrough() {
       const hidden = new Set();
       const phases = [];
       for (const rig of rigs) {
-        const { gantry, head, carried, fill, statusMat, statusLight, lampLight } = rig;
+        const { gantry, head, carried, fill, statusMat } = rig;
         gantry.rotation.z = 0;
         let kind = 'rest';
         let mode = 'rest';
@@ -1520,9 +1515,7 @@ function buildGrubTrough() {
         gantry.position.z = pose.z;
         const key = st === 'break' ? 'break' : st !== 'job' ? 'rest' : (mode === 'empty' ? 'empty' : 'work');
         statusMat.emissive.set(statusColor[key]);
-        statusLight.color.set(statusColor[key]);
-        statusLight.intensity = key === 'break' ? 200 : key === 'rest' ? 280 : 700;
-        lampLight.intensity = st === 'job' && mode === 'work' ? 90 : st === 'sel' ? 36 : st === 'break' ? 8 : 22;
+        statusMat.emissiveIntensity = key === 'break' ? 1.4 : key === 'rest' ? 2.6 : 4.6;
         const caption = PHASE[kind] || (mode === 'empty' ? '空驶' : '作业');
         setLabel(rig, caption);
         rig.label.lookAt(cam.position);
@@ -1588,7 +1581,7 @@ function disposeStage() {
     o.userData.alive = false;
     stage.remove(o);
     o.traverse(m => {
-      if (m.geometry) m.geometry.dispose();
+      if (m.geometry && !m.geometry.userData.shared) m.geometry.dispose();
       const mats = m.material ? (Array.isArray(m.material) ? m.material : [m.material]) : [];
       for (const mat of mats) {
         if (mat.map && mat.userData && mat.userData.dispose) mat.map.dispose();
