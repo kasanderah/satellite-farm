@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { LAB_CLASSES, LAB_ENTRIES } from '../src/lab-catalog.js';
 import {
   CROPS, L, PLOT, FIELD_HA, fields, fieldAt, fieldAtWorld, focus, rigs,
   plantField, step, economy, quote, log, exportSnapshot, applySnapshot, RING,
@@ -406,4 +407,20 @@ test('culture tanks sit in one row off the hub and inside the plot', () => {
     const cx = x + L.FIELD / 2, cz = z + L.FIELD / 2;
     assert.ok(Math.hypot(cx, cz) > L.BLOCK / 2);
   }
+});
+
+test('asset lab lists the four classes and the live placeholders', () => {
+  assert.deepEqual(LAB_CLASSES.map(c => c.id), ['unit', 'machine', 'equip', 'rail']);
+  assert.deepEqual(LAB_CLASSES.map(c => c.label), ['单元', '农机', '设备', '轨道设备']);
+  const ids = new Set(LAB_ENTRIES.map(e => e.id));
+  for (const id of ['field', 'deck', 'hub', 'tank', 'arm', 'tractor']) assert.ok(ids.has(id), id);
+  const cls = new Set(LAB_CLASSES.map(c => c.id));
+  for (const e of LAB_ENTRIES) {
+    assert.ok(cls.has(e.cls), e.id);
+    assert.ok(e.name && e.size && e.notes, e.id);
+  }
+  assert.equal(LAB_ENTRIES.find(e => e.id === 'hub').cls, 'unit');
+  assert.equal(LAB_ENTRIES.find(e => e.id === 'tank').cls, 'equip');
+  assert.equal(LAB_ENTRIES.find(e => e.id === 'arm').cls, 'rail');
+  assert.equal(LAB_ENTRIES.find(e => e.id === 'tractor').cls, 'machine');
 });

@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>环穗 · 资产工坊</title>
+<style>
+@font-face{font-family:"BarlowSC";font-weight:400;src:url(data:font/woff;base64,__FONT_R__) format("woff")}
+@font-face{font-family:"BarlowSC";font-weight:500;src:url(data:font/woff;base64,__FONT_M__) format("woff")}
+:root{--void:#0a0c14;--line:rgba(188,195,196,.4);--fg:#e8d8d0;--mut:#a2998a;--sig:#d8693c;--zone:#e49680;
+  --font:"BarlowSC","PingFang SC","Microsoft YaHei","Noto Sans CJK SC","Noto Sans SC","WenQuanYi Micro Hei","Droid Sans Fallback",sans-serif}
+html,body{margin:0;height:100%;background:var(--void);color:var(--fg);font-family:var(--font);-webkit-font-smoothing:antialiased}
+body{display:grid;grid-template-rows:52px 1fr;overflow:hidden}
+header{display:flex;align-items:center;gap:16px;padding:0 16px;border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:center;gap:10px}
+.brand i{width:16px;height:16px;border:1px solid var(--fg);position:relative;display:block}
+.brand i:after{content:"";position:absolute;left:3px;top:3px;width:8px;height:8px;background:var(--sig)}
+.brand b{display:block;font-weight:500;font-size:14px;letter-spacing:.18em}
+.brand small{display:block;margin-top:2px;font-size:10px;letter-spacing:.14em;color:var(--mut)}
+#back{margin-left:auto;color:var(--fg);text-decoration:none;font-size:12px;letter-spacing:.16em;border:1px solid var(--line);padding:4px 10px}
+#back:hover{border-color:var(--sig);color:var(--sig)}
+main{display:grid;grid-template-columns:220px 1fr 268px;min-height:0}
+#catalog{border-right:1px solid var(--line);overflow:auto;padding:6px 0 18px}
+.cls{font-size:10px;letter-spacing:.22em;color:var(--mut);padding:14px 14px 4px}
+.ent{display:block;width:100%;text-align:left;font:inherit;color:var(--fg);background:transparent;border:0;border-left:2px solid transparent;padding:6px 14px 6px 18px;cursor:pointer;letter-spacing:.08em;font-size:13px}
+.ent.on{border-left-color:var(--sig);color:var(--zone)}
+#view{position:relative;min-width:0;min-height:0;background:#0a0c14}
+#view canvas{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:grab;touch-action:none}
+#view canvas:active{cursor:grabbing}
+#states{position:absolute;left:50%;bottom:18px;transform:translateX(-50%);display:flex;gap:6px}
+#states button,#brief button{font:inherit;color:var(--fg);background:rgba(10,12,20,.72);border:1px solid var(--line);padding:5px 12px;letter-spacing:.14em;cursor:pointer;font-size:12px}
+#states button.on{border-color:var(--sig);color:var(--zone)}
+#hint{position:absolute;right:14px;bottom:16px;font-size:10px;letter-spacing:.12em;color:var(--mut);text-align:right;line-height:1.6}
+#brief{border-left:1px solid var(--line);padding:14px 14px 18px;overflow:auto;display:flex;flex-direction:column;gap:10px}
+#brief label{display:flex;flex-direction:column;gap:4px;font-size:10px;letter-spacing:.2em;color:var(--mut)}
+#brief input,#brief textarea{font:inherit;color:var(--fg);background:transparent;border:1px solid var(--line);padding:6px 8px;letter-spacing:.06em;font-size:13px;resize:vertical}
+#brief textarea{min-height:120px;line-height:1.5}
+#brief .foot{margin-top:8px;font-size:11px;letter-spacing:.06em;color:var(--mut);line-height:1.55}
+</style></head><body>
+<header>
+  <div class="brand"><i></i><div><b>环穗 · 资产工坊</b><small>设计沙盒 · 定稿后由主进度接入</small></div></div>
+  <a id="back" href="index.html">回到环穗</a>
+</header>
+<main>
+  <nav id="catalog"></nav>
+  <div id="view">
+    <div id="states">
+      <button type="button" data-s="idle">空闲</button>
+      <button type="button" data-s="job">作业</button>
+      <button type="button" data-s="sel">选中</button>
+      <button type="button" data-s="break">损坏</button>
+    </div>
+    <div id="hint">拖动 旋转 · 右键 平移 · 滚轮 缩放<br>1–4 状态</div>
+  </div>
+  <aside id="brief">
+    <label>名称<input id="b-name" autocomplete="off"></label>
+    <label>类别<input id="b-cls" autocomplete="off"></label>
+    <label>模数<input id="b-size" autocomplete="off"></label>
+    <label>备注<textarea id="b-notes"></textarea></label>
+    <div class="foot">备注只留在这台浏览器里，不写入环穗存档。</div>
+  </aside>
+</main>
+<script>__BUNDLE__</script>
+</body></html>

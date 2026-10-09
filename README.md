@@ -6,6 +6,8 @@
 
 Open `index.html` in a browser. It is a single file: no server, no network.
 
+`asset-lab.html` is the design sandbox, titled 环穗 · 资产工坊. It opens the same way. The header says 设计沙盒 · 定稿后由主进度接入. Notes typed there stay in this browser and do not touch a saved game.
+
 To rebuild after changing `src/`:
 
 ```bash
