@@ -102,7 +102,7 @@ MAT.crop = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8, 
 const SUN_EL = 21 * DEG, SUN_AZ = -38 * DEG; // 方位：镜头默认朝 -z，太阳在左前方 38°
 const sunDir = new THREE.Vector3(Math.sin(SUN_AZ) * Math.cos(SUN_EL), Math.sin(SUN_EL), -Math.cos(SUN_AZ) * Math.cos(SUN_EL)).normalize();
 U.uSunXZ.value.set(sunDir.x, sunDir.z).normalize(); U.uSunTan.value = Math.tan(SUN_EL);
-const FOG_DAY = new THREE.Color('#868d8f'), FOG_FAR = new THREE.Color('#b4babb'), FOG_NIGHT = new THREE.Color('#1b1f27'), FOG_DECK = new THREE.Color('#12161c');
+const FOG_DAY = new THREE.Color('#868d8f'), FOG_FAR = new THREE.Color('#b4babb'), FOG_NIGHT = new THREE.Color('#1b1f27'), FOG_DECK = new THREE.Color('#2a3138');
 scene.fog = new THREE.FogExp2(FOG_DAY.clone(), 0.0002);
 const sky = new THREE.Mesh(new THREE.SphereGeometry(1, 48, 24), new THREE.ShaderMaterial({
   side: THREE.BackSide, depthWrite: false, depthTest: false, fog: false,
@@ -181,7 +181,7 @@ const hemi = new THREE.HemisphereLight('#5f7480', '#2a2622', 0.42); scene.add(he
 const ground = new THREE.Mesh(new THREE.PlaneGeometry(RING.CIRC + 400, RING.W, 760, 8).rotateX(-Math.PI / 2), MAT.ground);
 ground.receiveShadow = true; ground.frustumCulled = false; scene.add(ground);
 // 培育层地板：和地表同一套模数（跨环 7 个大格，每格 4×4 = 16 个小格）。只在下到培育层时露出来。
-const deckMat = new THREE.MeshStandardMaterial({ roughness: 0.5, metalness: 0.72, color: PALETTE.deep });
+const deckMat = new THREE.MeshStandardMaterial({ roughness: 0.58, metalness: 0.42, color: PALETTE.haze });
 deckMat.onBeforeCompile = (sh) => {
   sh.uniforms.uCurve = U.uCurve;
   sh.uniforms.uField = { value: L.FIELD };
@@ -195,13 +195,14 @@ deckMat.onBeforeCompile = (sh) => {
   sh.uniforms.gMetal = { value: C('metalDk') };
   sh.uniforms.gHaze = { value: C('haze') };
   sh.uniforms.gData = { value: C('data') };
+  sh.uniforms.gSteel = { value: C('steel') };
   sh.vertexShader = sh.vertexShader
     .replace('#include <common>', '#include <common>\n' + CURVE_DECL + '\nvarying vec3 vFlat;')
     .replace('#include <project_vertex>', 'vFlat = (modelMatrix * vec4(transformed, 1.0)).xyz;\n' + CURVE_PROJECT);
   sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>
 varying vec3 vFlat;
 uniform float uField, uRoad, uBP, uBlock, uX0, uZ0, uLane;
-uniform vec3 gDeep, gMetal, gHaze, gData;
+uniform vec3 gDeep, gMetal, gHaze, gData, gSteel;
 float aaAt(float x, float w){ float fw = max(fwidth(x), 0.02); return 1. - smoothstep(w, w + fw, x); }
 vec3 deckEmis = vec3(0.);
 vec3 deckAlbedo(){
@@ -215,19 +216,19 @@ vec3 deckAlbedo(){
   float plate = (1. - trunk) * step(sx, uField) * step(sz, uField);
   float seam = max(aaAt(min(sx, pitch - sx), 0.35), aaAt(min(sz, pitch - sz), 0.35));
   float big = max(aaAt(min(bx, abs(bx - uBlock)), 0.9), aaAt(min(bz, abs(bz - uBlock)), 0.9));
-  vec3 col = mix(gDeep, gMetal, plate);
-  col = mix(col, gHaze * 0.55, (1. - plate) * (1. - trunk) * 0.85);
-  col = mix(col, gDeep * 0.65, trunk);
-  col = mix(col, gHaze, seam * 0.35 + big * 0.55);
-  float lane = plate * aaAt(abs(mod(sx + uLane * 0.5, uLane) - uLane * 0.5), 0.12);
-  deckEmis = gData * lane * 0.55 + gData * big * 0.35;
+  vec3 col = mix(gMetal * 1.35, gHaze * 0.42, plate);
+  col = mix(col, gHaze * 0.62, (1. - plate) * (1. - trunk));
+  col = mix(col, gDeep * 0.85, trunk);
+  col = mix(col, gSteel, seam * 0.45 + big * 0.7);
+  float lane = plate * aaAt(abs(mod(sx + uLane * 0.5, uLane) - uLane * 0.5), 0.18);
+  deckEmis = gData * lane * 2.4 + gData * big * 1.6 + gSteel * seam * 0.35;
   return col;
 }`).replace('#include <color_fragment>', '#include <color_fragment>\n diffuseColor.rgb = deckAlbedo();')
     .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n totalEmissiveRadiance += deckEmis;');
 };
 const deckFloor = new THREE.Mesh(new THREE.PlaneGeometry(PLOT.x1 - PLOT.x0, PLOT.z1 - PLOT.z0, 1, 1).rotateX(-Math.PI / 2), deckMat);
 deckFloor.position.set((PLOT.x0 + PLOT.x1) / 2, LAYERS[1].floor, (PLOT.z0 + PLOT.z1) / 2);
-deckFloor.receiveShadow = true; deckFloor.frustumCulled = false; deckFloor.visible = false; scene.add(deckFloor);
+deckFloor.receiveShadow = false; deckFloor.frustumCulled = false; deckFloor.visible = false; scene.add(deckFloor);
 const GC = { soil: C('regoDk').multiplyScalar(0.62), rego: C('rego'), regoDk: C('regoDk'), regoLt: C('regoLt'), haze: C('haze'), paper: C('paper'), metalDk: C('metalDk'), deep: C('deep'), tealGy: C('tealGy'), zone: C('zone'), data: C('data'), harvest: C('harvest'), void: C('void'), alert: C('alert'), oliveDp: C('oliveDp'), olive: C('olive'), moss: C('moss'), ochre: C('ochre'), straw: C('straw'), rust: C('rust') };
 MAT.ground.onBeforeCompile = (s) => {
   Object.assign(s.uniforms, U);
@@ -744,6 +745,7 @@ function rebuildInfra(cx, cz) {
 const RACK_CAP = 2600, MOD_CAP = 80, PIPE_CAP = 60, CART_CAP = 30, CREW_CAP = 60;
 const rackSet = instanced(growRackKit(), RACK_CAP), tankSet = instanced(tankKit(), MOD_CAP), pumpSet = instanced(pumpKit(), MOD_CAP), pipeSet = instanced(pipeRackKit(), PIPE_CAP);
 const cultureSet = instanced(cultureTankKit(), 8), armSet = instanced(armKit(), 1), deckLightSet = instanced(deckLightKit(), 8);
+for (const set of [cultureSet, armSet, deckLightSet]) for (const k in set) set[k].receiveShadow = false;
 if (cultureSet.light) cultureSet.light.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(8 * 3), 3);
 let tankPos = [], armX = 0, armReady = false, armOrder = null;
 const railGeo = new THREE.BoxGeometry(1, 0.16, 0.22);
@@ -1733,15 +1735,17 @@ function frame(now) {
   hemi.color.set('#5f7480'); hemi.groundColor.set('#2a2622');
   hemi.intensity = 0.42 * (1 - nt) + 0.22 * nt; scene.environmentIntensity = 0.45 * (1 - nt) + 0.12 * nt;
   if (camS.deck) {
-    sun.color.lerp(new THREE.Color('#b7c6d4'), 0.72);
-    sun.intensity *= 0.42;
-    hemi.color.set('#9eb0be'); hemi.groundColor.set('#14161a'); hemi.intensity = 0.28;
+    sun.color.lerp(new THREE.Color('#d5dee8'), 0.8);
+    sun.intensity = 1.7;
+    hemi.color.set('#d0d8e0'); hemi.groundColor.set('#3a4148'); hemi.intensity = 0.95;
+    scene.environmentIntensity = 0.4;
   }
   // 拉远时雾色变亮：被阳光照透的大气，让远处的环带拱顶发亮（远景的高光端主要来自这里）
   scene.fog.color.copy(FOG_DAY).lerp(FOG_FAR, THREE.MathUtils.smoothstep(d, 900, 4000)).lerp(FOG_NIGHT, nt);
-  if (camS.deck) scene.fog.color.lerp(FOG_DECK, 0.72);
+  if (camS.deck) scene.fog.color.lerp(FOG_DECK, 0.42);
   // 近中景沿用 v3 的空气透视；拉远后雾变薄，让环带拱顶隔着一层大气浮现在天空里
   scene.fog.density = (5.6e-5 + 0.29 / d * Math.pow(d / 4300, 0.3) * (1 - THREE.MathUtils.smoothstep(d, 120, 700))) * (1 + nt * 0.4);
+  if (camS.deck) scene.fog.density *= 0.38;
   // 阴影相机跟随视野
   const sz = Math.min(1800, Math.max(70, d * 1.15));
   sun.target.position.set(camS.x, 0, camS.z); sun.position.copy(sun.target.position).addScaledVector(sunDir, Math.max(800, sz * 2));
@@ -1822,11 +1826,12 @@ function frame(now) {
       const goal = tankPos[armOrder.id];
       z = goal.z - L.FIELD / 2 - L.ROAD / 2;
       const dx = goal.x - armX;
-      if (armOrder.phase === 'move' && Math.abs(dx) > 0.35) armX += Math.sign(dx) * Math.min(Math.abs(dx), 12 * dt);
+      const motion = Math.min(Math.max(raw, dt), 1.5);
+      if (armOrder.phase === 'move' && Math.abs(dx) > 0.35) armX += Math.sign(dx) * Math.min(Math.abs(dx), 64 * motion);
       else {
-        armX += dx * Math.min(1, dt * 8);
+        armX += dx * Math.min(1, motion * 8);
         if (armOrder.phase === 'move') { armOrder.phase = 'act'; armOrder.t = 0; }
-        armOrder.t += dt;
+        armOrder.t += motion;
         const u = Math.min(1, armOrder.t / 0.7);
         reach = Math.sin(u * Math.PI) * (armOrder.job === 'harvest' ? 1 : 0.35);
         if (u >= 1) armOrder = null;
