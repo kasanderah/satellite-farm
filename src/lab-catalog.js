@@ -46,23 +46,39 @@ export const CULT_EMPTY_NOTES = `抬缘白台。培育层的空单元：台上�
 台面有一层很浅的分格线，亚光，没有噪点。台缘是一条细的冷青白发光缘，会照到台沿。顶灯带在 ${CULT_EMPTY.clear} m 楼板下，空闲时大约两成，是真正的灯，不是贴图。环境光压暗，方便看清照度。
 
 墙与门：
-墙不是光板。外皮有竖向肋柱、横向梁和板缝，门洞带门框。四面墙各 ${CULT_EMPTY.doorsPerWall} 扇农机门，一共 ${CULT_EMPTY.doorsPerWall * 4} 扇。门宽 ${m1(CULT_EMPTY.doorW)} m，高 ${m1(CULT_EMPTY.doorH)} m，农机进得去，不是机库大开口。门位对准外侧那一排单元。
+墙背是光板。肋柱、横梁、板缝和门框都在内皮，地块合并后背面几乎看不见。四面墙各 ${CULT_EMPTY.doorsPerWall} 扇农机门，一共 ${CULT_EMPTY.doorsPerWall * 4} 扇。门宽 ${m1(CULT_EMPTY.doorW)} m，高 ${m1(CULT_EMPTY.doorH)} m，农机进得去，不是机库大开口。门位对准外侧那一排单元。
 
-状态（灯会跟着变）：
+灯组：顶灯带、台缘、门灯、墙灯。工坊里可以逐组开关。状态仍用 1–4。
 空闲：环境偏暗，顶灯大约两成，缘光细。
 作业：顶灯和缘光一起抬一点。
 选中：缘光明显一些，台面略亮。
 损坏：顶灯和缘光变弱，台面有轻微磨损。`;
 
+export const CULT_B_NOTES = `培育地块B方案。同一套空地块，漆面马拉松绿，不是 A 的亚光白台。台上仍然没有设备，也没有作物。
+
+尺度与 A 相同：农场 4×4 km，7×7=49 地块，正中是中枢。样例 ${CULT_EMPTY.code}。地块外边 ${m1(CULT_EMPTY.plot)} m。4×4=16 单元，净边 ${m1(CULT_EMPTY.unit)} m。单元之间 ${m1(CULT_EMPTY.seam)} m 电缆沟。贴墙环路 ${m1(CULT_EMPTY.lane)} m。净高 ${CULT_EMPTY.clear} m。
+
+造型：高饱和凯利绿 / 森绿，清漆，高光。转角是大圆角，不是 A 的小倒角。亮红横带作结构强调。紫色发光点是点缀。墙背仍是光板，肋、梁、板缝、门框只在内皮。
+
+灯组：顶灯带、台缘、门灯、墙灯、紫灯。可逐组开关。1–4 仍是空闲、作业、选中、损坏。空闲顶灯大约两成。`;
+
 // span：沙盒里把镜头框住的边长（米）。和游戏里的模数一致，只用于取景。
 export const LAB_ENTRIES = [
   {
-    id: 'cult-empty',
+    id: 'cult-a',
     cls: 'unit',
-    name: '培育层·空单元',
+    name: '培育地块A方案',
     size: `${m1(CULT_EMPTY.unit)} × ${m1(CULT_EMPTY.unit)} m · 地块 ${m1(CULT_EMPTY.plot)} m`,
     span: 800,
     notes: CULT_EMPTY_NOTES,
+  },
+  {
+    id: 'cult-b',
+    cls: 'unit',
+    name: '培育地块B方案',
+    size: `${m1(CULT_EMPTY.unit)} × ${m1(CULT_EMPTY.unit)} m · 圆角 · 地块 ${m1(CULT_EMPTY.plot)} m`,
+    span: 800,
+    notes: CULT_B_NOTES,
   },
   { id: 'field', cls: 'unit', name: '地表田块', size: '128 × 128 m', span: 128, notes: '露天小格。地面是垄，四周是田埂。没有顶。' },
   { id: 'deck', cls: 'unit', name: '培育层地板', size: '128 × 128 m', span: 128, notes: '密封小格。金属地板、墙和顶缘。冷色缝灯。' },

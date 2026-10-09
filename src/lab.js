@@ -322,8 +322,9 @@ function buildIrrigator() {
   };
 }
 
-// 培育层空单元：一块地里 16 个抬缘白台。无设备、无作物。
-function buildCultEmpty() {
+// 培育地块。scheme a = 抬缘白台，b = 漆面绿。灯组挂在返回值上，工坊逐组开关。
+function buildCultPlot(scheme) {
+  const marathon = scheme === 'b';
   const U = CULT_EMPTY;
   const g = new THREE.Group();
   g.userData.alive = true;
@@ -332,26 +333,57 @@ function buildCultEmpty() {
     m.userData.dispose = true;
     return m;
   };
-  const floorMat = mat({ color: '#5a6164', roughness: 0.94, metalness: 0.04 });
-  const seamMat = mat({ color: '#1c2124', roughness: 0.96, metalness: 0.08 });
-  const cableMat = mat({ color: '#3a4145', roughness: 0.72, metalness: 0.35 });
-  const wallMat = mat({ color: '#2b3034', roughness: 0.84, metalness: 0.28 });
-  const ceilMat = mat({ color: '#23272b', roughness: 0.9, metalness: 0.2 });
-  const doorMat = mat({ color: '#8d9497', roughness: 0.78, metalness: 0.22 });
-  const doorBackMat = mat({ color: '#16191c', roughness: 0.9, metalness: 0.1 });
-  const apronMat = mat({ color: '#12151a', roughness: 0.96, metalness: 0.02 });
-  const padMat = mat({ color: '#c5c9c6', roughness: 0.9, metalness: 0.04, emissive: '#000000', emissiveIntensity: 0 });
-  const wearMat = mat({ color: '#6a645c', roughness: 1, metalness: 0 });
-  const ribMat = mat({ color: '#46525a', roughness: 0.58, metalness: 0.42 });
-  const beamMat = mat({ color: '#3c474e', roughness: 0.55, metalness: 0.48 });
-  const lineMat = mat({ color: '#1a1f23', roughness: 0.84, metalness: 0.16 });
-  const housingMat = mat({ color: '#171c20', roughness: 0.5, metalness: 0.55 });
-  const glowMat = mat({ color: '#06211e', emissive: '#c8fff6', emissiveIntensity: 3.2, roughness: 0.32, metalness: 0 });
-  const stripMat = mat({ color: '#041614', emissive: '#b6fff4', emissiveIntensity: 2.4, roughness: 0.28, metalness: 0 });
-  const slitMat = mat({ color: '#06302c', emissive: '#9ee8de', emissiveIntensity: 1.4, roughness: 0.4, metalness: 0 });
-  const gridMap = padGridTexture();
-  const gridMat = mat({ map: gridMap, color: '#f2f4f2', roughness: 0.92, metalness: 0.03, emissive: '#000000', emissiveIntensity: 0 });
-  const padBuilt = padGeometry(U.unit, U.raise, U.chamfer, U.bevel);
+  const gloss = (opts) => {
+    const m = new THREE.MeshPhysicalMaterial({ envMapIntensity: 1.05, ...opts });
+    m.userData.dispose = true;
+    return m;
+  };
+  const groups = {
+    strip: { id: 'strip', label: '顶灯带', on: true, lights: [], meshes: [] },
+    rim: { id: 'rim', label: '台缘', on: true, lights: [], meshes: [] },
+    door: { id: 'door', label: '门灯', on: true, lights: [], meshes: [] },
+    wall: { id: 'wall', label: '墙灯', on: true, lights: [], meshes: [] },
+  };
+  if (marathon) groups.accent = { id: 'accent', label: '紫灯', on: true, lights: [], meshes: [] };
+  const floorMat = marathon
+    ? gloss({ color: '#063318', roughness: 0.22, metalness: 0.08, clearcoat: 0.6, clearcoatRoughness: 0.25 })
+    : mat({ color: '#5a6164', roughness: 0.94, metalness: 0.04 });
+  const seamMat = mat({ color: marathon ? '#04150c' : '#1c2124', roughness: marathon ? 0.4 : 0.96, metalness: 0.08 });
+  const cableMat = mat({ color: marathon ? '#0a2414' : '#3a4145', roughness: 0.72, metalness: 0.35 });
+  const wallMat = marathon
+    ? gloss({ color: '#128a32', roughness: 0.16, metalness: 0.06, clearcoat: 0.9, clearcoatRoughness: 0.14 })
+    : mat({ color: '#2b3034', roughness: 0.84, metalness: 0.28 });
+  const ceilMat = mat({ color: marathon ? '#0a3d1c' : '#23272b', roughness: marathon ? 0.35 : 0.9, metalness: 0.2 });
+  const doorMat = marathon
+    ? gloss({ color: '#0f7a2c', roughness: 0.18, metalness: 0.08, clearcoat: 0.85, clearcoatRoughness: 0.16 })
+    : mat({ color: '#8d9497', roughness: 0.78, metalness: 0.22 });
+  const doorBackMat = mat({ color: marathon ? '#06210f' : '#16191c', roughness: 0.9, metalness: 0.1 });
+  const apronMat = mat({ color: marathon ? '#07140c' : '#12151a', roughness: 0.96, metalness: 0.02 });
+  const padMat = marathon
+    ? gloss({ color: '#16a33c', roughness: 0.14, metalness: 0.05, clearcoat: 1, clearcoatRoughness: 0.12 })
+    : mat({ color: '#c5c9c6', roughness: 0.9, metalness: 0.04, emissive: '#000000', emissiveIntensity: 0 });
+  const wearMat = mat({ color: marathon ? '#3a4a28' : '#6a645c', roughness: 1, metalness: 0 });
+  const ribMat = marathon
+    ? gloss({ color: '#0e6e2a', roughness: 0.18, metalness: 0.1, clearcoat: 0.75, clearcoatRoughness: 0.18 })
+    : mat({ color: '#46525a', roughness: 0.58, metalness: 0.42 });
+  const beamMat = marathon
+    ? gloss({ color: '#149438', roughness: 0.16, metalness: 0.08, clearcoat: 0.8, clearcoatRoughness: 0.16 })
+    : mat({ color: '#3c474e', roughness: 0.55, metalness: 0.48 });
+  const lineMat = mat({ color: marathon ? '#063318' : '#1a1f23', roughness: 0.84, metalness: 0.16 });
+  const redMat = gloss({ color: '#e10600', roughness: 0.2, metalness: 0.04, clearcoat: 0.7, clearcoatRoughness: 0.18, emissive: '#ff2a2a', emissiveIntensity: marathon ? 0.35 : 0 });
+  const housingMat = mat({ color: marathon ? '#08301a' : '#171c20', roughness: 0.5, metalness: 0.55 });
+  const glowMat = mat({ color: marathon ? '#3a1060' : '#06211e', emissive: marathon ? '#d28bff' : '#c8fff6', emissiveIntensity: 3.2, roughness: 0.32, metalness: 0 });
+  const stripMat = mat({ color: marathon ? '#063318' : '#041614', emissive: marathon ? '#b6ffc8' : '#b6fff4', emissiveIntensity: 2.4, roughness: 0.28, metalness: 0 });
+  const slitMat = mat({ color: marathon ? '#2a0848' : '#06302c', emissive: marathon ? '#c060ff' : '#9ee8de', emissiveIntensity: 1.4, roughness: 0.4, metalness: 0 });
+  const accentMat = mat({ color: '#2a0844', emissive: '#d090ff', emissiveIntensity: 2.8, roughness: 0.3, metalness: 0 });
+  const wallGlowMat = mat({ color: marathon ? '#0c2818' : '#041614', emissive: marathon ? '#b6ffc8' : '#c8fff6', emissiveIntensity: 1.8, roughness: 0.32, metalness: 0 });
+  const gridMap = padGridTexture(marathon);
+  const gridMat = marathon
+    ? gloss({ map: gridMap, color: '#ffffff', roughness: 0.16, metalness: 0.04, clearcoat: 0.85, clearcoatRoughness: 0.16 })
+    : mat({ map: gridMap, color: '#f2f4f2', roughness: 0.92, metalness: 0.03, emissive: '#000000', emissiveIntensity: 0 });
+  const corner = marathon ? 16 : U.chamfer;
+  const bevel = marathon ? 0.18 : U.bevel;
+  const padBuilt = padGeometry(U.unit, U.raise, corner, bevel, marathon);
   const padTop = padBuilt.top;
   const core = 4 * U.unit + 3 * U.seam;
   const origin = -core / 2 + U.unit / 2;
@@ -380,10 +412,10 @@ function buildCultEmpty() {
     addStrip(core - U.seam, 0.045, 0.62, 0, 0.07, at, cableMat);
   }
 
-  const glowW = 0.42;
-  const glowLen = U.unit - U.chamfer * 2 - 1.6;
-  const glowInset = 0.72;
-  const gridSize = U.unit - U.chamfer * 2 - 2.4;
+  const glowW = marathon ? 0.7 : 0.42;
+  const glowLen = U.unit - corner * 2 - 1.6;
+  const glowInset = marathon ? 1.35 : 0.72;
+  const gridSize = U.unit - corner * 2 - 2.4;
   const gridGeo = new THREE.PlaneGeometry(gridSize, gridSize).rotateX(-Math.PI / 2);
   for (const p of pads) {
     const mesh = new THREE.Mesh(padBuilt.geo, padMat);
@@ -399,10 +431,16 @@ function buildCultEmpty() {
     g.add(grid);
     const y = padTop + 0.028;
     const e = U.unit / 2 - glowInset;
-    addStrip(glowLen, 0.02, glowW, p.x, y, p.z - e, glowMat);
-    addStrip(glowLen, 0.02, glowW, p.x, y, p.z + e, glowMat);
-    addStrip(glowW, 0.02, glowLen, p.x - e, y, p.z, glowMat);
-    addStrip(glowW, 0.02, glowLen, p.x + e, y, p.z, glowMat);
+    for (const mesh of [
+      addStrip(glowLen, 0.02, glowW, p.x, y, p.z - e, glowMat),
+      addStrip(glowLen, 0.02, glowW, p.x, y, p.z + e, glowMat),
+      addStrip(glowW, 0.02, glowLen, p.x - e, y, p.z, glowMat),
+      addStrip(glowW, 0.02, glowLen, p.x + e, y, p.z, glowMat),
+    ]) groups.rim.meshes.push(mesh);
+    if (marathon) {
+      const band = addStrip(U.unit - corner * 2 - 8, 0.03, 0.7, p.x, y + 0.012, p.z, redMat);
+      if (p.n % 2) band.rotation.y = Math.PI / 2;
+    }
   }
 
   const labels = [];
@@ -431,7 +469,7 @@ function buildCultEmpty() {
     if (!g.userData.alive) return;
     for (const label of labels) {
       const prev = label.mesh.material.map;
-      label.mesh.material.map = labelTexture(label.text);
+      label.mesh.material.map = labelTexture(label.text, marathon ? '#f3fff4' : '#24272c');
       label.mesh.material.needsUpdate = true;
       if (prev) prev.dispose();
     }
@@ -461,15 +499,21 @@ function buildCultEmpty() {
       segment(a - cursor, 0, U.clear, cursor);
       segment(b - a, U.doorH, U.clear, a);
       addDoor(horizontal, sign, (a + b) / 2, fixed);
+      const doorCenter = (a + b) / 2;
+      const lampAt = -sign * (U.wall + 1.4);
+      const lamp = new THREE.PointLight(marathon ? '#c070ff' : '#9ee8de', 1, 18, 2);
+      lamp.position.set(horizontal ? doorCenter : fixed + lampAt, U.doorH * 0.62, horizontal ? fixed + lampAt : doorCenter);
+      g.add(lamp);
+      groups.door.lights.push(lamp);
       doors += 1;
       cursor = b;
     }
     segment(span1 - cursor, 0, U.clear, cursor);
   };
   const addDoor = (horizontal, sign, along, fixed) => {
-    const outer = sign * (U.wall / 2 - 0.16);
-    const x = horizontal ? along : fixed + outer;
-    const z = horizontal ? fixed + outer : along;
+    const innerFace = -sign * (U.wall / 2 - 0.16);
+    const x = horizontal ? along : fixed + innerFace;
+    const z = horizontal ? fixed + innerFace : along;
     const back = -sign * (U.wall / 2 - 0.06);
     const bx = horizontal ? along : fixed + back;
     const bz = horizontal ? fixed + back : along;
@@ -489,10 +533,18 @@ function buildCultEmpty() {
       leaf.castShadow = false;
       g.add(leaf);
       const slit = horizontal
-        ? box(leafW * 0.42, 0.04, 0.02, x + off, y + leafH * 0.16, z + sign * 0.07, slitMat)
-        : box(0.02, 0.04, leafW * 0.42, x + sign * 0.07, y + leafH * 0.16, z + off, slitMat);
+        ? box(leafW * 0.55, 0.14, 0.04, x + off, y + leafH * 0.18, z - sign * 0.09, slitMat)
+        : box(0.04, 0.14, leafW * 0.55, x - sign * 0.09, y + leafH * 0.18, z + off, slitMat);
       slit.castShadow = false;
       g.add(slit);
+      groups.door.meshes.push(slit);
+      if (marathon) {
+        const stripe = horizontal
+          ? box(leafW * 0.92, 0.16, 0.03, x + off, y - leafH * 0.22, z - sign * 0.07, redMat)
+          : box(0.03, 0.16, leafW * 0.92, x - sign * 0.07, y - leafH * 0.22, z + off, redMat);
+        stripe.castShadow = false;
+        g.add(stripe);
+      }
     }
     const sillY = 0.03;
     const sillAt = fixed - sign * (U.wall / 2 + 0.78);
@@ -506,10 +558,12 @@ function buildCultEmpty() {
   addWall(true, 1);
   addWall(false, -1);
   addWall(false, 1);
-  dressCultWall(g, true, -1, U, centers, beamMat, ribMat, lineMat);
-  dressCultWall(g, true, 1, U, centers, beamMat, ribMat, lineMat);
-  dressCultWall(g, false, -1, U, centers, beamMat, ribMat, lineMat);
-  dressCultWall(g, false, 1, U, centers, beamMat, ribMat, lineMat);
+  const wallKit = { beamMat, ribMat, lineMat, redMat, accentMat, marathon, groups };
+  dressCultWall(g, true, -1, U, centers, wallKit);
+  dressCultWall(g, true, 1, U, centers, wallKit);
+  dressCultWall(g, false, -1, U, centers, wallKit);
+  dressCultWall(g, false, 1, U, centers, wallKit);
+  if (marathon) addCornerFillets(g, U, wallMat, redMat, accentMat, groups);
 
   const lip = 8;
   const lipH = 0.55;
@@ -527,32 +581,49 @@ function buildCultEmpty() {
     light.rotation.set(-Math.PI / 2, 0, turn ? Math.PI / 2 : 0);
     g.add(light);
     rects.push(light);
+    groups.strip.lights.push(light);
   };
+  const stripColor = marathon ? '#e7ffe8' : '#d8fff8';
   for (const c of centers) {
-    addStrip(stripLen, 0.28, 1.35, 0, stripY + 0.12, c, housingMat);
-    addStrip(stripLen, 0.07, 0.55, 0, stripY - 0.08, c, stripMat);
-    addStrip(1.35, 0.28, stripLen, c, stripY + 0.18, 0, housingMat);
-    addStrip(0.55, 0.07, stripLen, c, stripY - 0.02, 0, stripMat);
-    hang(new THREE.RectAreaLight('#d8fff8', 1, stripLen, 2.4), 0, stripY - 0.4, c, false);
-    hang(new THREE.RectAreaLight('#d8fff8', 1, stripLen, 2.4), c, stripY - 0.32, 0, true);
+    for (const mesh of [
+      addStrip(stripLen, 0.28, 1.35, 0, stripY + 0.12, c, housingMat),
+      addStrip(stripLen, 0.07, 0.55, 0, stripY - 0.08, c, stripMat),
+      addStrip(1.35, 0.28, stripLen, c, stripY + 0.18, 0, housingMat),
+      addStrip(0.55, 0.07, stripLen, c, stripY - 0.02, 0, stripMat),
+    ]) groups.strip.meshes.push(mesh);
+    hang(new THREE.RectAreaLight(stripColor, 1, stripLen, 2.4), 0, stripY - 0.4, c, false);
+    hang(new THREE.RectAreaLight(stripColor, 1, stripLen, 2.4), c, stripY - 0.32, 0, true);
   }
   stripMat.side = THREE.DoubleSide;
   glowMat.side = THREE.DoubleSide;
+  wallGlowMat.side = THREE.DoubleSide;
+  const padColor = marathon ? '#e9ffe8' : '#e7f7f4';
   const padLights = pads.map(p => {
-    const L = new THREE.PointLight('#e7f7f4', 1, 0, 2);
+    const L = new THREE.PointLight(padColor, 1, 0, 2);
     L.position.set(p.x, U.clear - 2.4, p.z);
     g.add(L);
+    groups.strip.lights.push(L);
     return L;
   });
   const wallLights = [];
   for (const c of [centers[0], centers[3]]) {
     for (const sign of [-1, 1]) {
       const inset = sign * (U.plot / 2 - U.wall - 2.2);
-      for (const [x, y, z] of [[c, 8.2, inset], [inset, 8.2, c]]) {
-        const L = new THREE.PointLight('#d5eee8', 1, 0, 2);
-        L.position.set(x, y, z);
+      const face = sign * (U.plot / 2 - U.wall - 0.04);
+      for (const horiz of [true, false]) {
+        const x = horiz ? c : inset;
+        const z = horiz ? inset : c;
+        const L = new THREE.PointLight(marathon ? '#d8ffe4' : '#d5eee8', 1, 0, 2);
+        L.position.set(x, 8.2, z);
         g.add(L);
         wallLights.push(L);
+        groups.wall.lights.push(L);
+        const plate = horiz
+          ? box(7.2, 0.28, 0.07, c, 8.2, face, wallGlowMat)
+          : box(0.07, 0.28, 7.2, face, 8.2, c, wallGlowMat);
+        plate.castShadow = false;
+        g.add(plate);
+        groups.wall.meshes.push(plate);
       }
     }
   }
@@ -579,43 +650,96 @@ function buildCultEmpty() {
   g.add(wear);
 
   // 满照度记为 1。空闲顶灯约两成，作业略抬，选中把缘光拉开，损坏收暗。
+  // 灯组开关不写在这里：motion 先把该状态的照度铺上，applyLightGroups 再把关掉的组压成 0。
   const look = {
-    idle: { hemi: 0.11, sun: 0.05, padL: 7000, wallL: 2800, rect: 0.16, glowI: 3.4, stripI: 2.2, wear: false, grid: '#e7e9e7' },
-    job: { hemi: 0.14, sun: 0.06, padL: 16000, wallL: 5600, rect: 0.42, glowI: 5.2, stripI: 4.4, wear: false, grid: '#eceeed' },
-    sel: { hemi: 0.12, sun: 0.05, padL: 9000, wallL: 3400, rect: 0.24, glowI: 11, stripI: 3.2, wear: false, grid: '#eef1ee' },
-    break: { hemi: 0.06, sun: 0.03, padL: 1400, wallL: 600, rect: 0.03, glowI: 0.22, stripI: 0.16, wear: true, grid: '#b7b2aa' },
+    idle: { hemi: 0.11, sun: 0.05, padL: 7000, wallL: 2800, rect: 0.16, glowI: 3.4, stripI: 2.2, doorL: 1400, accentL: 1800, wear: false, grid: '#e7e9e7' },
+    job: { hemi: 0.14, sun: 0.06, padL: 16000, wallL: 5600, rect: 0.42, glowI: 5.2, stripI: 4.4, doorL: 2600, accentL: 2800, wear: false, grid: '#eceeed' },
+    sel: { hemi: 0.12, sun: 0.05, padL: 9000, wallL: 3400, rect: 0.24, glowI: 11, stripI: 3.2, doorL: 2000, accentL: 4200, wear: false, grid: '#eef1ee' },
+    break: { hemi: 0.06, sun: 0.03, padL: 1400, wallL: 600, rect: 0.03, glowI: 0.22, stripI: 0.16, doorL: 120, accentL: 80, wear: true, grid: '#b7b2aa' },
   };
+  const lightGroups = [groups.strip, groups.rim, groups.door, groups.wall];
+  if (groups.accent) lightGroups.push(groups.accent);
   g.userData.cult = {
     pads: pads.length, doors, labels: labels.length, unit: U.unit, plot: U.plot,
-    seam: U.seam, lane: U.lane, raise: padTop, lights: padLights.length + wallLights.length + rects.length,
+    seam: U.seam, lane: U.lane, raise: padTop, scheme: marathon ? 'b' : 'a',
+    lights: padLights.length + wallLights.length + rects.length + groups.door.lights.length + (groups.accent ? groups.accent.lights.length : 0),
+    groups: lightGroups.map(x => x.id),
   };
   return {
     group: g,
     ring: new THREE.Group(),
     ownState: true,
+    lightGroups,
     motion(_p, st) {
       const L = look[st] || look.idle;
       hemi.intensity = L.hemi;
       sun.intensity = L.sun;
       glowMat.emissiveIntensity = L.glowI;
       stripMat.emissiveIntensity = L.stripI;
-      slitMat.emissiveIntensity = L.stripI * 0.55;
-      gridMat.color.set(L.grid);
+      wallGlowMat.emissiveIntensity = L.stripI * 0.75;
+      slitMat.emissiveIntensity = marathon ? L.stripI * 0.95 : L.stripI * 0.55;
+      gridMat.color.set(marathon ? (st === 'break' ? '#c8c2b4' : '#ffffff') : L.grid);
       for (const light of padLights) light.intensity = L.padL;
       for (const light of wallLights) light.intensity = L.wallL;
       for (const light of rects) light.intensity = L.rect;
+      for (const light of groups.door.lights) light.intensity = L.doorL;
+      if (groups.accent) {
+        accentMat.emissiveIntensity = st === 'sel' ? 5.6 : st === 'break' ? 0.18 : st === 'job' ? 3.8 : 2.7;
+        for (const light of groups.accent.lights) light.intensity = L.accentL;
+      }
       wear.visible = L.wear;
     },
   };
 }
 
-function dressCultWall(g, horizontal, sign, U, centers, beamMat, ribMat, lineMat) {
+// 地块四角的大圆角。只在 B 方案用，柱心略埋进墙，弧面朝房间里。
+function addCornerFillets(g, U, wallMat, redMat, accentMat, groups) {
+  const r = 8;
+  const inner = U.plot / 2 - U.wall;
+  const geo = new THREE.CylinderGeometry(r, r, U.clear, 18, 1, false, 0, Math.PI / 2);
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+    let rot = 0;
+    if (sx > 0 && sz > 0) rot = 0;
+    else if (sx < 0 && sz > 0) rot = -Math.PI / 2;
+    else if (sx > 0 && sz < 0) rot = Math.PI / 2;
+    else rot = Math.PI;
+    const mesh = new THREE.Mesh(geo, wallMat);
+    mesh.position.set(sx * (inner - r + 0.08), U.clear / 2, sz * (inner - r + 0.08));
+    mesh.rotation.y = rot;
+    mesh.castShadow = false;
+    g.add(mesh);
+    const inv = 1 / Math.SQRT2;
+    const ux = sx * inv;
+    const uz = sz * inv;
+    for (const y of [6.6, 12.9]) {
+      const stripe = new THREE.Mesh(new THREE.BoxGeometry(11, 0.22, 0.16), redMat);
+      stripe.position.set(mesh.position.x + ux * (r - 0.02), y, mesh.position.z + uz * (r - 0.02));
+      stripe.rotation.y = Math.atan2(-sx, -sz);
+      stripe.castShadow = false;
+      g.add(stripe);
+    }
+    const orb = new THREE.Mesh(new THREE.SphereGeometry(0.42, 16, 12), accentMat);
+    orb.position.set(mesh.position.x + ux * (r - 0.15), 15.15, mesh.position.z + uz * (r - 0.15));
+    orb.castShadow = false;
+    g.add(orb);
+    groups.accent.meshes.push(orb);
+    const lamp = new THREE.PointLight('#c070ff', 1, 22, 2);
+    lamp.position.copy(orb.position);
+    g.add(lamp);
+    groups.accent.lights.push(lamp);
+  }
+}
+
+// 结构只做在内皮。墙背是光板：地块合并后背面几乎看不见。
+function dressCultWall(g, horizontal, sign, U, centers, kit) {
+  const { beamMat, ribMat, lineMat, redMat, accentMat, marathon, groups } = kit;
   const fixed = sign * (U.plot / 2 - U.wall / 2);
   const span0 = horizontal ? -U.plot / 2 : -(U.plot / 2 - U.wall);
   const span1 = -span0;
   const length = span1 - span0;
-  const put = (along, y, len, h, depth, side, material) => {
-    if (len <= 0.04 || h <= 0.04 || depth <= 0.01) return;
+  const put = (along, y, len, h, depth, material, proud = 0) => {
+    if (len <= 0.04 || h <= 0.04 || depth <= 0.01) return null;
+    const side = -sign * (U.wall / 2 + proud + depth / 2);
     const x = horizontal ? along : fixed + side;
     const z = horizontal ? fixed + side : along;
     const m = horizontal
@@ -623,59 +747,117 @@ function dressCultWall(g, horizontal, sign, U, centers, beamMat, ribMat, lineMat
       : box(depth, h, len, x, y, z, material);
     m.castShadow = false;
     g.add(m);
+    return m;
   };
-  const ext = depth => sign * (U.wall / 2 + depth / 2);
-  const inn = depth => -sign * (U.wall / 2 + depth / 2);
   const blocked = (a, pad = 1.1) => centers.some(c => Math.abs(a - c) < U.doorW / 2 + pad);
-  put(0, 16.15, length, 1.2, 0.78, ext(0.78), beamMat);
-  put(0, 16.15, length - 2, 0.7, 0.42, inn(0.42), beamMat);
-  put(0, 11.5, length, 0.36, 0.34, ext(0.34), beamMat);
-  put(0, 8.15, length, 0.32, 0.3, ext(0.3), beamMat);
+  const addColumn = (along, y0, h, radius) => {
+    const mesh = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius * 1.06, h, marathon ? 20 : 8), ribMat);
+    const side = -sign * (U.wall / 2 + radius);
+    mesh.position.set(horizontal ? along : fixed + side, y0 + h / 2, horizontal ? fixed + side : along);
+    mesh.castShadow = false;
+    g.add(mesh);
+    return mesh;
+  };
+  const addBand = (along, y, radius) => {
+    const mesh = new THREE.Mesh(new THREE.TorusGeometry(radius + 0.05, 0.1, 8, 18), redMat);
+    const side = -sign * (U.wall / 2 + radius);
+    mesh.position.set(horizontal ? along : fixed + side, y, horizontal ? fixed + side : along);
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.castShadow = false;
+    g.add(mesh);
+  };
+  const addAccent = (along, y, radius, withLamp) => {
+    if (!groups.accent) return;
+    const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.34, 14, 10), accentMat);
+    const side = -sign * (U.wall / 2 + radius + 0.05);
+    mesh.position.set(horizontal ? along : fixed + side, y, horizontal ? fixed + side : along);
+    mesh.castShadow = false;
+    g.add(mesh);
+    groups.accent.meshes.push(mesh);
+    if (!withLamp) return;
+    const lamp = new THREE.PointLight('#c070ff', 1, 26, 2);
+    lamp.position.copy(mesh.position);
+    g.add(lamp);
+    groups.accent.lights.push(lamp);
+  };
+
+  put(0, 16.15, length, marathon ? 0.85 : 1.15, marathon ? 0.62 : 0.72, beamMat, 0);
+  if (marathon) {
+    put(0, 13.35, length, 0.22, 0.08, redMat, 0.64);
+    put(0, 6.35, length, 0.18, 0.07, redMat, 0.02);
+  } else {
+    put(0, 11.5, length, 0.36, 0.34, beamMat, 0);
+    put(0, 8.15, length, 0.32, 0.3, beamMat, 0);
+  }
   const gaps = centers.map(c => [c - U.doorW / 2 - 1.15, c + U.doorW / 2 + 1.15]);
   let rail = span0;
   for (const [a, b] of gaps) {
-    if (a - rail > 3) put((rail + a) / 2, 0.42, a - rail - 0.3, 0.55, 0.36, ext(0.36), beamMat);
+    if (a - rail > 3) put((rail + a) / 2, 0.42, a - rail - 0.3, 0.55, marathon ? 0.42 : 0.36, beamMat, 0);
     rail = b;
   }
-  if (span1 - rail > 3) put((rail + span1) / 2, 0.42, span1 - rail - 0.3, 0.55, 0.36, ext(0.36), beamMat);
-  for (let a = span0 + 12; a < span1 - 8; a += 22) {
-    if (blocked(a, 1.4)) continue;
-    put(a, U.clear * 0.48, 1.35, U.clear - 1.6, 0.72, ext(0.72), ribMat);
-    put(a, U.clear * 0.46, 0.85, U.clear - 2.4, 0.4, inn(0.4), ribMat);
+  if (span1 - rail > 3) put((rail + span1) / 2, 0.42, span1 - rail - 0.3, 0.55, marathon ? 0.42 : 0.36, beamMat, 0);
+  const step = marathon ? 36 : 22;
+  const colR = marathon ? 1.15 : 0.62;
+  const midWall = (span0 + span1) / 2;
+  for (let a = span0 + step * 0.55; a < span1 - 8; a += step) {
+    if (blocked(a, marathon ? 2.4 : 1.4)) continue;
+    if (marathon) {
+      const h = U.clear - 1.35;
+      addColumn(a, 0.55, h, colR);
+      addBand(a, 6.35, colR);
+      addBand(a, 12.55, colR);
+      addAccent(a, 14.7, colR, Math.abs(a - midWall) < step);
+    } else {
+      put(a, U.clear * 0.48, 1.2, U.clear - 1.7, 0.64, ribMat, 0);
+    }
   }
-  for (let a = span0 + 5; a < span1 - 3; a += 7.4) {
-    if (blocked(a, 0.2)) continue;
-    put(a, 8.4, 0.07, 12.6, 0.05, ext(0.05), lineMat);
+  if (!marathon) {
+    for (let a = span0 + 5; a < span1 - 3; a += 7.4) {
+      if (blocked(a, 0.2)) continue;
+      put(a, 8.4, 0.07, 12.6, 0.045, lineMat, 0.02);
+    }
   }
   for (const c of centers) {
-    for (const s of [-1, 1]) {
-      const a = c + s * (U.doorW / 2 + 0.62);
-      put(a, U.doorH * 0.55, 0.72, U.doorH + 1.1, 0.58, ext(0.58), ribMat);
+    if (marathon) {
+      for (const s of [-1, 1]) addColumn(c + s * (U.doorW / 2 + 1.05), 0.2, U.doorH + 1.35, 0.48);
+      put(c, U.doorH + 0.72, U.doorW + 2.6, 0.2, 0.08, redMat, 0.55);
+    } else {
+      for (const s of [-1, 1]) {
+        const a = c + s * (U.doorW / 2 + 0.62);
+        put(a, U.doorH * 0.55, 0.7, U.doorH + 1.15, 0.52, ribMat, 0);
+      }
+      put(c, U.doorH + 0.55, U.doorW + 2.1, 0.72, 0.48, beamMat, 0);
+      put(c, U.doorH * 0.5, U.doorW + 0.2, 0.07, 0.05, lineMat, 0.5);
     }
-    put(c, U.doorH + 0.55, U.doorW + 2.1, 0.78, 0.62, ext(0.62), beamMat);
-    put(c, U.doorH * 0.5, U.doorW + 0.2, 0.08, 0.08, ext(0.08), lineMat);
   }
 }
 
-function padGridTexture() {
+function padGridTexture(marathon) {
   const S = 1024;
   const c = document.createElement('canvas');
   c.width = S;
   c.height = S;
   const g = c.getContext('2d');
-  g.fillStyle = '#e6e8e6';
+  const margin = marathon ? 28 : 36;
+  g.fillStyle = marathon ? '#14943a' : '#e6e8e6';
   g.fillRect(0, 0, S, S);
-  const margin = 36;
-  g.strokeStyle = 'rgba(92, 100, 104, 0.55)';
-  g.lineWidth = 4;
-  g.strokeRect(margin, margin, S - margin * 2, S - margin * 2);
-  g.strokeStyle = 'rgba(110, 118, 120, 0.42)';
-  g.lineWidth = 2;
-  g.strokeRect(margin + 18, margin + 18, S - (margin + 18) * 2, S - (margin + 18) * 2);
+  if (marathon) {
+    g.strokeStyle = '#e10600';
+    g.lineWidth = 14;
+    g.strokeRect(margin, margin, S - margin * 2, S - margin * 2);
+    g.strokeStyle = 'rgba(4, 48, 18, 0.72)';
+  } else {
+    g.strokeStyle = 'rgba(92, 100, 104, 0.55)';
+    g.lineWidth = 4;
+    g.strokeRect(margin, margin, S - margin * 2, S - margin * 2);
+    g.strokeStyle = 'rgba(110, 118, 120, 0.42)';
+    g.lineWidth = 2;
+    g.strokeRect(margin + 18, margin + 18, S - (margin + 18) * 2, S - (margin + 18) * 2);
+    g.strokeStyle = 'rgba(86, 94, 98, 0.38)';
+  }
   const cells = 4;
   const inner = S - margin * 2;
-  g.strokeStyle = 'rgba(86, 94, 98, 0.38)';
-  g.lineWidth = 2;
+  g.lineWidth = marathon ? 4 : 2;
   for (let i = 1; i < cells; i++) {
     const p = margin + inner * i / cells;
     g.beginPath();
@@ -687,8 +869,8 @@ function padGridTexture() {
     g.lineTo(p, S - margin);
     g.stroke();
   }
-  g.strokeStyle = 'rgba(120, 128, 130, 0.22)';
-  g.lineWidth = 1;
+  g.strokeStyle = marathon ? 'rgba(6, 70, 24, 0.55)' : 'rgba(120, 128, 130, 0.22)';
+  g.lineWidth = marathon ? 2 : 1;
   for (let i = 0; i < cells; i++) for (let j = 0; j < cells; j++) {
     const x = margin + inner * i / cells + 22;
     const y = margin + inner * j / cells + 22;
@@ -702,26 +884,39 @@ function padGridTexture() {
   return tex;
 }
 
-function padGeometry(size, height, chamfer, bevel) {
+function padGeometry(size, height, chamfer, bevel, rounded) {
   const h = size / 2;
-  const c = Math.min(chamfer, h * 0.4);
+  const c = Math.min(chamfer, h * 0.45);
   const sh = new THREE.Shape();
-  sh.moveTo(-h + c, -h);
-  sh.lineTo(h - c, -h);
-  sh.lineTo(h, -h + c);
-  sh.lineTo(h, h - c);
-  sh.lineTo(h - c, h);
-  sh.lineTo(-h + c, h);
-  sh.lineTo(-h, h - c);
-  sh.lineTo(-h, -h + c);
+  if (rounded) {
+    const r = c;
+    sh.moveTo(-h + r, -h);
+    sh.lineTo(h - r, -h);
+    sh.absarc(h - r, -h + r, r, -Math.PI / 2, 0, false);
+    sh.lineTo(h, h - r);
+    sh.absarc(h - r, h - r, r, 0, Math.PI / 2, false);
+    sh.lineTo(-h + r, h);
+    sh.absarc(-h + r, h - r, r, Math.PI / 2, Math.PI, false);
+    sh.lineTo(-h, -h + r);
+    sh.absarc(-h + r, -h + r, r, Math.PI, Math.PI * 1.5, false);
+  } else {
+    sh.moveTo(-h + c, -h);
+    sh.lineTo(h - c, -h);
+    sh.lineTo(h, -h + c);
+    sh.lineTo(h, h - c);
+    sh.lineTo(h - c, h);
+    sh.lineTo(-h + c, h);
+    sh.lineTo(-h, h - c);
+    sh.lineTo(-h, -h + c);
+  }
   sh.closePath();
   const geo = new THREE.ExtrudeGeometry(sh, {
     depth: Math.max(0.04, height - bevel * 2),
     bevelEnabled: bevel > 0,
     bevelThickness: bevel,
-    bevelSize: bevel * 0.55,
-    bevelSegments: 1,
-    curveSegments: 1,
+    bevelSize: rounded ? bevel : bevel * 0.55,
+    bevelSegments: rounded ? 3 : 1,
+    curveSegments: rounded ? 12 : 1,
     steps: 1,
   });
   geo.rotateX(-Math.PI / 2);
@@ -734,14 +929,14 @@ function padGeometry(size, height, chamfer, bevel) {
   return { geo, top: geo.boundingBox.max.y };
 }
 
-function labelTexture(text) {
+function labelTexture(text, ink) {
   const W = 2048, H = 320;
   const c = document.createElement('canvas');
   c.width = W;
   c.height = H;
   const g = c.getContext('2d');
   g.clearRect(0, 0, W, H);
-  g.fillStyle = '#24272c';
+  g.fillStyle = ink || '#24272c';
   g.font = '500 168px BarlowSC, sans-serif';
   g.textAlign = 'center';
   g.textBaseline = 'middle';
@@ -757,20 +952,23 @@ function labelTexture(text) {
 }
 
 function applyStageLight(entry) {
-  const interior = entry && entry.id === 'cult-empty';
+  const id = entry && entry.id;
+  const interior = id === 'cult-a' || id === 'cult-b';
+  const marathon = id === 'cult-b';
   sun.intensity = interior ? 0.08 : LIGHT0.sun;
-  sun.color.copy(interior ? C('#d5e6e8') : LIGHT0.sunColor);
+  sun.color.copy(interior ? C(marathon ? '#e7ffe4' : '#d5e6e8') : LIGHT0.sunColor);
   sun.shadow.bias = interior ? -0.0012 : LIGHT0.bias;
   sun.shadow.normalBias = interior ? 0.12 : 0;
   hemi.intensity = interior ? 0.16 : LIGHT0.hemi;
-  hemi.color.copy(interior ? C('#c9ddd8') : LIGHT0.hemiColor);
-  hemi.groundColor.copy(interior ? C('#1c2224') : LIGHT0.hemiGround);
-  scene.environmentIntensity = interior ? 0.08 : LIGHT0.env;
-  renderer.toneMappingExposure = interior ? 1.02 : LIGHT0.exp;
+  hemi.color.copy(interior ? C(marathon ? '#c6efd0' : '#c9ddd8') : LIGHT0.hemiColor);
+  hemi.groundColor.copy(interior ? C(marathon ? '#0c2414' : '#1c2224') : LIGHT0.hemiGround);
+  scene.environmentIntensity = interior ? (marathon ? 0.72 : 0.08) : LIGHT0.env;
+  renderer.toneMappingExposure = interior ? (marathon ? 1.05 : 1.02) : LIGHT0.exp;
 }
 
 const BUILD = {
-  'cult-empty': buildCultEmpty,
+  'cult-a': () => buildCultPlot('a'),
+  'cult-b': () => buildCultPlot('b'),
   field: () => buildUnit('field', 128),
   deck: () => buildUnit('deck', 128),
   hub: () => buildUnit('hub', 530),
@@ -813,11 +1011,11 @@ function frameSpan(entry) {
   eye.tz = 0;
   eye.yaw = entry.cls === 'rail' ? 0.7 : 0.85;
   eye.pitch = entry.cls === 'unit' ? 0.95 : entry.cls === 'rail' ? 0.42 : 0.46;
-  if (entry.id === 'cult-empty') {
-    eye.yaw = 0.46;
-    eye.pitch = 0.72;
+  if (entry.id === 'cult-a' || entry.id === 'cult-b') {
+    eye.yaw = entry.id === 'cult-b' ? 0.58 : 0.46;
+    eye.pitch = entry.id === 'cult-b' ? 0.58 : 0.72;
     eye.ty = 0.6;
-    eye.dist *= 0.94;
+    eye.dist *= entry.id === 'cult-b' ? 0.82 : 0.94;
   }
 }
 
@@ -835,12 +1033,58 @@ function show(id) {
   applyPose(frozen == null ? 0 : frozen);
   document.querySelectorAll('#catalog .ent').forEach(b => b.classList.toggle('on', b.dataset.id === entry.id));
   fillBrief(entry);
+  paintLights();
+}
+
+// 资产声明 lightGroups: [{ id, label, on, lights, meshes }]。没有灯组的资产不显示开关。
+function applyLightGroups() {
+  const groups = shown && shown.lightGroups;
+  if (!groups) return;
+  for (const g of groups) {
+    if (!g.on) for (const L of g.lights) L.intensity = 0;
+    for (const m of g.meshes) m.visible = !!g.on;
+  }
+}
+
+function paintLights() {
+  const bar = $('lights');
+  if (!bar) return;
+  bar.replaceChildren();
+  const groups = shown && shown.lightGroups;
+  if (!groups || !groups.length) {
+    bar.style.display = 'none';
+    return;
+  }
+  bar.style.display = 'flex';
+  const tag = document.createElement('i');
+  tag.textContent = '灯组';
+  bar.appendChild(tag);
+  for (const g of groups) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.dataset.light = g.id;
+    b.textContent = g.label;
+    b.className = g.on ? 'on' : 'off';
+    b.addEventListener('click', () => toggleLight(g.id));
+    bar.appendChild(b);
+  }
+}
+
+function toggleLight(id, force) {
+  const groups = shown && shown.lightGroups;
+  if (!groups) return;
+  const g = groups.find(x => x.id === id);
+  if (!g) return;
+  g.on = force == null ? !g.on : !!force;
+  applyPose(frozen == null ? ((performance.now() % 4200) / 4200) : frozen);
+  paintLights();
 }
 
 function applyPose(p) {
   if (!shown) return;
   if (shown.ownState) {
     if (motion) motion(p, state);
+    applyLightGroups();
     return;
   }
   shown.ring.visible = state === 'sel';
@@ -851,6 +1095,7 @@ function applyPose(p) {
     for (const m of shown.ring.children) m.material = alertMat;
   }
   if (motion) motion(p, state);
+  applyLightGroups();
 }
 
 function resize() {
@@ -903,7 +1148,8 @@ function classLabel(id) {
 }
 function fillBrief(entry) {
   const all = loadBriefs();
-  if (entry.id === 'cult-empty' && (!all[entry.id] || !String(all[entry.id].notes || '').includes('分格'))) {
+  const marker = entry.id === 'cult-b' ? '漆面' : entry.id === 'cult-a' ? '分格' : '';
+  if (marker && (!all[entry.id] || !String(all[entry.id].notes || '').includes(marker))) {
     all[entry.id] = {
       name: entry.name,
       cls: classLabel(entry.cls),
@@ -1039,4 +1285,9 @@ window.__lab = {
   look(part) { if (part) Object.assign(eye, part); },
   get cult() { return (shown && shown.group && shown.group.userData.cult) || null; },
   get brief() { return loadBriefs()[curId] || null; },
+  get lights() {
+    return ((shown && shown.lightGroups) || []).map(g => ({ id: g.id, label: g.label, on: g.on }));
+  },
+  toggleLight(id) { toggleLight(id); },
+  setLight(id, on) { toggleLight(id, on); },
 };

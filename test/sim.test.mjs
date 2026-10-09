@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { LAB_CLASSES, LAB_ENTRIES, CULT_EMPTY, CULT_EMPTY_NOTES } from '../src/lab-catalog.js';
+import { LAB_CLASSES, LAB_ENTRIES, CULT_EMPTY, CULT_EMPTY_NOTES, CULT_B_NOTES } from '../src/lab-catalog.js';
 import {
   CROPS, L, PLOT, FIELD_HA, fields, fieldAt, fieldAtWorld, focus, rigs,
   plantField, step, economy, quote, log, exportSnapshot, applySnapshot, RING,
@@ -426,13 +426,21 @@ test('asset lab lists the four classes and the live placeholders', () => {
 });
 
 test('empty cultivation unit matches the 4 km plot grid', () => {
-  const e = LAB_ENTRIES.find(x => x.id === 'cult-empty');
+  const e = LAB_ENTRIES.find(x => x.id === 'cult-a');
+  const b = LAB_ENTRIES.find(x => x.id === 'cult-b');
   assert.ok(e);
+  assert.ok(b);
   assert.equal(e.cls, 'unit');
-  assert.equal(LAB_ENTRIES[0].id, 'cult-empty');
-  assert.equal(e.name, '培育层·空单元');
+  assert.equal(b.cls, 'unit');
+  assert.equal(LAB_ENTRIES[0].id, 'cult-a');
+  assert.equal(e.name, '培育地块A方案');
+  assert.equal(b.name, '培育地块B方案');
   assert.equal(e.notes, CULT_EMPTY_NOTES);
+  assert.equal(b.notes, CULT_B_NOTES);
   assert.match(e.notes, /抬缘白台/);
+  assert.match(e.notes, /内皮/);
+  assert.match(b.notes, /漆面/);
+  assert.match(b.notes, /紫灯/);
   assert.match(e.notes, /C-3,2-U01/);
   assert.match(e.notes, /两成/);
   assert.equal(CULT_EMPTY.plots, 7);
