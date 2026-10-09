@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js';
 import { PALETTE } from './_shared.js';
-import { LAB_CLASSES, LAB_ENTRIES, CULT_EMPTY } from './lab-catalog.js';
+import { LAB_CLASSES, LAB_ENTRIES, CULT_EMPTY, planGrubColumns, GRUB_DEMO_GANTRIES, GRUB_WORK_MPS, GRUB_EMPTY_MPS } from './lab-catalog.js';
 import {
   tractorKit, planterKit, hillerKit, topperKit, potatoLifterKit,
   cultureTankKit, warehouseKit, garageKit, processKit, armKit, irrigatorKit,
@@ -323,8 +323,9 @@ function buildIrrigator() {
 }
 
 // 培育地块。scheme a = 抬缘白台，b = 漆面绿。灯组挂在返回值上，工坊逐组开关。
-function buildCultPlot(scheme) {
+function buildCultPlot(scheme, opts) {
   const marathon = scheme === 'b';
+  const weak = scheme === 'a' && !!(opts && opts.weak);
   const U = CULT_EMPTY;
   const g = new THREE.Group();
   g.userData.alive = true;
@@ -373,10 +374,10 @@ function buildCultPlot(scheme) {
   const redMat = gloss({ color: '#e10600', roughness: 0.2, metalness: 0.04, clearcoat: 0.7, clearcoatRoughness: 0.18, emissive: '#ff2a2a', emissiveIntensity: marathon ? 0.35 : 0 });
   const housingMat = mat({ color: marathon ? '#08301a' : '#171c20', roughness: 0.5, metalness: 0.55 });
   const glowMat = mat({ color: marathon ? '#3a1060' : '#06211e', emissive: marathon ? '#d28bff' : '#c8fff6', emissiveIntensity: 3.2, roughness: 0.32, metalness: 0 });
-  const stripMat = mat({ color: marathon ? '#063318' : '#041614', emissive: marathon ? '#b6ffc8' : '#b6fff4', emissiveIntensity: 2.4, roughness: 0.28, metalness: 0 });
-  const slitMat = mat({ color: marathon ? '#2a0848' : '#06302c', emissive: marathon ? '#c060ff' : '#9ee8de', emissiveIntensity: 1.4, roughness: 0.4, metalness: 0 });
+  const stripMat = mat({ color: marathon ? '#063318' : (weak ? '#14080c' : '#041614'), emissive: marathon ? '#b6ffc8' : (weak ? '#c01828' : '#b6fff4'), emissiveIntensity: 2.4, roughness: 0.28, metalness: 0 });
+  const slitMat = mat({ color: marathon ? '#2a0848' : (weak ? '#2a1c08' : '#06302c'), emissive: marathon ? '#c060ff' : (weak ? '#ffcc66' : '#9ee8de'), emissiveIntensity: 1.4, roughness: 0.4, metalness: 0 });
   const accentMat = mat({ color: '#2a0844', emissive: '#d090ff', emissiveIntensity: 2.8, roughness: 0.3, metalness: 0 });
-  const wallGlowMat = mat({ color: marathon ? '#0c2818' : '#041614', emissive: marathon ? '#b6ffc8' : '#c8fff6', emissiveIntensity: 1.8, roughness: 0.32, metalness: 0 });
+  const wallGlowMat = mat({ color: marathon ? '#0c2818' : '#041614', emissive: marathon ? '#b6ffc8' : (weak ? '#401018' : '#c8fff6'), emissiveIntensity: weak ? 0 : 1.8, roughness: 0.32, metalness: 0 });
   const gridMap = padGridTexture(marathon);
   const gridMat = marathon
     ? gloss({ map: gridMap, color: '#ffffff', roughness: 0.16, metalness: 0.04, clearcoat: 0.85, clearcoatRoughness: 0.16 })
@@ -541,7 +542,7 @@ function buildCultPlot(scheme) {
       addDoor(horizontal, sign, (a + b) / 2, fixed);
       const doorCenter = (a + b) / 2;
       const lampAt = -sign * (U.wall + 1.4);
-      const lamp = new THREE.PointLight(marathon ? '#c070ff' : '#9ee8de', 1, 18, 2);
+      const lamp = new THREE.PointLight(weak ? '#ffcc66' : (marathon ? '#c070ff' : '#9ee8de'), 1, weak ? 46 : 18, 2);
       lamp.position.set(horizontal ? doorCenter : fixed + lampAt, U.doorH * 0.62, horizontal ? fixed + lampAt : doorCenter);
       g.add(lamp);
       groups.door.lights.push(lamp);
@@ -623,21 +624,29 @@ function buildCultPlot(scheme) {
     rects.push(light);
     groups.strip.lights.push(light);
   };
-  const stripColor = marathon ? '#e7ffe8' : '#d8fff8';
+  const stripColor = weak ? '#8a1824' : marathon ? '#e7ffe8' : '#d8fff8';
   for (const c of centers) {
     for (const mesh of [
       addStrip(stripLen, 0.28, 1.35, 0, stripY + 0.12, c, housingMat),
-      addStrip(stripLen, 0.07, 0.55, 0, stripY - 0.08, c, stripMat),
+      addStrip(stripLen, 0.07, weak ? 1.7 : 0.55, 0, stripY - 0.08, c, stripMat),
       addStrip(1.35, 0.28, stripLen, c, stripY + 0.18, 0, housingMat),
-      addStrip(0.55, 0.07, stripLen, c, stripY - 0.02, 0, stripMat),
+      addStrip(weak ? 1.7 : 0.55, 0.07, stripLen, c, stripY - 0.02, 0, stripMat),
     ]) groups.strip.meshes.push(mesh);
     hang(new THREE.RectAreaLight(stripColor, 1, stripLen, 2.4), 0, stripY - 0.4, c, false);
     hang(new THREE.RectAreaLight(stripColor, 1, stripLen, 2.4), c, stripY - 0.32, 0, true);
   }
   stripMat.side = THREE.DoubleSide;
+  if (weak) {
+    const soffitMat = mat({ color: '#12080c', emissive: '#7a1520', emissiveIntensity: 0.42, roughness: 0.92, metalness: 0, side: THREE.DoubleSide });
+    const soffit = new THREE.Mesh(new THREE.PlaneGeometry(U.plot - 6, U.plot - 6).rotateX(Math.PI / 2), soffitMat);
+    soffit.position.y = U.clear - 0.85;
+    soffit.castShadow = false;
+    g.add(soffit);
+    groups.strip.meshes.push(soffit);
+  }
   glowMat.side = THREE.DoubleSide;
   wallGlowMat.side = THREE.DoubleSide;
-  const padColor = marathon ? '#e9ffe8' : '#e7f7f4';
+  const padColor = weak ? '#6a1420' : marathon ? '#e9ffe8' : '#e7f7f4';
   const padLights = pads.map(p => {
     const L = new THREE.PointLight(padColor, 1, 0, 2);
     L.position.set(p.x, U.clear - 2.4, p.z);
@@ -699,9 +708,12 @@ function buildCultPlot(scheme) {
   };
   const lightGroups = [groups.strip, groups.rim, groups.door, groups.wall];
   if (groups.accent) lightGroups.push(groups.accent);
+  if (weak) groups.wall.on = false;
   g.userData.cult = {
     pads: pads.length, doors, labels: labels.length, unit: U.unit, plot: U.plot,
-    seam: U.seam, lane: U.lane, raise: padTop, scheme: marathon ? 'b' : 'a',
+    seam: U.seam, lane: U.lane, raise: padTop, padTop, scheme: marathon ? 'b' : 'a',
+    padList: pads.map(p => ({ n: p.n, x: p.x, z: p.z })),
+    weak,
     lights: padLights.length + wallLights.length + rects.length + groups.door.lights.length + (groups.accent ? groups.accent.lights.length : 0),
     groups: lightGroups.map(x => x.id),
   };
@@ -711,6 +723,25 @@ function buildCultPlot(scheme) {
     ownState: true,
     lightGroups,
     motion(_p, st) {
+      if (weak) {
+        hemi.intensity = 0.02;
+        hemi.color.set('#241014');
+        hemi.groundColor.set('#0a0909');
+        sun.intensity = 0;
+        scene.environmentIntensity = 0.03;
+        renderer.toneMappingExposure = 0.96;
+        glowMat.emissiveIntensity = 0.1;
+        markerMat.emissiveIntensity = 0.16;
+        stripMat.emissiveIntensity = 2.2;
+        wallGlowMat.emissiveIntensity = 0;
+        slitMat.emissiveIntensity = 0.9;
+        gridMat.color.set('#9aa09c');
+        for (const light of padLights) light.intensity = 650;
+        for (const light of wallLights) light.intensity = 0;
+        for (const light of rects) light.intensity = 0.09;
+        for (const light of groups.door.lights) light.intensity = 520;
+        return;
+      }
       const L = look[st] || look.idle;
       hemi.intensity = L.hemi;
       sun.intensity = L.sun;
@@ -1013,13 +1044,13 @@ function applyStageLight(entry) {
   scene.environmentIntensity = interior ? (marathon ? 0.72 : 0.08) : LIGHT0.env;
   renderer.toneMappingExposure = interior ? (marathon ? 1.05 : 1.02) : LIGHT0.exp;
   if (id === 'grub-trough') {
-    sun.intensity = 0.42;
-    sun.color.copy(C('#e4eee6'));
-    hemi.intensity = 0.24;
-    hemi.color.copy(C('#d7e6de'));
-    hemi.groundColor.copy(C('#1a221e'));
-    scene.environmentIntensity = 0.3;
-    renderer.toneMappingExposure = 1.12;
+    sun.intensity = 0;
+    sun.color.copy(C('#4a2024'));
+    hemi.intensity = 0.02;
+    hemi.color.copy(C('#241014'));
+    hemi.groundColor.copy(C('#0a0909'));
+    scene.environmentIntensity = 0.03;
+    renderer.toneMappingExposure = 0.96;
   }
 }
 
@@ -1061,14 +1092,20 @@ function grubTexture() {
 // 一整套蛴螬培养槽：占一个培育单元，槽排之间走龙门。
 function buildGrubTrough() {
   const U = CULT_EMPTY;
+  const plot = buildCultPlot('a', { weak: true });
+  const host = plot.group;
+  const pad = host.userData.cult.padList[0];
+  host.userData.cult.occupied = { n: pad.n, x: pad.x, z: pad.z };
+  host.userData.cult.dim = '弱光';
   const g = new THREE.Group();
+  g.position.set(pad.x, 0, pad.z);
+  host.add(g);
+  const y0 = host.userData.cult.padTop;
   const mat = (opts) => {
     const m = new THREE.MeshStandardMaterial(opts);
     m.userData.dispose = true;
     return m;
   };
-  const apronMat = mat({ color: '#12151a', roughness: 0.96, metalness: 0.02 });
-  const padMatLocal = mat({ color: '#c5c9c6', roughness: 0.9, metalness: 0.04 });
   const shellMat = mat({ color: '#8a9296', roughness: 0.62, metalness: 0.28 });
   const wallMat = mat({ color: '#6e777c', roughness: 0.55, metalness: 0.34 });
   const railMat = mat({ color: '#3c4448', roughness: 0.7, metalness: 0.4 });
@@ -1076,26 +1113,13 @@ function buildGrubTrough() {
   const darkMat = mat({ color: '#2a3136', roughness: 0.58, metalness: 0.45 });
   const grubMap = grubTexture();
   const grubMat = mat({ map: grubMap, color: '#f3e6c8', roughness: 0.86, metalness: 0 });
-  const vatMat = mat({ color: '#12302c', emissive: '#b7fff0', emissiveIntensity: 1.6, roughness: 0.35, metalness: 0 });
-  const rigMat = mat({ color: '#102824', emissive: '#d8fff4', emissiveIntensity: 3.2, roughness: 0.3, metalness: 0 });
+  const vatMat = mat({ color: '#2a1014', emissive: '#ff2b30', emissiveIntensity: 2.2, roughness: 0.35, metalness: 0 });
+  const rigMat = mat({ color: '#2a1014', emissive: '#ff2b30', emissiveIntensity: 3.2, roughness: 0.3, metalness: 0 });
   const groups = {
     vat: { id: 'vat', label: '槽灯', on: true, lights: [], meshes: [] },
     rig: { id: 'rig', label: '巡灯', on: true, lights: [], meshes: [] },
+    status: { id: 'status', label: '状态灯', on: true, lights: [], meshes: [] },
   };
-
-  const apron = new THREE.Mesh(new THREE.PlaneGeometry(U.unit + 46, U.unit + 46).rotateX(-Math.PI / 2), apronMat);
-  apron.position.y = -0.04;
-  apron.receiveShadow = true;
-  g.add(apron);
-  const padBuilt = padGeometry(U.unit, U.raise, U.chamfer, U.bevel, false);
-  const pad = new THREE.Mesh(padBuilt.geo, padMatLocal);
-  pad.receiveShadow = true;
-  g.add(pad);
-  const gridSize = U.unit - U.chamfer * 2 - 2.4;
-  const grid = new THREE.Mesh(new THREE.PlaneGeometry(gridSize, gridSize).rotateX(-Math.PI / 2), mat({ map: padGridTexture(false), color: '#f2f4f2', roughness: 0.92, metalness: 0.03 }));
-  grid.position.y = padBuilt.top + 0.012;
-  grid.receiveShadow = true;
-  g.add(grid);
 
   const troughL = 15;
   const troughW = 4;
@@ -1104,24 +1128,31 @@ function buildGrubTrough() {
   const usable = U.unit - 16;
   const nLong = Math.floor((usable + endGap) / (troughL + endGap));
   const nRows = Math.floor((usable + aisle) / (troughW + aisle));
-  const n = nLong * nRows;
   const spanX = nLong * troughL + (nLong - 1) * endGap;
   const spanZ = nRows * troughW + (nRows - 1) * aisle;
   const x0 = -spanX / 2 + troughL / 2;
   const z0 = -spanZ / 2 + troughW / 2;
+  const pitchX = troughL + endGap;
   const pitch = troughW + aisle;
-  const y0 = padBuilt.top;
+  const slots = [];
+  for (let row = 0; row < nRows; row++) {
+    for (let col = 0; col < nLong; col++) {
+      if (col === 0 && row < 2) continue;
+      slots.push({ col, row, i: slots.length, x: x0 + col * pitchX, z: z0 + row * pitch });
+    }
+  }
+  const n = slots.length;
+  const doorA = { x: x0, z: z0, name: 'A' };
+  const doorB = { x: x0, z: z0 + pitch, name: 'B' };
 
-  const placeAll = (mesh, y, lift = 0) => {
+  const placeAll = (mesh, y) => {
     const dummy = new THREE.Object3D();
-    for (let i = 0; i < n; i++) {
-      const col = i % nLong;
-      const row = Math.floor(i / nLong);
-      dummy.position.set(x0 + col * (troughL + endGap), y0 + y + lift, z0 + row * pitch);
+    for (const s of slots) {
+      dummy.position.set(s.x, y0 + y, s.z);
       dummy.rotation.set(0, 0, 0);
       dummy.scale.set(1, 1, 1);
       dummy.updateMatrix();
-      mesh.setMatrixAt(i, dummy.matrix);
+      mesh.setMatrixAt(s.i, dummy.matrix);
     }
     mesh.castShadow = false;
     g.add(mesh);
@@ -1132,12 +1163,10 @@ function buildGrubTrough() {
   for (const side of [-1, 1]) {
     const mesh = new THREE.InstancedMesh(longGeo, wallMat, n);
     const dummy = new THREE.Object3D();
-    for (let i = 0; i < n; i++) {
-      const col = i % nLong;
-      const row = Math.floor(i / nLong);
-      dummy.position.set(x0 + col * (troughL + endGap), y0 + 0.49, z0 + row * pitch + side * (troughW / 2 - 0.06));
+    for (const s of slots) {
+      dummy.position.set(s.x, y0 + 0.49, s.z + side * (troughW / 2 - 0.06));
       dummy.updateMatrix();
-      mesh.setMatrixAt(i, dummy.matrix);
+      mesh.setMatrixAt(s.i, dummy.matrix);
     }
     mesh.castShadow = false;
     g.add(mesh);
@@ -1146,12 +1175,10 @@ function buildGrubTrough() {
   for (const side of [-1, 1]) {
     const mesh = new THREE.InstancedMesh(shortGeo, wallMat, n);
     const dummy = new THREE.Object3D();
-    for (let i = 0; i < n; i++) {
-      const col = i % nLong;
-      const row = Math.floor(i / nLong);
-      dummy.position.set(x0 + col * (troughL + endGap) + side * (troughL / 2 - 0.06), y0 + 0.49, z0 + row * pitch);
+    for (const s of slots) {
+      dummy.position.set(s.x + side * (troughL / 2 - 0.06), y0 + 0.49, s.z);
       dummy.updateMatrix();
-      mesh.setMatrixAt(i, dummy.matrix);
+      mesh.setMatrixAt(s.i, dummy.matrix);
     }
     mesh.castShadow = false;
     g.add(mesh);
@@ -1159,130 +1186,364 @@ function buildGrubTrough() {
   const grubMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(troughL - 0.46, 0.5, troughW - 0.42), grubMat, n);
   const grubDummy = new THREE.Object3D();
   const grubBase = [];
-  for (let i = 0; i < n; i++) {
-    const col = i % nLong;
-    const row = Math.floor(i / nLong);
-    grubDummy.position.set(x0 + col * (troughL + endGap), y0 + 0.38, z0 + row * pitch);
+  for (const s of slots) {
+    grubDummy.position.set(s.x, y0 + 0.38, s.z);
     grubDummy.scale.set(1, 1, 1);
     grubDummy.updateMatrix();
-    grubBase.push(grubDummy.matrix.clone());
-    grubMesh.setMatrixAt(i, grubDummy.matrix);
-    grubMesh.setColorAt(i, new THREE.Color('#ffffff'));
+    grubBase[s.i] = grubDummy.matrix.clone();
+    grubMesh.setMatrixAt(s.i, grubDummy.matrix);
+    grubMesh.setColorAt(s.i, new THREE.Color('#ffffff'));
   }
   grubMesh.castShadow = false;
   g.add(grubMesh);
   const vatMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(troughL - 0.8, 0.06, 0.08), vatMat, n);
   const vatDummy = new THREE.Object3D();
-  for (let i = 0; i < n; i++) {
-    const col = i % nLong;
-    const row = Math.floor(i / nLong);
-    vatDummy.position.set(x0 + col * (troughL + endGap), y0 + 0.9, z0 + row * pitch + troughW / 2 - 0.16);
+  for (const s of slots) {
+    vatDummy.position.set(s.x, y0 + 0.9, s.z + troughW / 2 - 0.16);
     vatDummy.updateMatrix();
-    vatMesh.setMatrixAt(i, vatDummy.matrix);
+    vatMesh.setMatrixAt(s.i, vatDummy.matrix);
   }
   vatMesh.castShadow = false;
   g.add(vatMesh);
   groups.vat.meshes.push(vatMesh);
 
-  for (let r = -1; r < nRows; r++) {
+  for (let r = 0; r < nRows - 1; r++) {
     const z = z0 + r * pitch + troughW / 2 + aisle / 2;
-    const rail = box(spanX + 8, 0.045, 0.12, 0, y0 + 0.03, z, railMat);
+    const xMin = r < 1 ? x0 + pitchX - troughL / 2 : -spanX / 2 - 1;
+    const xMax = spanX / 2 + 1;
+    const rail = box(xMax - xMin, 0.045, 0.12, (xMin + xMax) / 2, y0 + 0.03, z, railMat);
     rail.castShadow = false;
     g.add(rail);
   }
-
-  const patrolRow = Math.floor(nRows / 2);
-  const patrolZ = z0 + patrolRow * pitch;
-  const legZ = troughW / 2 + aisle / 2;
-  const gantry = new THREE.Group();
-  gantry.position.y = y0;
-  const legH = 4.55;
-  const addG = (w, h, d, x, y, z, material) => {
-    const m = box(w, h, d, x, y, z, material);
-    m.castShadow = false;
-    gantry.add(m);
-    return m;
+  const signTex = (text) => {
+    const c = document.createElement('canvas');
+    c.width = 512;
+    c.height = 160;
+    const ctx = c.getContext('2d');
+    ctx.clearRect(0, 0, 512, 160);
+    ctx.fillStyle = '#f7f4ee';
+    ctx.font = '500 92px BarlowSC, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, 256, 84);
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.needsUpdate = true;
+    return tex;
   };
-  for (const s of [-1, 1]) {
-    addG(0.34, legH, 0.34, 0, legH / 2, s * legZ, steelMat);
-    addG(0.85, 0.2, 0.62, 0, 0.12, s * legZ, darkMat);
-  }
-  addG(0.46, 0.34, legZ * 2 + 0.7, 0, legH, 0, steelMat);
-  addG(0.16, 0.12, legZ * 2 - 0.4, 0, legH - 0.72, 0, steelMat);
-  addG(1.25, 0.62, 0.9, 0, legH + 0.46, 0, darkMat);
-  const head = new THREE.Group();
-  gantry.add(head);
-  const headBody = box(0.62, 0.28, 0.62, 0, 0, 0, steelMat);
-  headBody.castShadow = false;
-  head.add(headBody);
-  const nozzle = box(0.2, 0.85, 0.2, 0, -0.52, 0, steelMat);
-  nozzle.castShadow = false;
-  head.add(nozzle);
-  const tip = box(0.32, 0.08, 0.32, 0, -0.98, 0, rigMat);
-  tip.castShadow = false;
-  head.add(tip);
-  head.position.y = legH - 1.15;
-  const lamp = addG(0.7, 0.1, 0.18, 1.05, legH - 0.32, 0, rigMat);
-  const lampLight = new THREE.PointLight('#e8fff6', 1800, 18, 2);
-  lampLight.position.set(1.05, legH - 0.55, 0);
-  gantry.add(lampLight);
-  groups.rig.meshes.push(lamp, tip);
-  groups.rig.lights.push(lampLight);
-  g.add(gantry);
+  const addDoor = (door, title, rimHex) => {
+    const pit = box(14.4, 0.42, 3.55, door.x, y0 - 0.16, door.z, darkMat);
+    pit.castShadow = false;
+    g.add(pit);
+    const rimMat = mat({ color: '#14181c', emissive: rimHex, emissiveIntensity: 1.8, roughness: 0.4, metalness: 0.2 });
+    for (const [w, d, zof, xof] of [[14.6, 0.12, 1.85, 0], [14.6, 0.12, -1.85, 0], [0.12, 3.7, 0, 7.3], [0.12, 3.7, 0, -7.3]]) {
+      const rim = box(w, 0.08, d, door.x + xof, y0 + 0.06, door.z + zof, rimMat);
+      rim.castShadow = false;
+      g.add(rim);
+    }
+    const face = new THREE.MeshBasicMaterial({ map: signTex(title), transparent: true, depthWrite: false });
+    face.userData.dispose = true;
+    const label = new THREE.Mesh(new THREE.PlaneGeometry(6.4, 2), face);
+    label.position.set(door.x, y0 + 0.08, door.z);
+    label.rotation.x = -Math.PI / 2;
+    g.add(label);
+  };
+  addDoor(doorA, 'A 出', '#ffb25a');
+  addDoor(doorB, 'B 进', '#8fd0ff');
 
   const xStart = x0 - troughL / 2 + 1.2;
-  const xEnd = x0 + (nLong - 1) * (troughL + endGap) + troughL / 2 - 1.2;
+  const xEnd = x0 + (nLong - 1) * pitchX + troughL / 2 - 1.2;
+  const parkX = xEnd + 3.2;
+  const legZ = troughW / 2 + aisle / 2;
+  const legH = 4.55;
+  const WORK = GRUB_WORK_MPS;
+  const EMPTY = GRUB_EMPTY_MPS;
+  const futureJobs = { feed() {}, patrol() {}, stir() {} };
+  const phaseTex = (text) => {
+    const c = document.createElement('canvas');
+    c.width = 256;
+    c.height = 64;
+    const ctx = c.getContext('2d');
+    ctx.clearRect(0, 0, 256, 64);
+    ctx.fillStyle = '#f4efe6';
+    ctx.font = '500 36px BarlowSC, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, 128, 34);
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.needsUpdate = true;
+    return tex;
+  };
+  const PHASE = { rest: '停靠', empty: '空驶', work: '作业', lift: '起箱', carry: '送出', drop: '交出', pick: '取箱', return: '回位', place: '落箱', sel: '选中', break: '损坏' };
+  const statusColor = { rest: '#e2b15c', empty: '#6eb6ff', work: '#3dff7a', break: '#ff5a4a' };
+
+  const makeGantry = () => {
+    const gantry = new THREE.Group();
+    gantry.position.y = y0;
+    const addG = (w, h, d, x, y, z, material) => {
+      const m = box(w, h, d, x, y, z, material);
+      m.castShadow = false;
+      gantry.add(m);
+      return m;
+    };
+    for (const s of [-1, 1]) {
+      addG(0.34, legH, 0.34, 0, legH / 2, s * legZ, steelMat);
+      addG(0.85, 0.2, 0.62, 0, 0.12, s * legZ, darkMat);
+    }
+    addG(0.46, 0.34, legZ * 2 + 0.7, 0, legH, 0, steelMat);
+    addG(0.16, 0.12, legZ * 2 - 0.4, 0, legH - 0.72, 0, steelMat);
+    addG(1.25, 0.62, 0.9, 0, legH + 0.46, 0, darkMat);
+    const head = new THREE.Group();
+    gantry.add(head);
+    const headBody = box(0.62, 0.28, 0.62, 0, 0, 0, steelMat);
+    headBody.castShadow = false;
+    head.add(headBody);
+    const nozzle = box(0.2, 0.85, 0.2, 0, -0.52, 0, steelMat);
+    nozzle.castShadow = false;
+    head.add(nozzle);
+    const tip = box(0.32, 0.08, 0.32, 0, -0.98, 0, rigMat);
+    tip.castShadow = false;
+    head.add(tip);
+    const carried = new THREE.Group();
+    carried.position.y = -1.2;
+    head.add(carried);
+    const shell = box(14.2, 0.55, 3.35, 0, 0, 0, shellMat);
+    shell.castShadow = false;
+    const fill = box(13.5, 0.28, 2.85, 0, 0.22, 0, grubMat);
+    fill.castShadow = false;
+    carried.add(shell, fill);
+    carried.visible = false;
+    head.position.y = 3.35;
+    const lamp = addG(0.7, 0.1, 0.18, 1.05, legH - 0.32, 0, rigMat);
+    const lampLight = new THREE.PointLight('#ff2b30', 700, 18, 2);
+    lampLight.position.set(1.05, legH - 0.55, 0);
+    gantry.add(lampLight);
+    const statusMat = mat({ color: '#2a2418', emissive: statusColor.rest, emissiveIntensity: 3.4, roughness: 0.3, metalness: 0 });
+    const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.22, 12, 8), statusMat);
+    beacon.position.set(0, legH + 1.02, 0);
+    beacon.castShadow = false;
+    gantry.add(beacon);
+    const statusLight = new THREE.PointLight(statusColor.rest, 500, 10, 2);
+    statusLight.position.set(0, legH + 1.15, 0);
+    gantry.add(statusLight);
+    const labelMat = new THREE.MeshBasicMaterial({ map: phaseTex('停靠'), transparent: true, depthWrite: false });
+    labelMat.userData.dispose = true;
+    const label = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 0.85), labelMat);
+    label.position.set(0, legH + 1.62, 0);
+    gantry.add(label);
+    groups.rig.meshes.push(lamp, tip);
+    groups.rig.lights.push(lampLight);
+    groups.status.meshes.push(beacon, label);
+    groups.status.lights.push(statusLight);
+    g.add(gantry);
+    return { gantry, head, carried, fill, lampLight, statusMat, statusLight, label, labelMat, labelText: '停靠' };
+  };
+
+  const westOf = (row) => (row < 2 ? x0 + pitchX - troughL / 2 + 1.4 : xStart);
+  const rowZ = (row) => z0 + row * pitch;
+  const durOf = (seg) => seg.dur != null ? seg.dur : Math.max(0.08, Math.hypot(seg.x1 - seg.x0, seg.z1 - seg.z0) / seg.speed);
+  const makeScript = (rowList) => {
+    const segs = [];
+    const parkZ = rowZ(rowList[0]);
+    let x = parkX;
+    let z = parkZ;
+    let dir = -1;
+    const pushMove = (kind, x1, z1, speed, mode, extra) => {
+      segs.push({ kind, x0: x, x1, z0: z, z1, speed, mode, ...extra });
+      x = x1;
+      z = z1;
+    };
+    for (let i = 0; i < rowList.length; i++) {
+      const row = rowList[i];
+      const zRow = rowZ(row);
+      if (Math.abs(z - zRow) > 0.04) pushMove('shift', x, zRow, EMPTY, 'empty');
+      const dest = dir < 0 ? westOf(row) : xEnd;
+      const harvest = i === 0 ? slots.find(s => s.row === row && s.col === nLong - 2) : null;
+      const hx = harvest ? harvest.x : null;
+      const passes = harvest && ((dir < 0 && hx <= x + 0.01 && hx >= dest - 0.01) || (dir > 0 && hx >= x - 0.01 && hx <= dest + 0.01));
+      if (passes) {
+        pushMove('work', hx, z, WORK, 'work');
+        segs.push({ kind: 'lift', x0: hx, x1: hx, z0: z, z1: z, dur: 1.6, mode: 'work', slot: harvest.i });
+        pushMove('carry', doorA.x, doorA.z, EMPTY, 'work', { slot: harvest.i });
+        segs.push({ kind: 'drop', x0: doorA.x, x1: doorA.x, z0: doorA.z, z1: doorA.z, dur: 1.25, mode: 'work', slot: harvest.i });
+        pushMove('fetch', doorB.x, doorB.z, EMPTY, 'empty');
+        segs.push({ kind: 'pick', x0: doorB.x, x1: doorB.x, z0: doorB.z, z1: doorB.z, dur: 1.25, mode: 'work' });
+        pushMove('return', hx, zRow, EMPTY, 'work', { slot: harvest.i });
+        segs.push({ kind: 'place', x0: hx, x1: hx, z0: zRow, z1: zRow, dur: 1.25, mode: 'work', slot: harvest.i });
+      }
+      if (Math.abs(x - dest) > 0.05) pushMove('work', dest, z, WORK, 'work');
+      dir *= -1;
+    }
+    if (Math.abs(z - parkZ) > 0.04) pushMove('shift', x, parkZ, EMPTY, 'empty');
+    if (Math.abs(x - parkX) > 0.05) pushMove('home', parkX, parkZ, EMPTY, 'empty');
+    let t = 0;
+    let liftAt = 0;
+    for (const seg of segs) {
+      seg.dur = durOf(seg);
+      seg.t0 = t;
+      if (seg.kind === 'lift' && !liftAt) liftAt = t;
+      t += seg.dur;
+    }
+    return { segs, total: Math.max(1, t), liftAt, parkZ };
+  };
+
+  const columns = planGrubColumns(nRows, GRUB_DEMO_GANTRIES);
+  const rigs = columns.map((rows, gi) => {
+    const rig = makeGantry();
+    const script = makeScript(rows);
+    rig.rows = rows;
+    rig.script = script;
+    rig.offset = gi * 22;
+    return rig;
+  });
+
   const ring = salmonRing(U.unit * 1.01, U.unit * 1.01, y0 + 0.2);
   g.add(ring);
   const bad = new Set();
   for (let i = 0; i < n; i++) if (i % 11 === 4) bad.add(i);
+  let jobAnchor = null;
 
-  g.userData.grub = { n, nLong, nRows, troughL, troughW, aisle };
+  const sample = (script, time) => {
+    const local = ((time % script.total) + script.total) % script.total;
+    for (let i = 0; i < script.segs.length; i++) {
+      const seg = script.segs[i];
+      if (local <= seg.t0 + seg.dur || i === script.segs.length - 1) {
+        const u = seg.dur <= 1e-4 ? 1 : Math.min(1, Math.max(0, (local - seg.t0) / seg.dur));
+        return { seg, u, index: i };
+      }
+    }
+    return { seg: script.segs[0], u: 0, index: 0 };
+  };
+  const lerp = (a, b, u) => a + (b - a) * u;
+  const headY = (kind, u) => {
+    const up = 3.35, low = 2.15, down = 1.22, carry = 3.6;
+    if (kind === 'work') return low;
+    if (kind === 'lift') return u < 0.35 ? lerp(low, down, u / 0.35) : lerp(down, carry, (u - 0.35) / 0.65);
+    if (kind === 'carry' || kind === 'return') return carry;
+    if (kind === 'drop') return lerp(carry, down, u);
+    if (kind === 'pick') return lerp(down, carry, u);
+    if (kind === 'place') return lerp(carry, down, Math.min(1, u / 0.7));
+    return up;
+  };
+  const showingBox = (kind, u) => {
+    if (kind === 'lift') return u >= 0.35;
+    if (kind === 'carry' || kind === 'drop' || kind === 'return') return true;
+    if (kind === 'pick') return u >= 0.15;
+    if (kind === 'place') return u < 0.82;
+    return false;
+  };
+  const fullBox = (kind) => kind === 'lift' || kind === 'carry' || kind === 'drop';
+  const setLabel = (rig, text) => {
+    if (rig.labelText === text) return;
+    const prev = rig.labelMat.map;
+    rig.labelMat.map = phaseTex(text);
+    rig.labelMat.needsUpdate = true;
+    if (prev) prev.dispose();
+    rig.labelText = text;
+  };
+
+  host.userData.grub = {
+    n, nLong, nRows, troughL, troughW, aisle,
+    gantries: rigs.length,
+    options: [2, 4],
+    workMps: WORK,
+    emptyMps: EMPTY,
+    jobs: ['feed', 'patrol', 'stir', 'cycle'],
+    activeJob: 'cycle',
+    cycle: rigs[0].script.total,
+    liftAt: rigs[0].script.liftAt,
+    phases: [],
+    dim: '弱光',
+    vatColor: '#ff2b30',
+    rigColor: '#ff2b30',
+    plotDim: { strip: '#8a1824', door: '#ffcc66', wall: 'off' },
+  };
   return {
-    group: g,
+    group: host,
     ring,
     ownState: true,
-    lightGroups: [groups.vat, groups.rig],
-    motion(p, st) {
-      const travel = xStart + (xEnd - xStart) * (0.5 - 0.5 * Math.cos(p * Math.PI * 2));
-      if (st === 'job') {
-        gantry.position.x = travel;
-        gantry.position.z = patrolZ;
-        gantry.rotation.z = 0;
-        head.position.y = legH - 2.05;
-      } else if (st === 'break') {
-        gantry.position.x = xStart + (xEnd - xStart) * 0.37;
-        gantry.position.z = patrolZ;
-        gantry.rotation.z = 0.045;
-        head.position.y = legH - 1.7;
-      } else {
-        gantry.position.x = xStart;
-        gantry.position.z = patrolZ;
-        gantry.rotation.z = 0;
-        head.position.y = legH - 1.15;
+    lightGroups: [...plot.lightGroups, groups.vat, groups.rig, groups.status],
+    motion(_p, st) {
+      plot.motion(_p, st);
+      if (st !== 'job') jobAnchor = null;
+      else if (frozen == null && jobAnchor == null) {
+        jobAnchor = performance.now() / 1000;
+        futureJobs.patrol();
       }
-      vatMat.emissiveIntensity = st === 'job' ? 2.8 : st === 'sel' ? 2.2 : st === 'break' ? 0.25 : 1.15;
-      rigMat.emissiveIntensity = st === 'job' ? 6.5 : st === 'sel' ? 3.4 : st === 'break' ? 0.2 : 1.4;
-      lampLight.intensity = st === 'job' ? 9000 : st === 'sel' ? 2800 : st === 'break' ? 80 : 700;
+      const live = jobAnchor == null ? 0 : performance.now() / 1000 - jobAnchor;
+      const t0 = frozen != null && st === 'job' ? ((frozen % 1) + 1) % 1 * rigs[0].script.total : live;
+      const hidden = new Set();
+      const phases = [];
+      for (const rig of rigs) {
+        const { gantry, head, carried, fill, statusMat, statusLight, lampLight } = rig;
+        gantry.rotation.z = 0;
+        let kind = 'rest';
+        let mode = 'rest';
+        let pose = { x: parkX, z: rig.script.parkZ, u: 0 };
+        if (st === 'job') {
+          const hit = sample(rig.script, t0 + rig.offset);
+          kind = hit.seg.kind;
+          mode = hit.seg.mode;
+          pose = { x: lerp(hit.seg.x0, hit.seg.x1, hit.u), z: lerp(hit.seg.z0, hit.seg.z1, hit.u), u: hit.u, index: hit.index, slot: hit.seg.slot };
+          if (hit.seg.slot != null && (hit.index > rig.script.segs.findIndex(s => s.kind === 'lift') || (kind === 'lift' && hit.u >= 0.35))) hidden.add(hit.seg.slot);
+          carried.visible = showingBox(kind, hit.u);
+          fill.visible = fullBox(kind);
+          head.position.y = headY(kind, hit.u);
+        } else if (st === 'break') {
+          const row = rig.rows[0];
+          gantry.rotation.z = rig.rows[0] % 2 ? 0.04 : -0.04;
+          pose = { x: lerp(parkX, westOf(row), 0.42), z: rowZ(row), u: 0 };
+          carried.visible = false;
+          head.position.y = 2.4;
+          kind = 'break';
+        } else {
+          pose = { x: parkX, z: rig.script.parkZ, u: 0 };
+          carried.visible = false;
+          head.position.y = 3.35;
+          kind = st === 'sel' ? 'sel' : 'rest';
+        }
+        gantry.position.x = pose.x;
+        gantry.position.z = pose.z;
+        const key = st === 'break' ? 'break' : st !== 'job' ? 'rest' : (mode === 'empty' ? 'empty' : 'work');
+        statusMat.emissive.set(statusColor[key]);
+        statusLight.color.set(statusColor[key]);
+        statusLight.intensity = key === 'break' ? 200 : key === 'rest' ? 280 : 700;
+        lampLight.intensity = st === 'job' && mode === 'work' ? 4200 : st === 'sel' ? 1600 : st === 'break' ? 80 : 900;
+        const caption = PHASE[kind] || (mode === 'empty' ? '空驶' : '作业');
+        setLabel(rig, caption);
+        rig.label.lookAt(cam.position);
+        phases.push(caption);
+      }
+      host.userData.grub.phases = phases;
+      host.userData.grub.t0 = t0;
+      vatMat.emissiveIntensity = st === 'break' ? 0.35 : 2.5;
+      rigMat.emissiveIntensity = st === 'job' ? 4.4 : st === 'sel' ? 3.2 : st === 'break' ? 0.25 : 2.2;
       ring.visible = st === 'sel' || st === 'break';
       for (const m of ring.children) m.material = st === 'break' ? alertMat : zoneMat;
-      const dim = st === 'break';
-      if (grubMesh.userData.dim !== dim) {
+      const sig = st + ':' + [...hidden].join(',');
+      if (grubMesh.userData.sig !== sig) {
         const pale = new THREE.Color('#ffffff');
         const dead = new THREE.Color('#6d6254');
         for (let i = 0; i < n; i++) {
-          grubMesh.setColorAt(i, dim && bad.has(i) ? dead : pale);
-          const base = grubBase[i];
-          if (dim && bad.has(i)) {
-            grubDummy.matrix.copy(base);
+          const sunk = st === 'break' && bad.has(i);
+          grubMesh.setColorAt(i, sunk ? dead : pale);
+          if (hidden.has(i)) {
+            grubDummy.matrix.copy(grubBase[i]);
+            grubDummy.matrix.elements[0] = 0.001;
+            grubDummy.matrix.elements[5] = 0.001;
+            grubDummy.matrix.elements[10] = 0.001;
+            grubMesh.setMatrixAt(i, grubDummy.matrix);
+          } else if (sunk) {
+            grubDummy.matrix.copy(grubBase[i]);
             grubDummy.matrix.elements[5] = 0.42;
             grubDummy.matrix.elements[13] = y0 + 0.22;
             grubMesh.setMatrixAt(i, grubDummy.matrix);
-          } else grubMesh.setMatrixAt(i, base);
+          } else grubMesh.setMatrixAt(i, grubBase[i]);
         }
         grubMesh.instanceMatrix.needsUpdate = true;
         if (grubMesh.instanceColor) grubMesh.instanceColor.needsUpdate = true;
-        grubMesh.userData.dim = dim;
+        grubMesh.userData.sig = sig;
       }
     },
   };
@@ -1335,10 +1596,15 @@ function frameSpan(entry) {
   eye.yaw = entry.cls === 'rail' ? 0.7 : 0.85;
   eye.pitch = entry.cls === 'unit' ? 0.95 : entry.cls === 'rail' ? 0.42 : 0.46;
   if (entry.id === 'grub-trough') {
+    const occ = shown && shown.group.userData.cult && shown.group.userData.cult.occupied;
+    if (occ) {
+      eye.tx = occ.x;
+      eye.tz = occ.z;
+    }
     eye.yaw = 0.78;
-    eye.pitch = 0.7;
-    eye.ty = 1.6;
-    eye.dist *= 0.8;
+    eye.pitch = 0.04;
+    eye.ty = 5.5;
+    eye.dist = 72;
   }
   if (entry.id === 'cult-a' || entry.id === 'cult-b') {
     eye.yaw = entry.id === 'cult-b' ? 0.58 : 0.46;
@@ -1477,7 +1743,7 @@ function classLabel(id) {
 }
 function fillBrief(entry) {
   const all = loadBriefs();
-  const marker = entry.id === 'cult-b' ? '漆面' : entry.id === 'cult-a' ? '地灯' : entry.id === 'grub-trough' ? '龙门' : '';
+  const marker = entry.id === 'cult-b' ? '漆面' : entry.id === 'cult-a' ? '后开始' : entry.id === 'grub-trough' ? '弱光' : '';
   if (marker && (!all[entry.id] || !String(all[entry.id].notes || '').includes(marker))) {
     all[entry.id] = {
       name: entry.name,
@@ -1610,9 +1876,10 @@ window.__lab = {
   select(id) { show(id); },
   reframe() { frameSpan(LAB_ENTRIES.find(e => e.id === curId)); },
   setState,
-  pose(p) { frozen = p; },
+  pose(p) { frozen = p; applyPose(p); },
   look(part) { if (part) Object.assign(eye, part); },
   get cult() { return (shown && shown.group && shown.group.userData.cult) || null; },
+  get grub() { return (shown && shown.group && shown.group.userData.grub) || null; },
   get brief() { return loadBriefs()[curId] || null; },
   get lights() {
     return ((shown && shown.lightGroups) || []).map(g => ({ id: g.id, label: g.label, on: g.on }));

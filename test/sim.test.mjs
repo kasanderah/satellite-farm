@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { LAB_CLASSES, LAB_ENTRIES, CULT_EMPTY, CULT_EMPTY_NOTES, CULT_B_NOTES, GRUB_TROUGH_NOTES } from '../src/lab-catalog.js';
+import { LAB_CLASSES, LAB_ENTRIES, CULT_EMPTY, CULT_EMPTY_NOTES, CULT_B_NOTES, GRUB_TROUGH_NOTES, planGrubColumns, GRUB_DEMO_GANTRIES, GRUB_WORK_MPS, GRUB_GANTRY_OPTIONS } from '../src/lab-catalog.js';
 import {
   CROPS, L, PLOT, FIELD_HA, fields, fieldAt, fieldAtWorld, focus, rigs,
   plantField, step, economy, quote, log, exportSnapshot, applySnapshot, RING,
@@ -444,6 +444,10 @@ test('empty cultivation unit matches the 4 km plot grid', () => {
   assert.match(b.notes, /紫灯/);
   assert.match(e.notes, /C-3,2-U01/);
   assert.match(e.notes, /两成/);
+  assert.match(e.notes, /弱光/);
+  assert.match(e.notes, /后开始/);
+  assert.match(e.notes, /减产/);
+  assert.match(e.notes, /暗房红/);
   assert.equal(CULT_EMPTY.plots, 7);
   assert.equal(CULT_EMPTY.farm, 4000);
   assert.ok(Math.abs(CULT_EMPTY.plot * CULT_EMPTY.plots - CULT_EMPTY.farm) < 1e-6);
@@ -462,4 +466,23 @@ test('empty cultivation unit matches the 4 km plot grid', () => {
   assert.match(grub.notes, /4×15/);
   assert.match(grub.notes, /龙门/);
   assert.match(grub.notes, /槽灯/);
+  assert.match(grub.notes, /容器循环逻辑/);
+  assert.match(grub.notes, /升级/);
+  assert.match(grub.notes, /3 m\/s/);
+  assert.match(grub.notes, /弱光/);
+  assert.match(grub.notes, /槽灯是红的/);
+  assert.match(grub.notes, /巡灯也是红的/);
+  assert.match(grub.notes, /后开始/);
+  assert.match(grub.notes, /减产/);
+  assert.doesNotMatch(CULT_B_NOTES, /弱光/);
+  assert.deepEqual(GRUB_GANTRY_OPTIONS, [2, 4]);
+  assert.equal(GRUB_DEMO_GANTRIES, 2);
+  assert.equal(GRUB_WORK_MPS, 3);
+  const two = planGrubColumns(17, 2);
+  const four = planGrubColumns(17, 4);
+  assert.equal(two.length, 2);
+  assert.equal(four.length, 4);
+  assert.deepEqual(two.flat(), [...Array(17).keys()]);
+  assert.deepEqual(four.flat(), [...Array(17).keys()]);
+  for (const part of four) assert.ok(part.length >= 4);
 });
