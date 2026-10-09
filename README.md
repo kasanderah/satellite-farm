@@ -39,12 +39,12 @@ The buttons along the bottom are the play modes:
 - **农机** lists the machines you own and what each is doing. Click one and the camera locks onto it.
 - **区域** returns to the field you are planting: select a field, then plant the potato. From the protein deck, 区域 brings you back up.
 - **仓库** is the store on the hub. Harvested potatoes and protein lots sit here. Select a lot and sell it to add that lot's listed price to 营收. Each row has a **牌价**. That number is a placeholder for a future market price. It does not change, and there is no price simulation.
-- **建设** places a functional building, and only on the hub parcel. A crop field refuses it. The opening hub already has a warehouse, a garage where the surface machines park, and a small processing shed. They use the same materials as the other structures.
+- **建设** has three separate actions: 放下 picks a building and clicks the hub to place it, 拆除 selects a hub building and removes it, and 查看 only lists what is already there. A crop field still refuses a building. The opening hub has a warehouse, a garage where the surface machines park, and a small processing shed. They stay until you delete them. 重开 puts the three back.
 - **商店** sells 种薯, 肥料, and 饲料. Buying spends 营收. 饲料 is 800. One culture spends one.
 
 ## Protein deck
 
-Press **C**, or click the grow row in the layers panel, to stand on the underground grow deck. **C** or **区域** comes back up. The deck is a second production, not a tractor loop: four culture tanks and one arm. Pick 蛴螬 or 黑水虻, start a tank (that spends one feed), send the arm to tend it, and harvest when the culture reaches its day on the same world clock. 蛴螬 takes 65 world days. 黑水虻 takes 13. The harvest is a protein lot in the warehouse, sold at its own 牌价. If the tank is already running, the line says so. If feed is gone, starting stops until you buy 饲料. The deck and the shop both show how much feed is left. The deck shows a set climate, 30°C and 70% humidity. That is a setpoint, not weather. The surface stays at its constant temperature.
+Press **C**, or click the grow row in the layers panel, to go down to the protein deck. The camera pans, orbits, and zooms the same way it does on the surface, including the 1–4 distance steps. While you are down there the surface field is hidden so the deck can be read. **C** or **区域** brings the surface and the surface camera back. The deck floor uses the same module as the surface plot: 7 large cells across, 16 small cells in each. Four sealed culture tanks and one gantry arm sit on that grid. Pick 蛴螬 or 黑水虻, start a tank (that spends one feed), send the arm to tend it, and harvest when the culture reaches its day on the same world clock. 蛴螬 takes 65 world days. 黑水虻 takes 13. The harvest is a protein lot in the warehouse, sold at its own 牌价. If the tank is already running, the line says so. If feed is gone, starting stops until you buy 饲料. The deck and the shop both show how much feed is left. The deck shows a set climate, 30°C and 70% humidity. That is a setpoint, not weather. The surface stays at its constant temperature.
 
 ## Admin
 
@@ -63,7 +63,7 @@ The game writes the snapshot to `localStorage` (`ringsheaf.nongshen8.v1`) after 
 - `plotId` (`nongshen-viii/plot-01`), `worldDay`, `revenue`, `timeScale`
 - `stores`: `seed`, `fertilizer`, `spray`, `feed`
 - `warehouse[]`: harvested lots, each with `listPrice` (the listed price, not a live market). Protein lots are marked `kind: "protein"` and priced apart from potatoes.
-- `buildings[]`: hub structures (warehouse, garage, processing shed). A shed saved on a crop field is moved onto the hub when the save opens.
+- `buildings[]`: hub structures (warehouse, garage, processing shed). A shed saved on a crop field is moved onto the hub when the save opens. `keepBuildings` keeps a deleted starter deleted. An older save without that flag still receives the three opening buildings.
 - `tanks[]`: the four culture tanks on the protein deck
 - `fields[]` for this plot only: `i, j, crop, dir, state, g, s, timer, growT, live, hold, plantedAt, paid, sprayed`
 - `harvesters[]` with mode and the field they are on
@@ -72,4 +72,4 @@ A future neighbor is this same document, loaded and not stepped. The ware potato
 
 ## Art
 
-Look, materials, lighting, and the ring bend come from the v3.1 sample and are not a new style. Simulation stays on a flat map (x along the ring, z across, y up). The bend is still `curveWorld` in the vertex shader. Palette, the six shared materials, the low warm sun, AgX, and the HUD chrome are the sample's. Geometry is the sample's; this slice only changes which fields are alive.
+Look, materials, lighting, and the ring bend come from the v3.1 sample and are not a new style. The protein deck stays inside that palette: hard metal plates, cold practical lights, sealed tanks, and a gantry arm. The ring exterior is unchanged. Simulation stays on a flat map (x along the ring, z across, y up). The bend is still `curveWorld` in the vertex shader. Palette, the six shared materials, the low warm sun, AgX, and the HUD chrome are the sample's. Geometry is the sample's; this slice only changes which fields are alive.

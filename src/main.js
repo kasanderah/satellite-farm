@@ -11,9 +11,9 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { HorizontalTiltShiftShader } from 'three/addons/shaders/HorizontalTiltShiftShader.js';
 import { VerticalTiltShiftShader } from 'three/addons/shaders/VerticalTiltShiftShader.js';
-import { PALETTE, CROPS, TEX_ID, L, fields, harvesters, haulers, drones, step, TRUNKS_X, TRUNKS_Z, depots, inCrater, ROADS, RING, LAYERS, CUT, wrapX, PLOT, economy, focus, signals, log, plantField, quote, setTimeScale, setPaused, paused, exportSnapshot, applySnapshot, fieldAtWorld, fieldAt, simTime, worldDay, stores, rigs, fieldVisual, cropWatch, POTATO_DAYS, warehouse, buildings, sellLot, placeBuilding, rigReadout, SHOP, buySeed, buyItem, SEED_PER_FIELD, FERT_PER_FIELD, resetGame, CULTURES, DECK_CLIMATE, tanks, cultureWatch, startCulture, tendCulture, harvestCulture, BUILDING_KINDS } from './_shared.js';
+import { PALETTE, CROPS, TEX_ID, L, fields, harvesters, haulers, drones, step, TRUNKS_X, TRUNKS_Z, depots, inCrater, ROADS, RING, LAYERS, CUT, wrapX, PLOT, economy, focus, signals, log, plantField, quote, setTimeScale, setPaused, paused, exportSnapshot, applySnapshot, fieldAtWorld, fieldAt, fieldOrigin, simTime, worldDay, stores, rigs, fieldVisual, cropWatch, POTATO_DAYS, warehouse, buildings, sellLot, placeBuilding, removeBuilding, rigReadout, SHOP, buySeed, buyItem, SEED_PER_FIELD, FERT_PER_FIELD, resetGame, CULTURES, DECK_CLIMATE, tanks, cultureWatch, startCulture, tendCulture, harvestCulture, BUILDING_KINDS } from './_shared.js';
 import { NOISE, FARM, CURVE_DECL, CURVE_PROJECT } from './glsl.js';
-import { harvesterKit, haulerKit, droneKit, personKit, conveyorKit, depotKit, hubKit, plantGeometry, mastKit, irrigatorKit, growRackKit, tankKit, pumpKit, pipeRackKit, tractorKit, planterKit, hillerKit, topperKit, potatoLifterKit, shedKit, warehouseKit, garageKit, processKit, cultureTankKit, armKit } from './prefabs.js';
+import { harvesterKit, haulerKit, droneKit, personKit, conveyorKit, depotKit, hubKit, plantGeometry, mastKit, irrigatorKit, growRackKit, tankKit, pumpKit, pipeRackKit, tractorKit, planterKit, hillerKit, topperKit, potatoLifterKit, shedKit, warehouseKit, garageKit, processKit, cultureTankKit, armKit, deckLightKit } from './prefabs.js';
 
 const Q = new URLSearchParams(location.search);
 const VIEW = Q.get('view') || '', PREWARM = +Q.get('t') || 0, NOPOST = Q.has('nopost'), SHOWFPS = Q.has('fps');
@@ -102,7 +102,7 @@ MAT.crop = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8, 
 const SUN_EL = 21 * DEG, SUN_AZ = -38 * DEG; // 方位：镜头默认朝 -z，太阳在左前方 38°
 const sunDir = new THREE.Vector3(Math.sin(SUN_AZ) * Math.cos(SUN_EL), Math.sin(SUN_EL), -Math.cos(SUN_AZ) * Math.cos(SUN_EL)).normalize();
 U.uSunXZ.value.set(sunDir.x, sunDir.z).normalize(); U.uSunTan.value = Math.tan(SUN_EL);
-const FOG_DAY = new THREE.Color('#868d8f'), FOG_FAR = new THREE.Color('#b4babb'), FOG_NIGHT = new THREE.Color('#1b1f27');
+const FOG_DAY = new THREE.Color('#868d8f'), FOG_FAR = new THREE.Color('#b4babb'), FOG_NIGHT = new THREE.Color('#1b1f27'), FOG_DECK = new THREE.Color('#12161c');
 scene.fog = new THREE.FogExp2(FOG_DAY.clone(), 0.0002);
 const sky = new THREE.Mesh(new THREE.SphereGeometry(1, 48, 24), new THREE.ShaderMaterial({
   side: THREE.BackSide, depthWrite: false, depthTest: false, fog: false,
@@ -180,6 +180,54 @@ const hemi = new THREE.HemisphereLight('#5f7480', '#2a2622', 0.42); scene.add(he
 // 环带内表面：一条整圈长（周长 + 重叠）、环壁到环壁宽的长条，沿环向跟随镜头；卷曲在顶点着色器里做
 const ground = new THREE.Mesh(new THREE.PlaneGeometry(RING.CIRC + 400, RING.W, 760, 8).rotateX(-Math.PI / 2), MAT.ground);
 ground.receiveShadow = true; ground.frustumCulled = false; scene.add(ground);
+// 培育层地板：和地表同一套模数（跨环 7 个大格，每格 4×4 = 16 个小格）。只在下到培育层时露出来。
+const deckMat = new THREE.MeshStandardMaterial({ roughness: 0.5, metalness: 0.72, color: PALETTE.deep });
+deckMat.onBeforeCompile = (sh) => {
+  sh.uniforms.uCurve = U.uCurve;
+  sh.uniforms.uField = { value: L.FIELD };
+  sh.uniforms.uRoad = { value: L.ROAD };
+  sh.uniforms.uBP = { value: L.BP };
+  sh.uniforms.uBlock = { value: L.BLOCK };
+  sh.uniforms.uX0 = { value: L.X0 };
+  sh.uniforms.uZ0 = { value: L.Z0 };
+  sh.uniforms.uLane = { value: L.LANE };
+  sh.uniforms.gDeep = { value: C('deep') };
+  sh.uniforms.gMetal = { value: C('metalDk') };
+  sh.uniforms.gHaze = { value: C('haze') };
+  sh.uniforms.gData = { value: C('data') };
+  sh.vertexShader = sh.vertexShader
+    .replace('#include <common>', '#include <common>\n' + CURVE_DECL + '\nvarying vec3 vFlat;')
+    .replace('#include <project_vertex>', 'vFlat = (modelMatrix * vec4(transformed, 1.0)).xyz;\n' + CURVE_PROJECT);
+  sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>
+varying vec3 vFlat;
+uniform float uField, uRoad, uBP, uBlock, uX0, uZ0, uLane;
+uniform vec3 gDeep, gMetal, gHaze, gData;
+float aaAt(float x, float w){ float fw = max(fwidth(x), 0.02); return 1. - smoothstep(w, w + fw, x); }
+vec3 deckEmis = vec3(0.);
+vec3 deckAlbedo(){
+  vec2 p = vFlat.xz;
+  float pitch = uField + uRoad;
+  float bx = mod(p.x - uX0, uBP);
+  float bz = mod(p.y - uZ0, uBP);
+  float trunk = max(step(uBlock, bx), step(uBlock, bz));
+  float sx = mod(bx, pitch);
+  float sz = mod(bz, pitch);
+  float plate = (1. - trunk) * step(sx, uField) * step(sz, uField);
+  float seam = max(aaAt(min(sx, pitch - sx), 0.35), aaAt(min(sz, pitch - sz), 0.35));
+  float big = max(aaAt(min(bx, abs(bx - uBlock)), 0.9), aaAt(min(bz, abs(bz - uBlock)), 0.9));
+  vec3 col = mix(gDeep, gMetal, plate);
+  col = mix(col, gHaze * 0.55, (1. - plate) * (1. - trunk) * 0.85);
+  col = mix(col, gDeep * 0.65, trunk);
+  col = mix(col, gHaze, seam * 0.35 + big * 0.55);
+  float lane = plate * aaAt(abs(mod(sx + uLane * 0.5, uLane) - uLane * 0.5), 0.12);
+  deckEmis = gData * lane * 0.55 + gData * big * 0.35;
+  return col;
+}`).replace('#include <color_fragment>', '#include <color_fragment>\n diffuseColor.rgb = deckAlbedo();')
+    .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n totalEmissiveRadiance += deckEmis;');
+};
+const deckFloor = new THREE.Mesh(new THREE.PlaneGeometry(PLOT.x1 - PLOT.x0, PLOT.z1 - PLOT.z0, 1, 1).rotateX(-Math.PI / 2), deckMat);
+deckFloor.position.set((PLOT.x0 + PLOT.x1) / 2, LAYERS[1].floor, (PLOT.z0 + PLOT.z1) / 2);
+deckFloor.receiveShadow = true; deckFloor.frustumCulled = false; deckFloor.visible = false; scene.add(deckFloor);
 const GC = { soil: C('regoDk').multiplyScalar(0.62), rego: C('rego'), regoDk: C('regoDk'), regoLt: C('regoLt'), haze: C('haze'), paper: C('paper'), metalDk: C('metalDk'), deep: C('deep'), tealGy: C('tealGy'), zone: C('zone'), data: C('data'), harvest: C('harvest'), void: C('void'), alert: C('alert'), oliveDp: C('oliveDp'), olive: C('olive'), moss: C('moss'), ochre: C('ochre'), straw: C('straw'), rust: C('rust') };
 MAT.ground.onBeforeCompile = (s) => {
   Object.assign(s.uniforms, U);
@@ -626,7 +674,13 @@ function instanced(kit, cap, cast = true) {
 }
 function setInst(set, i, x, y, z, ang, s = 1) { tmpM.compose(tmpP.set(x, y, z), tmpQ.setFromAxisAngle(UP, -ang), tmpS.set(s, s, s)); for (const k in set) set[k].setMatrixAt(i, tmpM); }
 function setCount(set, n) { for (const k in set) { set[k].count = n; set[k].instanceMatrix.needsUpdate = true; } }
-function staticMesh(kit) { for (const k of ['light', 'dark', 'glass', 'emis']) if (kit[k]) { const m = new THREE.Mesh(kit[k], MAT[k]); m.castShadow = k !== 'emis'; m.receiveShadow = true; scene.add(m); } }
+function staticMesh(kit) {
+  const meshes = [];
+  for (const k of ['light', 'dark', 'glass', 'emis']) if (kit[k]) {
+    const m = new THREE.Mesh(kit[k], MAT[k]); m.castShadow = k !== 'emis'; m.receiveShadow = true; scene.add(m); meshes.push(m);
+  }
+  return meshes;
+}
 
 const HUBC = L.X0 + L.HUBX * L.BP + L.BLOCK / 2;  // 中枢区中心（= 0；z 方向同样是 0）
 const HV = harvesterKit();
@@ -651,9 +705,10 @@ const droneSet = instanced(droneKit(), drones.length, false);
 const people = Array.from({ length: 46 }, (_, n) => ({ x: HUBC - 120 + hr() * 260, z: HUBC - 60 + hr() * 200, a: hr() * 6.28, sp: 0.6 + hr() * 0.8 }));
 const peopleSet = instanced(personKit(), people.length);
 // 中枢
-{ const hk = hubKit(hr); for (const k in hk) if (hk[k]) hk[k].translate(HUBC, 0, HUBC); staticMesh(hk); }
+const hubMeshes = (() => { const hk = hubKit(hr); for (const k in hk) if (hk[k]) hk[k].translate(HUBC, 0, HUBC); return staticMesh(hk); })();
 // 区站：每 3×3 区一座，位于主干走廊交叉口
-{ const ds = instanced(depotKit(), depots.length); depots.forEach((d, i) => setInst(ds, i, d.x, 0, d.z, 0)); setCount(ds, depots.length); }
+let depotSet;
+{ depotSet = instanced(depotKit(), depots.length); depots.forEach((d, i) => setInst(depotSet, i, d.x, 0, d.z, 0)); setCount(depotSet, depots.length); }
 // 输送带走廊（中央 9×9 区内做成三维几何，外围只在地面着色器里画）
 let convSegs = [], convSet = null, convAt = { x: 1e9, z: 1e9, on: false };
 {
@@ -688,10 +743,52 @@ function rebuildInfra(cx, cz) {
 // 每一层的内容由 DECK_BUILDERS[layer.content] 生成；以后加「水处理层」「仓储层」等，只需在 LAYERS 里加一项并在这里写一个函数
 const RACK_CAP = 2600, MOD_CAP = 80, PIPE_CAP = 60, CART_CAP = 30, CREW_CAP = 60;
 const rackSet = instanced(growRackKit(), RACK_CAP), tankSet = instanced(tankKit(), MOD_CAP), pumpSet = instanced(pumpKit(), MOD_CAP), pipeSet = instanced(pipeRackKit(), PIPE_CAP);
-const cultureSet = instanced(cultureTankKit(), 8), armSet = instanced(armKit(), 1);
+const cultureSet = instanced(cultureTankKit(), 8), armSet = instanced(armKit(), 1), deckLightSet = instanced(deckLightKit(), 8);
 if (cultureSet.light) cultureSet.light.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(8 * 3), 3);
-const DECK_SITE = { x: 980, z: -40 };
-let tankPos = [], armX = DECK_SITE.x;
+let tankPos = [], armX = 0, armReady = false, armOrder = null;
+const railGeo = new THREE.BoxGeometry(1, 0.16, 0.22);
+{ const c = C('haze'), n = railGeo.attributes.position.count, a = new Float32Array(n * 3); for (let i = 0; i < n; i++) a.set([c.r, c.g, c.b], i * 3); railGeo.setAttribute('color', new THREE.BufferAttribute(a, 3)); }
+const railMesh = new THREE.Mesh(railGeo, MAT.light); railMesh.castShadow = true; railMesh.visible = false; railMesh.frustumCulled = false; scene.add(railMesh);
+const cableGeo = new THREE.BoxGeometry(1, 0.1, 0.12);
+{ const c = C('metalDk'), n = cableGeo.attributes.position.count, a = new Float32Array(n * 3); for (let i = 0; i < n; i++) a.set([c.r, c.g, c.b], i * 3); cableGeo.setAttribute('color', new THREE.BufferAttribute(a, 3)); }
+const cableMesh = new THREE.Mesh(cableGeo, MAT.dark); cableMesh.visible = false; cableMesh.frustumCulled = false; scene.add(cableMesh);
+function cellCenter(bi, bj, fi, fj) {
+  const [x0, z0] = fieldOrigin(bi * L.PER + fi, bj * L.PER + fj);
+  return { x: x0 + L.FIELD / 2, z: z0 + L.FIELD / 2, y: LAYERS[1].floor };
+}
+function placeTanks() {
+  const y = LAYERS[1].floor;
+  tankPos = [];
+  for (let i = 0; i < tanks.length; i++) {
+    const at = cellCenter(L.HUBX, L.HUBZ, i, 1);
+    tankPos.push(at);
+    setInst(cultureSet, i, at.x, y, at.z, 0);
+    const spec = CULTURES.find(c => c.id === tanks[i].species);
+    const tint = !spec ? C('rego') : spec.id === 'bsf' ? C('sage') : C('ochre');
+    if (cultureSet.light) cultureSet.light.setColorAt(i, tint);
+    setInst(deckLightSet, i, at.x, y, at.z - L.FIELD / 2 - L.ROAD / 2, 0);
+  }
+  if (cultureSet.light?.instanceColor) cultureSet.light.instanceColor.needsUpdate = true;
+  setCount(cultureSet, tanks.length);
+  setCount(deckLightSet, tanks.length);
+  if (!armReady && tankPos[0]) { armX = tankPos[0].x; armReady = true; }
+  if (tankPos.length > 1) {
+    const z = tankPos[0].z - L.FIELD / 2 - L.ROAD / 2;
+    const span = Math.abs(tankPos[tankPos.length - 1].x - tankPos[0].x) + 18;
+    const mid = (tankPos[0].x + tankPos[tankPos.length - 1].x) / 2;
+    railMesh.scale.set(span, 1, 1);
+    railMesh.position.set(mid, y + 4.62, z);
+    cableMesh.scale.set(span, 1, 1);
+    cableMesh.position.set(mid, y + 0.2, z);
+  }
+  setInst(armSet, 0, armX, y, (tankPos[0] ? tankPos[0].z - L.FIELD / 2 - L.ROAD / 2 : 0), Math.PI / 2);
+  setCount(armSet, tankPos.length ? 1 : 0);
+}
+function orderArm(id, job) {
+  if (!tankPos[id]) return;
+  const near = Math.abs(armX - tankPos[id].x) < 1.2;
+  armOrder = { id, job, t: 0, phase: near ? 'act' : 'move' };
+}
 rackSet.light.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(RACK_CAP * 3), 3);
 const cartSet = instanced(haulerKit(), CART_CAP), crewSet = instanced(personKit(), CREW_CAP);
 const deckSlabs = new THREE.Group(); scene.add(deckSlabs);
@@ -699,23 +796,7 @@ const RACK_COLS = ['sage', 'moss', 'oliveDp', 'tealGy', 'olive'].map(k => C(k).m
 const deckCarts = [], deckCrew = [];
 const DECK_BUILDERS = {
   // 培育层：成排立体栽培架（12 m 一段），每 6 排一条 6 m 主通道，通道里有 AGV 小车和巡检人员
-  protein(L0) {
-    const y = L0.floor;
-    tankPos = [];
-    for (let i = 0; i < tanks.length; i++) {
-      const x = cut.x + 40 + i * 12, z = cut.z;
-      tankPos.push({ x, z, y });
-      setInst(cultureSet, i, x, y, z, 0);
-      const spec = CULTURES.find(c => c.id === tanks[i].species);
-      const tint = !spec ? C('rego') : spec.id === 'bsf' ? C('sage') : C('ochre');
-      if (cultureSet.light) cultureSet.light.setColorAt(i, tint);
-    }
-    if (cultureSet.light?.instanceColor) cultureSet.light.instanceColor.needsUpdate = true;
-    setCount(cultureSet, tanks.length);
-    armX = tankPos[0] ? tankPos[0].x : cut.x + 40;
-    setInst(armSet, 0, armX, y, cut.z - 5, Math.PI / 2);
-    setCount(armSet, 1);
-  },
+  protein() { placeTanks(); },
   racks(L0, rects) {
     let n = 0; const y = L0.floor;
     for (const [x0, x1, z0, z1] of rects) {
@@ -843,6 +924,7 @@ const iconMat = new THREE.ShaderMaterial({
     vec3 c = uHalo * halo + uRing * (ring + core); float a = max(max(ring, core), halo); gl_FragColor = vec4(c / max(a, 1e-3), a * uA); }`,
 });
 const icons = new THREE.Points(iconGeo, iconMat); icons.frustumCulled = false; icons.renderOrder = 6; scene.add(icons);
+let netMesh = null;
 // 物流网络线：区站 → 中枢沿主干走廊，宽度按屏幕像素恒定，带流动的虚线
 const netMat = new THREE.ShaderMaterial({
   transparent: true, depthWrite: false, fog: false,
@@ -874,7 +956,7 @@ const netMat = new THREE.ShaderMaterial({
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('side', new THREE.Float32BufferAttribute(side, 2));
   g.setAttribute('along', new THREE.Float32BufferAttribute(along, 1)); g.setAttribute('kind', new THREE.Float32BufferAttribute(kind, 1));
-  const m = new THREE.Mesh(g, netMat); m.frustumCulled = false; m.renderOrder = 4; scene.add(m);
+  const m = new THREE.Mesh(g, netMat); m.frustumCulled = false; m.renderOrder = 4; scene.add(m); netMesh = m;
 }
 // 收割尾迹：谷壳 / 尘土（只给近处的收割机）
 const DUSTN = 2400, dustPos = new Float32Array(DUSTN * 3), dustLife = new Float32Array(DUSTN), dustVel = new Float32Array(DUSTN * 3);
@@ -905,24 +987,49 @@ function pitchOf(d) {
 const camS = { x: HUBC, z: HUBC, y: 0, d: 4200, yaw: 0, pOff: 0, lookUp: 0, fovAdd: 0, deck: false }, camT = { ...camS };
 // 环带：拉远时镜头逐渐抬头、视角变宽 → 看到环带在前方升起、在天空中拱起，两侧是环壁，环壁外是太空与母星
 function placeCamera() {
-  if (camS.deck) {
-    const yaw = camS.yaw, stand = Math.max(8, camS.d);
-    cam.position.set(camS.x + Math.sin(yaw) * stand, camS.y + 2.6, camS.z + Math.cos(yaw) * stand);
-    cam.lookAt(camS.x, camS.y + 1.05, camS.z);
-    cam.fov = 46; cam.near = 0.15; cam.far = 220; cam.updateProjectionMatrix();
-    return;
-  }
+  const baseY = camS.deck ? LAYERS[1].floor : 0;
   const p = pitchOf(camS.d) + camS.pOff;
-  cam.position.set(camS.x + Math.sin(camS.yaw) * Math.cos(p) * camS.d, Math.sin(p) * camS.d, camS.z + Math.cos(camS.yaw) * Math.cos(p) * camS.d);
-  cam.lookAt(camS.x, 0, camS.z);
+  cam.position.set(camS.x + Math.sin(camS.yaw) * Math.cos(p) * camS.d, baseY + Math.sin(p) * camS.d, camS.z + Math.cos(camS.yaw) * Math.cos(p) * camS.d);
+  cam.lookAt(camS.x, baseY, camS.z);
   const far01 = THREE.MathUtils.smoothstep(camS.d, 1500, 5200);
   cam.rotateX((far01 * 25 + camS.lookUp) * DEG);
   cam.fov = 30 + 24 * far01 + camS.fovAdd;
   cam.near = Math.max(0.25, camS.d * 0.012); cam.far = 2.6 * RING.R + 6000; cam.updateProjectionMatrix();
 }
+function setShown(obj, on) {
+  if (!obj) return;
+  if (obj.isObject3D) { obj.visible = on; return; }
+  for (const k in obj) if (obj[k] && obj[k].isObject3D) obj[k].visible = on;
+}
+function applyDeckView() {
+  const on = !!camS.deck;
+  ground.visible = !on;
+  deckFloor.visible = on;
+  railMesh.visible = on && tankPos.length > 1;
+  cableMesh.visible = on && tankPos.length > 1;
+  for (const m of hubMeshes) m.visible = !on;
+  setShown(depotSet, !on);
+  setShown(convSet, !on);
+  setShown(mastSet, !on);
+  setShown(irrSet, !on);
+  setShown(harvSet, !on);
+  setShown(haulSet, !on);
+  setShown(droneSet, !on);
+  setShown(peopleSet, !on);
+  for (const k in buildingSets) setShown(buildingSets[k], !on);
+  for (const k in rigMesh) setShown(rigMesh[k], !on);
+  for (const k in plantMeshes) setShown(plantMeshes[k], !on);
+  if (netMesh) netMesh.visible = !on;
+  icons.visible = !on; dots.visible = !on; dust.visible = !on;
+  deckSlabs.visible = !on;
+  const lab = on || !!cut.on;
+  setShown(cultureSet, lab);
+  setShown(armSet, lab);
+  setShown(deckLightSet, lab);
+}
 // 交互：左键平移 / 右键旋转 / 滚轮缩放 / WASD / QE / N 昼夜 / M 地图模式 / H 隐藏界面
 let drag = null, ptr = null, selected = null, selNote = '';
-let mode = 'plan', watchRig = null, pickedLot = null, shopPick = 'seed', deckTank = 0;
+let mode = 'plan', watchRig = null, pickedLot = null, shopPick = 'seed', deckTank = 0, buildAct = 'place', buildKind = 'warehouse', buildPick = null;
 const raycaster = new THREE.Raycaster();
 function pickFlat(cx, cy) {
   const ndc = new THREE.Vector2((cx / innerWidth) * 2 - 1, -(cy / innerHeight) * 2 + 1);
@@ -945,8 +1052,15 @@ function selectField(f, why) { selected = f || null; selNote = why || ''; }
 function onMapClick(cx, cy) {
   const p = pickFlat(cx, cy);
   if (mode === 'build') {
+    if (buildAct === 'watch') return;
     if (!p) { toast('点在自己的田区里'); return; }
-    const r = placeBuilding(p.x, p.z);
+    if (buildAct === 'delete') {
+      let best = null, bd = 48;
+      for (const b of buildings) { const d = Math.hypot(b.x - p.x, b.z - p.z); if (d < bd) { bd = d; best = b; } }
+      if (!best) { toast('点中枢上的一栋'); return; }
+      buildPick = best.id; paintSheet(); return;
+    }
+    const r = placeBuilding(p.x, p.z, buildKind);
     if (!r.ok) toast(r.reason === 'field' ? '房子建在中枢地块上' : '只能建在自己的田区里');
     else { toast(`${r.building.name}已放下`); saveSoon(); paintSheet(); }
     return;
@@ -1090,13 +1204,14 @@ function leaveDeck() {
 function visitDeck(on) {
   if (!on) { leaveDeck(); showPlan(); return; }
   watchRig = null;
-  setCut(true, DECK_SITE.x, DECK_SITE.z);
-  const row = tankPos[1] || tankPos[0] || { x: cut.x + 58, z: cut.z, y: LAYERS[1].floor };
+  if (cut.on) setCut(false);
+  placeTanks();
+  const row = tankPos[1] || tankPos[0] || cellCenter(L.HUBX, L.HUBZ, 1, 1);
   camT.x = camS.x = row.x;
   camT.z = camS.z = row.z;
-  camT.y = camS.y = row.y;
-  camT.d = camS.d = 14;
-  camT.yaw = camS.yaw = Math.PI;
+  camT.y = camS.y = 0;
+  camT.d = camS.d = 280;
+  camT.yaw = camS.yaw = 118 * DEG;
   camT.pOff = camS.pOff = 0;
   camT.lookUp = camS.lookUp = 0;
   camT.fovAdd = camS.fovAdd = 0;
@@ -1158,8 +1273,18 @@ function paintSheet() {
     qty.addEventListener('mouseup', ev => ev.preventDefault());
     qty.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); $('buy').click(); } });
   } else if (mode === 'build') {
-    const placed = buildings.map(b => `<button type="button" class="rowbtn" data-shed="${b.id}"><b>${b.name}</b><small>中枢 · ${Math.round(b.x)}, ${Math.round(b.z)}</small></button>`).join('');
-    el.innerHTML = `<div class="who"><b>建设</b><span>功能房只放在中枢地块上</span></div><p class="note">田里种薯。仓库、机库和加工棚落在中枢。</p>${placed || '<p class="note">中枢上还没有房子。</p>'}`;
+    const acts = [['place', '放下'], ['delete', '拆除'], ['watch', '查看']].map(([id, name]) => `<button type="button" class="sell${buildAct === id ? ' on' : ''}" data-bact="${id}">${name}</button>`).join('');
+    let body = '';
+    if (buildAct === 'place') {
+      body = `<p class="note">先选一种，再点中枢地块。田里种薯。</p>` + ['warehouse', 'garage', 'process'].map(id => `<button type="button" class="rowbtn${buildKind === id ? ' on' : ''}" data-bkind="${id}"><b>${BUILDING_KINDS[id].name}</b><small>点中枢放下</small></button>`).join('');
+    } else if (buildAct === 'delete') {
+      const rows = buildings.map(b => `<button type="button" class="rowbtn${buildPick === b.id ? ' on' : ''}" data-bdel="${b.id}"><b>${b.name}</b><small>中枢 · ${Math.round(b.x)}, ${Math.round(b.z)}</small></button>`).join('');
+      body = `<p class="note">选中一栋再拆除。查看不在这一档。</p>${rows || '<p class="note">中枢上没有房子。</p>'}<button type="button" class="sell" id="bremove"${buildPick == null ? ' disabled' : ''}>拆除所选</button>`;
+    } else {
+      const rows = buildings.map(b => `<button type="button" class="rowbtn" data-bwatch="${b.id}"><b>${b.name}</b><small>中枢 · ${Math.round(b.x)}, ${Math.round(b.z)}</small></button>`).join('');
+      body = `<p class="note">已建的房子。点一行看位置。放下和拆除是另外两档。</p>${rows || '<p class="note">中枢上没有房子。</p>'}`;
+    }
+    el.innerHTML = `<div class="who"><b>建设</b><span>放下、拆除、查看分开</span></div><div class="buyline">${acts}</div>${body}`;
   } else if (mode === 'deck') {
     const rows = tanks.map(t => {
       const w = cultureWatch(t);
@@ -1193,9 +1318,24 @@ $('sheet').addEventListener('click', e => {
   if (rig) { lockRig(+rig.dataset.rig); return; }
   const lot = e.target.closest('[data-lot]');
   if (lot) { pickedLot = +lot.dataset.lot; paintSheet(); return; }
-  const shed = e.target.closest('[data-shed]');
-  if (shed) {
-    const b = buildings.find(x => x.id === +shed.dataset.shed);
+  const bact = e.target.closest('[data-bact]');
+  if (bact) { buildAct = bact.dataset.bact; paintSheet(); return; }
+  const bkind = e.target.closest('[data-bkind]');
+  if (bkind) { buildKind = bkind.dataset.bkind; buildAct = 'place'; paintSheet(); return; }
+  const bdel = e.target.closest('[data-bdel]');
+  if (bdel) { buildPick = +bdel.dataset.bdel; paintSheet(); return; }
+  if (e.target.id === 'bremove') {
+    if (buildPick == null) return;
+    const gone = removeBuilding(buildPick);
+    buildPick = null;
+    if (!gone.ok) toast('这栋已经不在了');
+    else { toast(`${gone.building.name}已拆除`); saveSoon(); }
+    paintSheet();
+    return;
+  }
+  const bwatch = e.target.closest('[data-bwatch]');
+  if (bwatch) {
+    const b = buildings.find(x => x.id === +bwatch.dataset.bwatch);
     if (!b) return;
     watchRig = null;
     if (camS.deck) leaveDeck();
@@ -1211,21 +1351,22 @@ $('sheet').addEventListener('click', e => {
   if (spawn) {
     const started = startCulture(deckTank, spawn.dataset.spawn);
     if (!started.ok) toast(started.reason === 'feed' ? '饲料不足' : started.reason === 'busy' ? '这口槽已经在养' : '不能开始');
-    else { toast(`${started.name}已入槽`); saveSoon(); if (cut.on) buildCut(); }
+    else { toast(`${started.name}已入槽`); orderArm(deckTank, 'tend'); saveSoon(); }
     paintSheet();
     return;
   }
   if (e.target.id === 'tend') {
     const tended = tendCulture(deckTank);
     if (!tended.ok) toast('这口槽是空的');
-    else toast('机械臂过去照料');
+    else { orderArm(deckTank, 'tend'); toast('机械臂过去照料'); }
     paintSheet();
     return;
   }
   if (e.target.id === 'harvest') {
+    orderArm(deckTank, 'harvest');
     const got = harvestCulture(deckTank);
     if (!got.ok) toast(got.reason === 'early' ? '还没到收获日' : '这口槽是空的');
-    else { toast(`<b>入仓</b>${got.lot.name}`); saveSoon(); if (cut.on) buildCut(); }
+    else { toast(`<b>入仓</b>${got.lot.name}`); saveSoon(); }
     paintSheet();
     return;
   }
@@ -1589,9 +1730,16 @@ function frame(now) {
   U.uNight.value += (nightT - U.uNight.value) * Math.min(1, dt * 2); U.uMap.value += (mapT - U.uMap.value) * Math.min(1, dt * 3);
   const nt = U.uNight.value;
   sun.color.set('#ffd9b0').lerp(new THREE.Color('#9fb4d0'), nt); sun.intensity = 3.6 * (1 - nt) + 0.35 * nt;
+  hemi.color.set('#5f7480'); hemi.groundColor.set('#2a2622');
   hemi.intensity = 0.42 * (1 - nt) + 0.22 * nt; scene.environmentIntensity = 0.45 * (1 - nt) + 0.12 * nt;
+  if (camS.deck) {
+    sun.color.lerp(new THREE.Color('#b7c6d4'), 0.72);
+    sun.intensity *= 0.42;
+    hemi.color.set('#9eb0be'); hemi.groundColor.set('#14161a'); hemi.intensity = 0.28;
+  }
   // 拉远时雾色变亮：被阳光照透的大气，让远处的环带拱顶发亮（远景的高光端主要来自这里）
   scene.fog.color.copy(FOG_DAY).lerp(FOG_FAR, THREE.MathUtils.smoothstep(d, 900, 4000)).lerp(FOG_NIGHT, nt);
+  if (camS.deck) scene.fog.color.lerp(FOG_DECK, 0.72);
   // 近中景沿用 v3 的空气透视；拉远后雾变薄，让环带拱顶隔着一层大气浮现在天空里
   scene.fog.density = (5.6e-5 + 0.29 / d * Math.pow(d / 4300, 0.3) * (1 - THREE.MathUtils.smoothstep(d, 120, 700))) * (1 + nt * 0.4);
   // 阴影相机跟随视野
@@ -1659,6 +1807,41 @@ function frame(now) {
     gtao.updateGtaoMaterial({ radius: Math.min(30, Math.max(1.5, d * 0.045)) });
   }
   finalPass.uniforms.uTime.value = t;
+  for (const kind of Object.keys(buildingSets)) {
+    const list = buildings.filter(b => (b.kind || 'shed') === kind);
+    const set = buildingSets[kind];
+    const n = d < 2200 ? Math.min(list.length, 8) : 0;
+    for (let i = 0; i < n; i++) setInst(set, i, list[i].x, 0, list[i].z, list[i].ang || 0);
+    setCount(set, n);
+  }
+  if ((camS.deck || cut.on) && tankPos.length) {
+    let reach = 0;
+    const home = tankPos[Math.min(deckTank, tankPos.length - 1)] || tankPos[0];
+    let z = home.z - L.FIELD / 2 - L.ROAD / 2;
+    if (armOrder && tankPos[armOrder.id]) {
+      const goal = tankPos[armOrder.id];
+      z = goal.z - L.FIELD / 2 - L.ROAD / 2;
+      const dx = goal.x - armX;
+      if (armOrder.phase === 'move' && Math.abs(dx) > 0.35) armX += Math.sign(dx) * Math.min(Math.abs(dx), 12 * dt);
+      else {
+        armX += dx * Math.min(1, dt * 8);
+        if (armOrder.phase === 'move') { armOrder.phase = 'act'; armOrder.t = 0; }
+        armOrder.t += dt;
+        const u = Math.min(1, armOrder.t / 0.7);
+        reach = Math.sin(u * Math.PI) * (armOrder.job === 'harvest' ? 1 : 0.35);
+        if (u >= 1) armOrder = null;
+      }
+    }
+    setInst(armSet, 0, armX, home.y, z + reach * 2.4, Math.PI / 2);
+    setCount(armSet, 1);
+    for (let i = 0; i < tanks.length && i < tankPos.length; i++) {
+      const spec = CULTURES.find(c => c.id === tanks[i].species);
+      const tint = !spec ? C('rego') : spec.id === 'bsf' ? C('sage') : C('ochre');
+      if (cultureSet.light) cultureSet.light.setColorAt(i, tint);
+    }
+    if (cultureSet.light?.instanceColor) cultureSet.light.instanceColor.needsUpdate = true;
+  }
+  applyDeckView();
   composer.render();
   // HUD
   if (mode === 'machines') document.querySelectorAll('#sheet [data-rig] small').forEach(el => {
@@ -1670,28 +1853,6 @@ function frame(now) {
     const w = cultureWatch(tank);
     el.textContent = w ? `${w.name} · 第 ${Math.floor(w.day)} / ${w.days} 日${w.tended ? ' · 臂已照料' : ''}${w.ready ? ' · 可收' : ''}` : '空槽';
   });
-  for (const kind of Object.keys(buildingSets)) {
-    const list = buildings.filter(b => (b.kind || 'shed') === kind);
-    const set = buildingSets[kind];
-    const n = d < 2200 ? Math.min(list.length, 8) : 0;
-    for (let i = 0; i < n; i++) setInst(set, i, list[i].x, 0, list[i].z, list[i].ang || 0);
-    setCount(set, n);
-  }
-  if (cut.on && tankPos.length) {
-    const focusTank = tanks[deckTank]?.species ? deckTank : tanks.findIndex(t => t.species);
-    const goal = tankPos[focusTank >= 0 ? focusTank : 0];
-    if (goal) {
-      armX += (goal.x - armX) * Math.min(1, dt * 1.4);
-      setInst(armSet, 0, armX, goal.y, goal.z - 5, Math.PI / 2);
-      setCount(armSet, 1);
-      for (let i = 0; i < tanks.length && i < tankPos.length; i++) {
-        const spec = CULTURES.find(c => c.id === tanks[i].species);
-        const tint = !spec ? C('rego') : spec.id === 'bsf' ? C('sage') : C('ochre');
-        if (cultureSet.light) cultureSet.light.setColorAt(i, tint);
-      }
-      if (cultureSet.light?.instanceColor) cultureSet.light.instanceColor.needsUpdate = true;
-    }
-  }
   const mpp = d * 2 * Math.tan(15 * DEG) / innerHeight; const [m, px] = niceScale(mpp);
   $('scalebar').style.width = px.toFixed(0) + 'px'; $('scaletxt').textContent = m >= 1000 ? (m / 1000) + ' km' : m + ' m';
   updateLabels(d);
@@ -1715,7 +1876,7 @@ requestAnimationFrame(frame);
 addEventListener('resize', () => { cam.aspect = innerWidth / innerHeight; cam.updateProjectionMatrix(); R.setSize(innerWidth, innerHeight); composer.setSize(innerWidth, innerHeight); gtao.setSize(innerWidth, innerHeight); });
 window.__farm = {
   economy, stores, focus, fields, harvesters, rigs, log, CROPS, PLOT, quote, fieldAtWorld, project, pick: pickFlat,
-  warehouse, buildings, sellLot, placeBuilding, buySeed, buyItem, resetGame, shop: SHOP,
+  warehouse, buildings, sellLot, placeBuilding, removeBuilding, buySeed, buyItem, resetGame, shop: SHOP,
   cultures: CULTURES, tanks, climate: DECK_CLIMATE, startCulture, tendCulture, harvestCulture, cultureWatch,
   deck(on) { visitDeck(on == null ? !camS.deck : !!on); },
   get onDeck() { return !!camS.deck; },
@@ -1724,7 +1885,14 @@ window.__farm = {
   get selected() { return selected; },
   get worldDay() { return worldDay; },
   get mode() { return mode; },
-  get camera() { return { x: camS.x, z: camS.z, d: camS.d }; },
+  get camera() { return { x: camS.x, z: camS.z, y: cam.position.y, d: camS.d, deck: !!camS.deck, ground: ground.visible }; },
+  get arm() {
+    return {
+      x: armX,
+      order: armOrder && { id: armOrder.id, phase: armOrder.phase, t: armOrder.t, job: armOrder.job },
+      tanks: tankPos.map(p => p.x),
+    };
+  },
   watch: () => cropWatch(selected),
   lock(id) { setMode('machines'); lockRig(id); paintLock(); },
   aim(yawDeg, dist, pitch) {

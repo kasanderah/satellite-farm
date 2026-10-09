@@ -715,6 +715,12 @@ export function placeBuilding(x, z, kind = 'process') {
   buildings.push(b);
   return { ok: true, building: b };
 }
+export function removeBuilding(id) {
+  const i = buildings.findIndex(b => b.id === id);
+  if (i < 0) return { ok: false, reason: 'missing' };
+  const building = buildings.splice(i, 1)[0];
+  return { ok: true, building };
+}
 export function cultureWatch(tank) {
   if (!tank?.species) return null;
   const spec = CULTURES.find(c => c.id === tank.species);
@@ -839,6 +845,7 @@ export function exportSnapshot() {
     timeScale: economy.timeScale,
     stores: { seed: stores.seed, fertilizer: stores.fertilizer, spray: stores.spray, feed: stores.feed },
     warehouse: warehouse.map(lot => ({ ...lot })),
+    keepBuildings: true,
     buildings: buildings.map(b => ({ id: b.id, kind: b.kind, name: b.name, x: +b.x.toFixed(2), z: +b.z.toFixed(2), ang: b.ang || 0 })),
     tanks: tanks.map(t => ({ id: t.id, species: t.species, startedAt: t.startedAt || 0, tended: !!t.tended })),
     fields: fields.filter(f => f.owned).map(f => ({
@@ -904,7 +911,7 @@ export function applySnapshot(data) {
     buildings.push({ id: +b.id || nextBuilding++, kind, name: b.name || BUILDING_KINDS[kind].name, x: at.x, z: at.z, ang: +b.ang || 0 });
     nextBuilding = Math.max(nextBuilding, (+b.id || 0) + 1);
   }
-  ensureStarters();
+  if (!data.keepBuildings) ensureStarters();
   if (Array.isArray(data.tanks)) {
     blankTanks();
     for (const t of data.tanks) {

@@ -4,7 +4,7 @@ import {
   CROPS, L, PLOT, FIELD_HA, fields, fieldAt, fieldAtWorld, focus, rigs,
   plantField, step, economy, quote, log, exportSnapshot, applySnapshot, RING,
   stores, worldDay, cropWatch, fieldVisual, setPaused, setTimeScale,
-  DAY_SECONDS, MACHINE_MPS, warehouse, sellLot, placeBuilding, buildings, rigReadout,
+  DAY_SECONDS, MACHINE_MPS, warehouse, sellLot, placeBuilding, removeBuilding, buildings, rigReadout,
   SHOP, buySeed, buyItem, SEED_PER_FIELD, resetGame, paused, onHubParcel,
   CULTURES, tanks, startCulture, harvestCulture,
 } from '../src/_shared.js';
@@ -315,6 +315,7 @@ test('fertilizer can be bought and then used to plant', () => {
 test('a shed saved on a crop field is moved onto the hub', () => {
   const bare = fieldAt(focus.i, focus.j);
   const snap = exportSnapshot();
+  delete snap.keepBuildings;
   snap.buildings = [{ id: 50, kind: 'shed', name: '仓棚', x: bare.x0 + 30, z: bare.z0 + 30, ang: 0 }];
   assert.equal(applySnapshot(snap), true);
   const shed = buildings.find(b => b.kind === 'shed');
@@ -374,4 +375,21 @@ test('feed can be bought and then used to start a culture', () => {
   assert.equal(economy.revenue, 0);
   assert.equal(startCulture(empty, 'grub').ok, true);
   assert.equal(stores.feed, 0);
+});
+
+test('a deleted starter stays gone in a new save and comes back on reset', () => {
+  const warehouse = buildings.find(b => b.kind === 'warehouse');
+  assert.ok(warehouse);
+  assert.equal(removeBuilding(warehouse.id).ok, true);
+  assert.equal(buildings.some(b => b.kind === 'warehouse'), false);
+  const snap = exportSnapshot();
+  assert.equal(snap.keepBuildings, true);
+  assert.equal(applySnapshot(snap), true);
+  assert.equal(buildings.some(b => b.kind === 'warehouse'), false);
+  assert.ok(buildings.some(b => b.kind === 'garage'));
+  assert.ok(buildings.some(b => b.kind === 'process'));
+  resetGame();
+  assert.ok(buildings.some(b => b.kind === 'warehouse'));
+  assert.ok(buildings.some(b => b.kind === 'garage'));
+  assert.ok(buildings.some(b => b.kind === 'process'));
 });
