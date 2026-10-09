@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { LAB_CLASSES, LAB_ENTRIES } from '../src/lab-catalog.js';
+import { LAB_CLASSES, LAB_ENTRIES, CULT_EMPTY, CULT_EMPTY_NOTES } from '../src/lab-catalog.js';
 import {
   CROPS, L, PLOT, FIELD_HA, fields, fieldAt, fieldAtWorld, focus, rigs,
   plantField, step, economy, quote, log, exportSnapshot, applySnapshot, RING,
@@ -423,4 +423,27 @@ test('asset lab lists the four classes and the live placeholders', () => {
   assert.equal(LAB_ENTRIES.find(e => e.id === 'tank').cls, 'equip');
   assert.equal(LAB_ENTRIES.find(e => e.id === 'arm').cls, 'rail');
   assert.equal(LAB_ENTRIES.find(e => e.id === 'tractor').cls, 'machine');
+});
+
+test('empty cultivation unit matches the 4 km plot grid', () => {
+  const e = LAB_ENTRIES.find(x => x.id === 'cult-empty');
+  assert.ok(e);
+  assert.equal(e.cls, 'unit');
+  assert.equal(LAB_ENTRIES[0].id, 'cult-empty');
+  assert.equal(e.name, '培育层·空单元');
+  assert.equal(e.notes, CULT_EMPTY_NOTES);
+  assert.match(e.notes, /抬缘白台/);
+  assert.match(e.notes, /C-3,2-U01/);
+  assert.match(e.notes, /两成/);
+  assert.equal(CULT_EMPTY.plots, 7);
+  assert.equal(CULT_EMPTY.farm, 4000);
+  assert.ok(Math.abs(CULT_EMPTY.plot * CULT_EMPTY.plots - CULT_EMPTY.farm) < 1e-6);
+  assert.ok(CULT_EMPTY.seam >= 2 && CULT_EMPTY.seam <= 4);
+  assert.ok(CULT_EMPTY.lane <= 6);
+  assert.ok(CULT_EMPTY.raise < 0.8);
+  assert.equal(CULT_EMPTY.clear, 17);
+  assert.equal(CULT_EMPTY.doorsPerWall, 4);
+  assert.ok(CULT_EMPTY.unit > 130 && CULT_EMPTY.unit < 145);
+  assert.ok(e.notes.includes(String(CULT_EMPTY.doorW)));
+  assert.ok(e.notes.includes('16'));
 });

@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { PALETTE } from './_shared.js';
-import { LAB_CLASSES, LAB_ENTRIES } from './lab-catalog.js';
+import { LAB_CLASSES, LAB_ENTRIES, CULT_EMPTY } from './lab-catalog.js';
 import {
   tractorKit, planterKit, hillerKit, topperKit, potatoLifterKit,
   cultureTankKit, warehouseKit, garageKit, processKit, armKit, irrigatorKit,
@@ -40,7 +40,18 @@ sc.right = sc.top = 90;
 sc.near = 1;
 sc.far = 280;
 scene.add(sun, sun.target);
-scene.add(new THREE.HemisphereLight('#5f7480', '#2a2622', 0.55));
+const hemi = new THREE.HemisphereLight('#5f7480', '#2a2622', 0.55);
+scene.add(hemi);
+const LIGHT0 = {
+  sun: sun.intensity,
+  sunColor: sun.color.clone(),
+  env: scene.environmentIntensity,
+  hemi: hemi.intensity,
+  hemiColor: hemi.color.clone(),
+  hemiGround: hemi.groundColor.clone(),
+  exp: renderer.toneMappingExposure,
+  bias: sun.shadow.bias,
+};
 
 const MAT = {
   light: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.52, metalness: 0.35 }),
@@ -309,7 +320,316 @@ function buildIrrigator() {
   };
 }
 
+// 培育层空单元：一块地里 16 个抬缘白台。无设备、无作物。
+function buildCultEmpty() {
+  const U = CULT_EMPTY;
+  const g = new THREE.Group();
+  g.userData.alive = true;
+  const mat = (opts) => {
+    const m = new THREE.MeshStandardMaterial(opts);
+    m.userData.dispose = true;
+    return m;
+  };
+  const basic = (color) => {
+    const m = new THREE.MeshBasicMaterial({ color });
+    m.userData.dispose = true;
+    return m;
+  };
+  const floorMat = mat({ color: '#5a6164', roughness: 0.94, metalness: 0.04 });
+  const seamMat = mat({ color: '#1c2124', roughness: 0.96, metalness: 0.08 });
+  const cableMat = mat({ color: '#3a4145', roughness: 0.72, metalness: 0.35 });
+  const wallMat = mat({ color: '#2b3034', roughness: 0.84, metalness: 0.28 });
+  const ceilMat = mat({ color: '#23272b', roughness: 0.9, metalness: 0.2 });
+  const doorMat = mat({ color: '#8d9497', roughness: 0.78, metalness: 0.22 });
+  const doorBackMat = mat({ color: '#16191c', roughness: 0.9, metalness: 0.1 });
+  const apronMat = mat({ color: '#12151a', roughness: 0.96, metalness: 0.02 });
+  const padMat = mat({ color: '#d8dad7', roughness: 0.93, metalness: 0.02, emissive: '#d8dad7', emissiveIntensity: 0 });
+  const wearMat = mat({ color: '#6a645c', roughness: 1, metalness: 0 });
+  const glowMat = basic('#9fcfc6');
+  const stripMat = basic('#6e9c96');
+  const slitMat = basic('#6f948f');
+  const padBuilt = padGeometry(U.unit, U.raise, U.chamfer, U.bevel);
+  const padTop = padBuilt.top;
+  const core = 4 * U.unit + 3 * U.seam;
+  const origin = -core / 2 + U.unit / 2;
+  const centers = [0, 1, 2, 3].map(i => origin + i * (U.unit + U.seam));
+  const pads = [];
+  for (let j = 0; j < 4; j++) for (let i = 0; i < 4; i++) pads.push({ i, j, n: j * 4 + i + 1, x: centers[i], z: centers[j] });
+
+  const apron = new THREE.Mesh(new THREE.PlaneGeometry(U.plot + 90, U.plot + 90).rotateX(-Math.PI / 2), apronMat);
+  apron.position.y = -0.04;
+  apron.receiveShadow = true;
+  g.add(apron);
+  const floor = box(U.plot, 0.5, U.plot, 0, -0.25, 0, floorMat);
+  floor.castShadow = false;
+  g.add(floor);
+
+  const addStrip = (w, h, d, x, y, z, material) => {
+    const m = box(w, h, d, x, y, z, material);
+    m.castShadow = false;
+    return m;
+  };
+  for (let k = 0; k < 3; k++) {
+    const at = origin + U.unit / 2 + U.seam / 2 + k * (U.unit + U.seam);
+    addStrip(U.seam * 0.98, 0.02, core, at, 0.012, 0, seamMat);
+    addStrip(core, 0.02, U.seam * 0.98, 0, 0.016, at, seamMat);
+    addStrip(0.62, 0.045, core - U.seam, at, 0.05, 0, cableMat);
+    addStrip(core - U.seam, 0.045, 0.62, 0, 0.07, at, cableMat);
+  }
+
+  const glowW = 0.16;
+  const glowLen = U.unit - U.chamfer * 2 - 1.4;
+  const glowInset = 0.55;
+  for (const p of pads) {
+    const mesh = new THREE.Mesh(padBuilt.geo, padMat);
+    mesh.position.set(p.x, 0, p.z);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.userData.code = `${U.code}-U${String(p.n).padStart(2, '0')}`;
+    g.add(mesh);
+    const y = padTop + 0.018;
+    const e = U.unit / 2 - glowInset;
+    addStrip(glowLen, 0.012, glowW, p.x, y, p.z - e, glowMat);
+    addStrip(glowLen, 0.012, glowW, p.x, y, p.z + e, glowMat);
+    addStrip(glowW, 0.012, glowLen, p.x - e, y, p.z, glowMat);
+    addStrip(glowW, 0.012, glowLen, p.x + e, y, p.z, glowMat);
+  }
+
+  const labels = [];
+  const labelGeo = new THREE.PlaneGeometry(34, 6.4);
+  const placeLabel = (text, x, z, yaw) => {
+    const material = new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 });
+    material.userData.dispose = true;
+    const mesh = new THREE.Mesh(labelGeo, material);
+    mesh.position.set(x, padTop + 0.04, z);
+    mesh.renderOrder = 3;
+    mesh.rotateX(-Math.PI / 2);
+    mesh.rotateZ(yaw);
+    g.add(mesh);
+    labels.push({ mesh, text });
+  };
+  const textInset = 5.2;
+  for (const p of pads) {
+    const text = `${U.code}-U${String(p.n).padStart(2, '0')}`;
+    const h = U.unit / 2 - textInset;
+    placeLabel(text, p.x, p.z - h, 0);
+    placeLabel(text, p.x, p.z + h, Math.PI);
+    placeLabel(text, p.x + h, p.z, -Math.PI / 2);
+    placeLabel(text, p.x - h, p.z, Math.PI / 2);
+  }
+  const paintLabels = () => {
+    if (!g.userData.alive) return;
+    for (const label of labels) {
+      const prev = label.mesh.material.map;
+      label.mesh.material.map = labelTexture(label.text);
+      label.mesh.material.needsUpdate = true;
+      if (prev) prev.dispose();
+    }
+  };
+  paintLabels();
+  if (document.fonts && document.fonts.load) document.fonts.load('500 72px BarlowSC').then(paintLabels);
+
+  let doors = 0;
+  const addWall = (horizontal, sign) => {
+    const fixed = sign * (U.plot / 2 - U.wall / 2);
+    const span0 = horizontal ? -U.plot / 2 : -(U.plot / 2 - U.wall);
+    const span1 = -span0;
+    const cuts = centers.map(c => [c - U.doorW / 2, c + U.doorW / 2]);
+    const segment = (len, y0, y1, a0) => {
+      if (len <= 0.04 || y1 - y0 <= 0.04) return;
+      const midA = a0 + len / 2;
+      const midY = (y0 + y1) / 2;
+      const h = y1 - y0;
+      const m = horizontal
+        ? box(len, h, U.wall, midA, midY, fixed, wallMat)
+        : box(U.wall, h, len, fixed, midY, midA, wallMat);
+      m.castShadow = false;
+      g.add(m);
+    };
+    let cursor = span0;
+    for (const [a, b] of cuts) {
+      segment(a - cursor, 0, U.clear, cursor);
+      segment(b - a, U.doorH, U.clear, a);
+      addDoor(horizontal, sign, (a + b) / 2, fixed);
+      doors += 1;
+      cursor = b;
+    }
+    segment(span1 - cursor, 0, U.clear, cursor);
+  };
+  const addDoor = (horizontal, sign, along, fixed) => {
+    const outer = sign * (U.wall / 2 - 0.16);
+    const x = horizontal ? along : fixed + outer;
+    const z = horizontal ? fixed + outer : along;
+    const back = -sign * (U.wall / 2 - 0.06);
+    const bx = horizontal ? along : fixed + back;
+    const bz = horizontal ? fixed + back : along;
+    const plate = horizontal
+      ? box(U.doorW - 0.08, U.doorH - 0.08, 0.06, bx, U.doorH / 2, bz, doorBackMat)
+      : box(0.06, U.doorH - 0.08, U.doorW - 0.08, bx, U.doorH / 2, bz, doorBackMat);
+    plate.castShadow = false;
+    g.add(plate);
+    const leafW = (U.doorW - 0.36) / 2;
+    const leafH = U.doorH - 0.28;
+    const y = 0.08 + leafH / 2;
+    for (const s of [-1, 1]) {
+      const off = s * (leafW / 2 + 0.06);
+      const leaf = horizontal
+        ? box(leafW, leafH, 0.1, x + off, y, z, doorMat)
+        : box(0.1, leafH, leafW, x, y, z + off, doorMat);
+      leaf.castShadow = false;
+      g.add(leaf);
+      const slit = horizontal
+        ? box(leafW * 0.42, 0.04, 0.02, x + off, y + leafH * 0.16, z + sign * 0.07, slitMat)
+        : box(0.02, 0.04, leafW * 0.42, x + sign * 0.07, y + leafH * 0.16, z + off, slitMat);
+      slit.castShadow = false;
+      g.add(slit);
+    }
+    const sillY = 0.03;
+    const sillAt = fixed - sign * (U.wall / 2 + 0.78);
+    const sill = horizontal
+      ? box(U.doorW + 0.6, 0.04, 1.35, along, sillY, sillAt, floorMat)
+      : box(1.35, 0.04, U.doorW + 0.6, sillAt, sillY, along, floorMat);
+    sill.castShadow = false;
+    g.add(sill);
+  };
+  addWall(true, -1);
+  addWall(true, 1);
+  addWall(false, -1);
+  addWall(false, 1);
+
+  const lip = 8;
+  const lipH = 0.55;
+  const lipY = U.clear - lipH / 2;
+  const inner = U.plot / 2 - U.wall;
+  for (const sign of [-1, 1]) {
+    addStrip(U.plot - U.wall * 2, lipH, lip, 0, lipY, sign * (inner - lip / 2), ceilMat);
+    addStrip(lip, lipH, U.plot - U.wall * 2 - lip * 2, sign * (inner - lip / 2), lipY, 0, ceilMat);
+  }
+  const stripY = U.clear - 1.15;
+  const stripLen = core * 0.92;
+  for (const c of centers) {
+    const sx = addStrip(stripLen, 0.1, 0.42, 0, stripY, c, stripMat);
+    const sz = addStrip(0.42, 0.1, stripLen, c, stripY, 0, stripMat);
+    sx.material = stripMat;
+    sz.material = stripMat;
+  }
+  stripMat.side = THREE.DoubleSide;
+  glowMat.side = THREE.DoubleSide;
+
+  const wear = new THREE.Group();
+  wear.visible = false;
+  const stains = [
+    [0, 2, 14, -8, 22, 7, 0.35],
+    [1, 0, -18, 12, 16, 9, -0.25],
+    [3, 3, 6, 16, 26, 6, 0.12],
+    [2, 1, -4, -14, 18, 8, 1.05],
+    [0, 0, 20, 18, 14, 12, 0.6],
+    [3, 1, -12, 6, 28, 2.2, 0.2],
+    [1, 3, 10, -20, 12, 14, -0.4],
+    [2, 2, -24, 8, 9, 20, 0.8],
+  ];
+  for (const [i, j, lx, lz, w, d, rot] of stains) {
+    const p = pads[j * 4 + i];
+    const m = box(w, 0.02, d, p.x + lx, padTop + 0.03, p.z + lz, wearMat);
+    m.castShadow = false;
+    m.rotation.y = rot;
+    wear.add(m);
+  }
+  g.add(wear);
+
+  const look = {
+    idle: { pad: '#d8dad7', emis: 0, rough: 0.93, glow: '#8fbfb8', strip: '#5f8e88', wear: false },
+    job: { pad: '#d8dad7', emis: 0.025, rough: 0.93, glow: '#b5e4dc', strip: '#8ecfc6', wear: false },
+    sel: { pad: '#e7eae6', emis: 0.06, rough: 0.88, glow: '#e7fffa', strip: '#8fd0c8', wear: false },
+    break: { pad: '#aea89f', emis: 0, rough: 1, glow: '#3e524f', strip: '#334845', wear: true },
+  };
+  g.userData.cult = { pads: pads.length, doors, labels: labels.length, unit: U.unit, plot: U.plot, seam: U.seam, lane: U.lane, raise: padTop };
+  return {
+    group: g,
+    ring: new THREE.Group(),
+    ownState: true,
+    motion(_p, st) {
+      const L = look[st] || look.idle;
+      padMat.color.set(L.pad);
+      padMat.emissive.set(L.pad);
+      padMat.emissiveIntensity = L.emis;
+      padMat.roughness = L.rough;
+      glowMat.color.set(L.glow);
+      stripMat.color.set(L.strip);
+      wear.visible = L.wear;
+    },
+  };
+}
+
+function padGeometry(size, height, chamfer, bevel) {
+  const h = size / 2;
+  const c = Math.min(chamfer, h * 0.4);
+  const sh = new THREE.Shape();
+  sh.moveTo(-h + c, -h);
+  sh.lineTo(h - c, -h);
+  sh.lineTo(h, -h + c);
+  sh.lineTo(h, h - c);
+  sh.lineTo(h - c, h);
+  sh.lineTo(-h + c, h);
+  sh.lineTo(-h, h - c);
+  sh.lineTo(-h, -h + c);
+  sh.closePath();
+  const geo = new THREE.ExtrudeGeometry(sh, {
+    depth: Math.max(0.04, height - bevel * 2),
+    bevelEnabled: bevel > 0,
+    bevelThickness: bevel,
+    bevelSize: bevel * 0.55,
+    bevelSegments: 1,
+    curveSegments: 1,
+    steps: 1,
+  });
+  geo.rotateX(-Math.PI / 2);
+  geo.computeBoundingBox();
+  const hh = geo.boundingBox.max.y - geo.boundingBox.min.y || 1;
+  geo.translate(0, -geo.boundingBox.min.y, 0);
+  geo.scale(1, height / hh, 1);
+  geo.computeVertexNormals();
+  geo.computeBoundingBox();
+  return { geo, top: geo.boundingBox.max.y };
+}
+
+function labelTexture(text) {
+  const W = 2048, H = 320;
+  const c = document.createElement('canvas');
+  c.width = W;
+  c.height = H;
+  const g = c.getContext('2d');
+  g.clearRect(0, 0, W, H);
+  g.fillStyle = '#24272c';
+  g.font = '500 168px BarlowSC, sans-serif';
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.letterSpacing = '14px';
+  g.fillText(text, W / 2, H / 2 + 4);
+  g.globalCompositeOperation = 'destination-out';
+  g.fillRect(0, H / 2 - 5, W, 9);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 8;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+function applyStageLight(entry) {
+  const interior = entry && entry.id === 'cult-empty';
+  sun.intensity = interior ? 0.9 : LIGHT0.sun;
+  sun.color.copy(interior ? C('#e4eeef') : LIGHT0.sunColor);
+  sun.shadow.bias = interior ? -0.0012 : LIGHT0.bias;
+  sun.shadow.normalBias = interior ? 0.12 : 0;
+  hemi.intensity = interior ? 0.62 : LIGHT0.hemi;
+  hemi.color.copy(interior ? C('#d5e2e4') : LIGHT0.hemiColor);
+  hemi.groundColor.copy(interior ? C('#3c4244') : LIGHT0.hemiGround);
+  scene.environmentIntensity = interior ? 0.16 : LIGHT0.env;
+  renderer.toneMappingExposure = interior ? 1.42 : LIGHT0.exp;
+}
+
 const BUILD = {
+  'cult-empty': buildCultEmpty,
   field: () => buildUnit('field', 128),
   deck: () => buildUnit('deck', 128),
   hub: () => buildUnit('hub', 530),
@@ -329,10 +649,15 @@ const BUILD = {
 function disposeStage() {
   while (stage.children.length) {
     const o = stage.children.pop();
+    o.userData.alive = false;
     stage.remove(o);
     o.traverse(m => {
       if (m.geometry) m.geometry.dispose();
-      if (m.material && m.material.userData && m.material.userData.dispose) m.material.dispose();
+      const mats = m.material ? (Array.isArray(m.material) ? m.material : [m.material]) : [];
+      for (const mat of mats) {
+        if (mat.map && mat.userData && mat.userData.dispose) mat.map.dispose();
+        if (mat.userData && mat.userData.dispose) mat.dispose();
+      }
     });
   }
 }
@@ -347,6 +672,12 @@ function frameSpan(entry) {
   eye.tz = 0;
   eye.yaw = entry.cls === 'rail' ? 0.7 : 0.85;
   eye.pitch = entry.cls === 'unit' ? 0.95 : entry.cls === 'rail' ? 0.42 : 0.46;
+  if (entry.id === 'cult-empty') {
+    eye.yaw = 0.46;
+    eye.pitch = 0.72;
+    eye.ty = 0.6;
+    eye.dist *= 0.94;
+  }
 }
 
 function show(id) {
@@ -359,6 +690,7 @@ function show(id) {
   motion = built.motion;
   resize();
   frameSpan(entry);
+  applyStageLight(entry);
   applyPose(frozen == null ? 0 : frozen);
   document.querySelectorAll('#catalog .ent').forEach(b => b.classList.toggle('on', b.dataset.id === entry.id));
   fillBrief(entry);
@@ -366,6 +698,10 @@ function show(id) {
 
 function applyPose(p) {
   if (!shown) return;
+  if (shown.ownState) {
+    if (motion) motion(p, state);
+    return;
+  }
   shown.ring.visible = state === 'sel';
   for (const m of shown.ring.children) m.material = zoneMat;
   shown.group.rotation.z = state === 'break' ? 0.045 : 0;
@@ -392,7 +728,29 @@ function placeCam() {
     eye.tz + eye.dist * Math.cos(eye.yaw) * cp,
   );
   cam.lookAt(eye.tx, eye.ty, eye.tz);
-  sun.position.set(eye.tx + 48, 90, eye.tz + 36);
+  const near = Math.max(0.06, eye.dist / 500);
+  const far = Math.max(8000, eye.dist * 8);
+  if (Math.abs(cam.near - near) > near * 0.05 || Math.abs(cam.far - far) > 1) {
+    cam.near = near;
+    cam.far = far;
+    cam.updateProjectionMatrix();
+  }
+  const interior = shown && shown.ownState;
+  if (interior) {
+    const r = CULT_EMPTY.plot;
+    sun.position.set(eye.tx + r * 0.42, r * 0.72, eye.tz + r * 0.28);
+    sc.left = sc.bottom = -r * 0.78;
+    sc.right = sc.top = r * 0.78;
+    sc.near = 8;
+    sc.far = r * 3.2;
+  } else {
+    sun.position.set(eye.tx + 48, 90, eye.tz + 36);
+    sc.left = sc.bottom = -90;
+    sc.right = sc.top = 90;
+    sc.near = 1;
+    sc.far = 280;
+  }
+  sc.updateProjectionMatrix();
   sun.target.position.set(eye.tx, eye.ty, eye.tz);
 }
 
@@ -403,7 +761,17 @@ function classLabel(id) {
   return (LAB_CLASSES.find(c => c.id === id) || {}).label || id;
 }
 function fillBrief(entry) {
-  const saved = loadBriefs()[entry.id] || {};
+  const all = loadBriefs();
+  if (entry.id === 'cult-empty' && !all[entry.id]) {
+    all[entry.id] = {
+      name: entry.name,
+      cls: classLabel(entry.cls),
+      size: entry.size,
+      notes: entry.notes,
+    };
+    localStorage.setItem(STORE, JSON.stringify(all));
+  }
+  const saved = all[entry.id] || {};
   $('b-name').value = saved.name || entry.name;
   $('b-cls').value = saved.cls || classLabel(entry.cls);
   $('b-size').value = saved.size || entry.size;
@@ -527,4 +895,7 @@ window.__lab = {
   reframe() { frameSpan(LAB_ENTRIES.find(e => e.id === curId)); },
   setState,
   pose(p) { frozen = p; },
+  look(part) { if (part) Object.assign(eye, part); },
+  get cult() { return (shown && shown.group && shown.group.userData.cult) || null; },
+  get brief() { return loadBriefs()[curId] || null; },
 };
