@@ -196,13 +196,17 @@ deckMat.onBeforeCompile = (sh) => {
   sh.uniforms.gHaze = { value: C('haze') };
   sh.uniforms.gData = { value: C('data') };
   sh.uniforms.gSteel = { value: C('steel') };
+  sh.uniforms.gZone = { value: C('zone') };
+  sh.uniforms.uSel = U.uSel;
+  sh.uniforms.uSelOn = U.uSelOn;
   sh.vertexShader = sh.vertexShader
     .replace('#include <common>', '#include <common>\n' + CURVE_DECL + '\nvarying vec3 vFlat;')
     .replace('#include <project_vertex>', 'vFlat = (modelMatrix * vec4(transformed, 1.0)).xyz;\n' + CURVE_PROJECT);
   sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>
 varying vec3 vFlat;
 uniform float uField, uRoad, uBP, uBlock, uX0, uZ0, uLane;
-uniform vec3 gDeep, gMetal, gHaze, gData, gSteel;
+uniform vec3 gDeep, gMetal, gHaze, gData, gSteel, gZone;
+uniform vec4 uSel; uniform float uSelOn;
 float aaAt(float x, float w){ float fw = max(fwidth(x), 0.02); return 1. - smoothstep(w, w + fw, x); }
 vec3 deckEmis = vec3(0.);
 vec3 deckAlbedo(){
@@ -222,11 +226,18 @@ vec3 deckAlbedo(){
   col = mix(col, gSteel, seam * 0.45 + big * 0.7);
   float lane = plate * aaAt(abs(mod(sx + uLane * 0.5, uLane) - uLane * 0.5), 0.18);
   deckEmis = gData * lane * 2.4 + gData * big * 1.6 + gSteel * seam * 0.35;
+  if (uSelOn > 0.5 && p.x >= uSel.x && p.x <= uSel.y && p.y >= uSel.z && p.y <= uSel.w) {
+    float b = min(min(p.x - uSel.x, uSel.y - p.x), min(p.y - uSel.z, uSel.w - p.y));
+    float px = max(fwidth(b) * 2.2, 3.6);
+    float edge = 1.0 - smoothstep(px * 0.12, px * 1.35, b);
+    col = mix(col, gZone, max(edge * 0.96, 0.28));
+    deckEmis += gZone * (edge * 1.35 + 0.22);
+  }
   return col;
 }`).replace('#include <color_fragment>', '#include <color_fragment>\n diffuseColor.rgb = deckAlbedo();')
     .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n totalEmissiveRadiance += deckEmis;');
 };
-const deckFloor = new THREE.Mesh(new THREE.PlaneGeometry(PLOT.x1 - PLOT.x0, PLOT.z1 - PLOT.z0, 1, 1).rotateX(-Math.PI / 2), deckMat);
+const deckFloor = new THREE.Mesh(new THREE.PlaneGeometry(PLOT.x1 - PLOT.x0, PLOT.z1 - PLOT.z0, 48, 48).rotateX(-Math.PI / 2), deckMat);
 deckFloor.position.set((PLOT.x0 + PLOT.x1) / 2, LAYERS[1].floor, (PLOT.z0 + PLOT.z1) / 2);
 deckFloor.receiveShadow = false; deckFloor.frustumCulled = false; deckFloor.visible = false; scene.add(deckFloor);
 const GC = { soil: C('regoDk').multiplyScalar(0.62), rego: C('rego'), regoDk: C('regoDk'), regoLt: C('regoLt'), haze: C('haze'), paper: C('paper'), metalDk: C('metalDk'), deep: C('deep'), tealGy: C('tealGy'), zone: C('zone'), data: C('data'), harvest: C('harvest'), void: C('void'), alert: C('alert'), oliveDp: C('oliveDp'), olive: C('olive'), moss: C('moss'), ochre: C('ochre'), straw: C('straw'), rust: C('rust') };
@@ -786,6 +797,25 @@ function placeTanks() {
   setInst(armSet, 0, armX, y, (tankPos[0] ? tankPos[0].z - L.FIELD / 2 - L.ROAD / 2 : 0), Math.PI / 2);
   setCount(armSet, tankPos.length ? 1 : 0);
 }
+function cellAt(x, z) {
+  const qx = wrapX(x) - L.X0, qy = z - L.Z0;
+  const bx = Math.floor(qx / L.BP), by = Math.floor(qy / L.BP);
+  if (by < 0 || by >= L.NBZ || bx < 0 || bx >= L.NBX) return null;
+  if (bx < PLOT.bi0 || bx > PLOT.bi1 || by < PLOT.bj0 || by > PLOT.bj1) return null;
+  const blx = qx - bx * L.BP, bly = qy - by * L.BP;
+  if (blx < 0 || bly < 0 || blx > L.BLOCK || bly > L.BLOCK) return null;
+  const pitch = L.FIELD + L.ROAD;
+  const fi = Math.floor(blx / pitch), fj = Math.floor(bly / pitch);
+  if (fi < 0 || fi >= L.PER || fj < 0 || fj >= L.PER) return null;
+  if (blx - fi * pitch > L.FIELD || bly - fj * pitch > L.FIELD) return null;
+  const i = bx * L.PER + fi, j = by * L.PER + fj;
+  const [x0, z0] = fieldOrigin(i, j);
+  let tank = -1;
+  const cx = x0 + L.FIELD / 2, cz = z0 + L.FIELD / 2;
+  for (let t = 0; t < tankPos.length; t++) if (Math.abs(tankPos[t].x - cx) < 2 && Math.abs(tankPos[t].z - cz) < 2) tank = t;
+  return { i, j, x0, z0, x1: x0 + L.FIELD, z1: z0 + L.FIELD, hub: bx === L.HUBX && by === L.HUBZ, bi: bx, bj: by, tank };
+}
+placeTanks();
 function orderArm(id, job) {
   if (!tankPos[id]) return;
   const near = Math.abs(armX - tankPos[id].x) < 1.2;
@@ -987,9 +1017,13 @@ function pitchOf(d) {
   return PITCH[PITCH.length - 1][1] * DEG;
 }
 const camS = { x: HUBC, z: HUBC, y: 0, d: 4200, yaw: 0, pOff: 0, lookUp: 0, fovAdd: 0, deck: false }, camT = { ...camS };
+let viewLayer = 'surface';
+let followLock = null;
+function layerNow() { return LAYERS.find(l => l.id === viewLayer) || LAYERS[0]; }
+function layerFloor() { return layerNow().floor; }
 // 环带：拉远时镜头逐渐抬头、视角变宽 → 看到环带在前方升起、在天空中拱起，两侧是环壁，环壁外是太空与母星
 function placeCamera() {
-  const baseY = camS.deck ? LAYERS[1].floor : 0;
+  const baseY = layerFloor();
   const p = pitchOf(camS.d) + camS.pOff;
   cam.position.set(camS.x + Math.sin(camS.yaw) * Math.cos(p) * camS.d, baseY + Math.sin(p) * camS.d, camS.z + Math.cos(camS.yaw) * Math.cos(p) * camS.d);
   cam.lookAt(camS.x, baseY, camS.z);
@@ -1004,11 +1038,14 @@ function setShown(obj, on) {
   for (const k in obj) if (obj[k] && obj[k].isObject3D) obj[k].visible = on;
 }
 function applyDeckView() {
-  const on = !!camS.deck;
+  const on = viewLayer !== 'surface';
+  const grow = viewLayer === 'grow';
+  camS.deck = camT.deck = on;
   ground.visible = !on;
   deckFloor.visible = on;
-  railMesh.visible = on && tankPos.length > 1;
-  cableMesh.visible = on && tankPos.length > 1;
+  deckFloor.position.y = layerFloor();
+  railMesh.visible = grow && tankPos.length > 1;
+  cableMesh.visible = grow && tankPos.length > 1;
   for (const m of hubMeshes) m.visible = !on;
   setShown(depotSet, !on);
   setShown(convSet, !on);
@@ -1023,11 +1060,12 @@ function applyDeckView() {
   for (const k in plantMeshes) setShown(plantMeshes[k], !on);
   if (netMesh) netMesh.visible = !on;
   icons.visible = !on; dots.visible = !on; dust.visible = !on;
-  deckSlabs.visible = !on;
-  const lab = on || !!cut.on;
+  deckSlabs.visible = !on && !!cut.on;
+  const lab = grow || !!cut.on;
   setShown(cultureSet, lab);
   setShown(armSet, lab);
   setShown(deckLightSet, lab);
+  document.body.classList.toggle('underground', on);
 }
 // 交互：左键平移 / 右键旋转 / 滚轮缩放 / WASD / QE / N 昼夜 / M 地图模式 / H 隐藏界面
 let drag = null, ptr = null, selected = null, selNote = '';
@@ -1037,10 +1075,10 @@ function pickFlat(cx, cy) {
   const ndc = new THREE.Vector2((cx / innerWidth) * 2 - 1, -(cy / innerHeight) * 2 + 1);
   raycaster.setFromCamera(ndc, cam);
   const o = raycaster.ray.origin, d = raycaster.ray.direction;
-  const R0 = RING.R, ax = cam.position.x, ox = o.x - ax, oy = o.y - R0;
+  const R0 = RING.R, rad = R0 - layerFloor(), ax = cam.position.x, ox = o.x - ax, oy = o.y - R0;
   const A = d.x * d.x + d.y * d.y;
   if (A < 1e-8) return null;
-  const B = 2 * (ox * d.x + oy * d.y), Cq = ox * ox + oy * oy - R0 * R0, disc = B * B - 4 * A * Cq;
+  const B = 2 * (ox * d.x + oy * d.y), Cq = ox * ox + oy * oy - rad * rad, disc = B * B - 4 * A * Cq;
   if (disc < 0) return null;
   const sd = Math.sqrt(disc);
   let tHit = Infinity;
@@ -1053,6 +1091,11 @@ function pickFlat(cx, cy) {
 function selectField(f, why) { selected = f || null; selNote = why || ''; }
 function onMapClick(cx, cy) {
   const p = pickFlat(cx, cy);
+  if (viewLayer !== 'surface' && mode !== 'build') {
+    const cell = p ? cellAt(p.x, p.z) : null;
+    if (cell && cell.tank >= 0 && viewLayer === 'grow') { deckTank = cell.tank; paintSheet(); }
+    return;
+  }
   if (mode === 'build') {
     if (buildAct === 'watch') return;
     if (!p) { toast('点在自己的田区里'); return; }
@@ -1103,7 +1146,9 @@ addEventListener('pointerup', e => {
   if (ptr && ptr.b === 0 && Math.hypot(e.clientX - ptr.x, e.clientY - ptr.y) < 6) onMapClick(ptr.x, ptr.y);
   drag = null; ptr = null;
 });
+let hoverPtr = null, deckHover = null;
 addEventListener('pointermove', e => {
+  hoverPtr = { x: e.clientX, y: e.clientY };
   if (!drag) return; const dx = e.clientX - drag.x, dy = e.clientY - drag.y; drag.x = e.clientX; drag.y = e.clientY;
   if (drag.b === 'pan') {
     const k = camT.d * 2 * Math.tan(15 * DEG) / innerHeight, s = Math.sin(camT.yaw), c = Math.cos(camT.yaw);
@@ -1198,29 +1243,37 @@ function paintLock() {
   el.innerHTML = `<b>${r.label}</b><small><em>${info.speed.toFixed(1)}</em> m/s</small><small>${info.doing}${where ? ' · ' + where : ''}</small><div id="rigbar"><i style="width:${pct}%"></i></div><small>本趟 ${pct}%</small>`;
 }
 function leaveDeck() {
-  if (!camS.deck && !cut.on) return;
+  if (viewLayer === 'surface' && !cut.on) return;
+  viewLayer = 'surface';
   camS.deck = camT.deck = false;
   camS.y = camT.y = 0;
   setCut(false);
+  if (typeof paintLayers === 'function') paintLayers();
 }
-function visitDeck(on) {
-  if (!on) { leaveDeck(); showPlan(); return; }
+function holdCamera() {
   watchRig = null;
+  followLock = null;
+  camT.x = camS.x; camT.z = camS.z; camT.d = camS.d;
+  camT.yaw = camS.yaw; camT.pOff = camS.pOff; camT.lookUp = camS.lookUp; camT.fovAdd = camS.fovAdd;
+}
+function showLayer(id) {
+  const next = LAYERS.some(l => l.id === id) ? id : 'surface';
+  if (next === viewLayer && !cut.on) { paintLayers(); return; }
+  holdCamera();
   if (cut.on) setCut(false);
-  placeTanks();
-  const row = tankPos[1] || tankPos[0] || cellCenter(L.HUBX, L.HUBZ, 1, 1);
-  camT.x = camS.x = row.x;
-  camT.z = camS.z = row.z;
-  camT.y = camS.y = 0;
-  camT.d = camS.d = 280;
-  camT.yaw = camS.yaw = 118 * DEG;
-  camT.pOff = camS.pOff = 0;
-  camT.lookUp = camS.lookUp = 0;
-  camT.fovAdd = camS.fovAdd = 0;
-  camT.deck = camS.deck = true;
-  mode = 'deck';
+  viewLayer = next;
+  camS.deck = camT.deck = next !== 'surface';
+  if (next === 'grow') placeTanks();
+  if (next === 'grow') mode = 'deck';
+  else if (mode === 'deck') mode = 'plan';
   paintModes();
   paintSheet();
+  paintLayers();
+  paintLock();
+}
+function visitDeck(on) {
+  const want = on == null ? viewLayer === 'surface' : !!on;
+  showLayer(want ? 'grow' : 'surface');
 }
 function showPlan() {
   leaveDeck();
@@ -1297,12 +1350,12 @@ function paintSheet() {
   }
 }
 function setMode(id) {
-  if (id !== 'deck' && camS.deck) {
+  if (id !== 'deck' && viewLayer !== 'surface') {
+    holdCamera();
+    viewLayer = 'surface';
     camS.deck = camT.deck = false;
-    camS.y = camT.y = 0;
-    camS.d = camT.d = 720;
-    camS.pOff = camT.pOff = -8 * DEG;
-    setCut(false);
+    if (cut.on) setCut(false);
+    paintLayers();
   }
   mode = id;
   if (id === 'plan') { showPlan(); return; }
@@ -1393,8 +1446,16 @@ $('sheet').addEventListener('click', e => {
 });
 paintModes();
 // 分层面板：列出 LAYERS（剖面打开时，被剖开的层高亮）
-$('layers').innerHTML = `<div class="lh">分层 · LAYERS <em>C 下到培育层</em></div>` + LAYERS.map(l => `<div class="ly ly-${l.id}"${l.id === 'grow' ? ' data-deck="1"' : ''}><i></i><span>${l.name}</span><small>${l.en}</small><em>${l.floor === 0 ? '±0 m' : l.floor.toFixed(0) + ' m'}</em></div>`).join('');
-$('layers').addEventListener('click', e => { if (e.target.closest('[data-deck]')) visitDeck(!camS.deck); });
+$('layers').innerHTML = `<div class="lh">分层 · LAYERS <em>点一层 · C</em></div>` + LAYERS.map(l => `<div class="ly ly-${l.id}" data-layer="${l.id}"><i></i><span>${l.name}</span><small>${l.en}</small><em>${l.floor === 0 ? '±0 m' : l.floor.toFixed(0) + ' m'}</em></div>`).join('');
+function paintLayers() {
+  document.querySelectorAll('#layers .ly').forEach(el => el.classList.toggle('on', el.dataset.layer === viewLayer));
+  document.body.classList.toggle('underground', viewLayer !== 'surface');
+}
+paintLayers();
+$('layers').addEventListener('click', e => {
+  const row = e.target.closest('[data-layer]');
+  if (row) showLayer(row.dataset.layer);
+});
 const pv = new THREE.Vector3();
 function project(x, y, z) {
   const cx = U.uCurve.value.x, R0 = RING.R, th = (x - cx) / R0, r = R0 - y;   // 与 curveWorld 相同的环带卷曲
@@ -1402,10 +1463,41 @@ function project(x, y, z) {
   return pv.z < 1 && pv.z > -1 ? [(pv.x * 0.5 + 0.5) * innerWidth, (-pv.y * 0.5 + 0.5) * innerHeight] : null;
 }
 const secName = (bi, bj) => `S-${String(bi).padStart(2, '0')}${String(bj).padStart(2, '0')}`;
+const cellCode = (i, j) => `G-${String(i).padStart(3, '0')}${String(j).padStart(2, '0')}`;
+function fillDeckLabels(want, d) {
+  const y = layerFloor() + 2;
+  const aSec = Math.min(1, Math.max(0, (d - 500) / 400));
+  if (aSec > 0) for (let bj = PLOT.bj0; bj <= PLOT.bj1; bj++) for (let bi = PLOT.bi0; bi <= PLOT.bi1; bi++) {
+    const x = L.X0 + bi * L.BP + L.BLOCK / 2, z = L.Z0 + bj * L.BP + L.BLOCK / 2;
+    if (Math.hypot(x - camS.x, z - camS.z) > d * 1.05) continue;
+    const hub = bi === L.HUBX && bj === L.HUBZ;
+    const name = hub ? '中枢' : secName(bi, bj);
+    const sub = hub ? `${layerNow().name} · 与地表中枢对齐` : '大格';
+    want.push({ x, z, y, pr: hub ? 0 : 1, a: aSec, html: `<b>${name}</b><small>${sub}</small>`, cls: hub ? 'hub' : 'sec' });
+  }
+  const aCell = Math.min(1, Math.max(0, (1100 - d) / 500));
+  if (aCell > 0) for (const f of fields) {
+    if (!f.inPlot) continue;
+    const x = f.x0 + L.FIELD / 2, z = f.z0 + L.FIELD / 2;
+    if (Math.hypot(x - camS.x, z - camS.z) > Math.min(d * 1.1, 780)) continue;
+    const hit = deckHover && deckHover.i === f.i && deckHover.j === f.j;
+    let tank = -1;
+    if (viewLayer === 'grow') for (let t = 0; t < tankPos.length; t++) if (Math.abs(tankPos[t].x - x) < 2 && Math.abs(tankPos[t].z - z) < 2) tank = t;
+    const hub = Math.floor(f.i / L.PER) === L.HUBX && Math.floor(f.j / L.PER) === L.HUBZ;
+    let title = cellCode(f.i, f.j), sub = hub ? '中枢格' : '空格';
+    if (tank >= 0) {
+      const w = cultureWatch(tanks[tank]);
+      title = `槽 ${tank + 1}`;
+      sub = w ? `${w.name} · 第 ${Math.floor(w.day)} 日` : '空槽';
+    }
+    want.push({ x, z, y, pr: tank >= 0 ? 0 : 2, a: aCell, html: `<b>${title}</b><span>${sub}</span>`, cls: 'fld' + (hit || tank === deckTank && tank >= 0 ? ' act' : '') });
+  }
+}
 function updateLabels(d) {
   const want = [];
-  const far = d > 1500, mid = d > 260 && d <= 1500, ops = d <= 260 && d > 60;
-  const aSec = Math.min(1, Math.max(0, (d - 1400) / 600)), aField = Math.min(1, Math.max(0, (d - 230) / 120)) * (1 - Math.min(1, Math.max(0, (d - 1300) / 300)));
+  if (camS.deck) { fillDeckLabels(want, d); }
+  const far = !camS.deck && d > 1500, mid = !camS.deck && d > 260 && d <= 1500, ops = !camS.deck && d <= 260 && d > 60;
+  const aSec = !camS.deck ? Math.min(1, Math.max(0, (d - 1400) / 600)) : 0, aField = !camS.deck ? Math.min(1, Math.max(0, (d - 230) / 120)) * (1 - Math.min(1, Math.max(0, (d - 1300) / 300))) : 0;
   if (aSec > 0) for (let bj = 0; bj < L.NBZ; bj++) for (let bi = 0; bi < L.NBX; bi++) {
     const x = L.X0 + bi * L.BP + L.BLOCK / 2, z = L.Z0 + bj * L.BP + L.BLOCK / 2;
     if (Math.hypot(x - camS.x, z - camS.z) > d * 1.0) continue;
@@ -1420,13 +1512,13 @@ function updateLabels(d) {
     want.push({ x, z, pr: 2, a: aField, html: `<i style="background:${sw}"></i><b>F-${String(f.i).padStart(2, '0')}${String(f.j).padStart(2, '0')}</b><span>${st}</span>`, cls: 'fld' + ((f === selected || watch) ? ' act' : '') });
   }
   if (ops) for (const h of nearH.slice(0, 6)) if (h.mode === 'cut' || h.mode === 'turn') want.push({ x: h.x, z: h.z, y: 8, pr: 3, a: Math.min(1, (260 - d) / 60) * Math.min(1, (d - 60) / 30), html: `<b>H-${String(h.id).padStart(3, '0')}</b><span>作业</span>`, cls: 'veh' });
-  for (const r of rigs) if (r.busy) want.push({ x: r.x, z: r.z, y: 6, pr: 3, a: Math.min(1, Math.max(0, (1400 - d) / 500)), html: `<b>${r.label}</b>`, cls: 'veh' });
+  if (!camS.deck) for (const r of rigs) if (r.busy) want.push({ x: r.x, z: r.z, y: 6, pr: 3, a: Math.min(1, Math.max(0, (1400 - d) / 500)), html: `<b>${r.label}</b>`, cls: 'veh' });
   if (cut.on && d < 2200) {
     const I = cutInner(), a = 1 - Math.min(1, Math.max(0, (d - 1500) / 500));
     want.push({ x: cut.x + 58, z: cut.z, y: LAYERS[1].floor + 2, pr: -2, a, html: `<b>${LAYERS[1].name}</b><small>${DECK_CLIMATE.temp}°C · 湿度 ${DECK_CLIMATE.rh}% · 蛴螬 / 黑水虻</small>`, cls: 'hub deck' });
     want.push({ x: (I.x0 + I.x1) / 2, z: I.z0 + 20, y: LAYERS[2].floor, pr: -2, a, html: `<b>${LAYERS[2].name} · ${LAYERS[2].en}</b><small>${LAYERS[2].floor} m · 储液 / 泵站 / 管廊</small>`, cls: 'hub deck' });
   }
-  want.push({ x: HUBC, z: HUBC, pr: -1, a: (d > 260 && d <= 1500) ? 1 : 0, html: `<b>中枢 · CENTRAL HUB</b><small>试验卫星 · 农神VIII</small>`, cls: 'hub' });
+  if (!camS.deck) want.push({ x: HUBC, z: HUBC, pr: -1, a: (d > 260 && d <= 1500) ? 1 : 0, html: `<b>中枢 · CENTRAL HUB</b><small>试验卫星 · 农神VIII</small>`, cls: 'hub' });
   // 屏幕上贪心去重：间距不足就不显示
   const placed = []; let n = 0;
   want.sort((a, b) => a.pr - b.pr);
@@ -1466,7 +1558,7 @@ else if (VIEW === 'ops') { const h = pickHarvester(); Object.assign(camS, { x: h
 else if (VIEW === 'hub') Object.assign(camS, { x: HUBC - 20, z: HUBC, d: 620, yaw: 0.5 });
 else if (VIEW === 'far') Object.assign(camS, { x: HUBC + 500, z: HUBC + 250, d: 4800, yaw: 96 * DEG });
 else Object.assign(camS, { x: focus.x, z: focus.z, d: 720, yaw: 118 * DEG, pOff: -8 * DEG, lookUp: 0, fovAdd: 6 });
-Object.assign(camT, camS); const follow = camS.follow; delete camT.follow;
+Object.assign(camT, camS); followLock = camS.follow || null; delete camT.follow;
 if (Q.get('cx')) { camS.x = camT.x = HUBC + +Q.get('cx'); camS.z = camT.z = HUBC + +(Q.get('cz') || 0); camS.follow = camT.follow = null; }
 if (Q.get('d')) camS.d = camT.d = +Q.get('d');
 if (Q.get('yaw')) camS.yaw = camT.yaw = +Q.get('yaw') * DEG;
@@ -1508,7 +1600,7 @@ function paintKpi() {
 }
 function updateDock() {
   const el = $('dock');
-  if (!selected) { el.classList.remove('on'); return; }
+  if (viewLayer !== 'surface' || !selected) { el.classList.remove('on'); return; }
   el.classList.add('on');
   const f = selected;
   const watch = cropWatch(f);
@@ -1716,11 +1808,11 @@ function frame(now) {
   if (keys.a || keys.arrowleft) { camT.x -= c * ks; camT.z += s * ks; } if (keys.d || keys.arrowright) { camT.x += c * ks; camT.z -= s * ks; }
   if (keys.q) camT.yaw += dt; if (keys.e) camT.yaw -= dt;
   if (watchRig && !drag) { camT.x = camS.x = watchRig.x; camT.z = camS.z = watchRig.z; }
-  if (follow && !drag && !Q.has('nofollow')) { camT.x += (follow.x - camT.x) * 0.5; camT.z += (follow.z - camT.z) * 0.5; }
+  if (followLock && !drag && !Q.has('nofollow')) { camT.x += (followLock.x - camT.x) * 0.5; camT.z += (followLock.z - camT.z) * 0.5; }
   const k = 1 - Math.exp(-dt * 7);
   for (const key of ['x', 'z', 'yaw', 'pOff', 'lookUp', 'fovAdd']) camS[key] += (camT[key] - camS[key]) * k;
   // 环向首尾相接：镜头绕环一圈后坐标回卷（画面不变）
-  if (!follow) { const wx = wrapX(camS.x); if (wx !== camS.x) { camT.x += wx - camS.x; camS.x = wx; } }
+  if (!followLock) { const wx = wrapX(camS.x); if (wx !== camS.x) { camT.x += wx - camS.x; camS.x = wx; } }
   camT.z = Math.max(RING.WALL_A + 60, Math.min(RING.WALL_B - 60, camT.z));
   camS.d = Math.exp(Math.log(camS.d) + (Math.log(camT.d) - Math.log(camS.d)) * k);
   const d = camS.d; U.uCamDist.value = d;
@@ -1818,7 +1910,14 @@ function frame(now) {
     for (let i = 0; i < n; i++) setInst(set, i, list[i].x, 0, list[i].z, list[i].ang || 0);
     setCount(set, n);
   }
-  if ((camS.deck || cut.on) && tankPos.length) {
+  if (viewLayer !== 'surface' && hoverPtr && !drag) {
+    const hp = pickFlat(hoverPtr.x, hoverPtr.y);
+    deckHover = hp ? cellAt(hp.x, hp.z) : null;
+  } else if (!hoverPtr || drag) deckHover = null;
+  if (viewLayer !== 'surface' && deckHover) { U.uSelOn.value = 1; U.uSel.value.set(deckHover.x0, deckHover.x1, deckHover.z0, deckHover.z1); }
+  else if (viewLayer === 'surface' && selected && selected.crop >= 0) { U.uSelOn.value = 1; U.uSel.value.set(selected.x0, selected.x0 + L.FIELD, selected.z0, selected.z0 + L.FIELD); }
+  else U.uSelOn.value = 0;
+  if ((viewLayer === 'grow' || cut.on) && tankPos.length) {
     let reach = 0;
     const home = tankPos[Math.min(deckTank, tankPos.length - 1)] || tankPos[0];
     let z = home.z - L.FIELD / 2 - L.ROAD / 2;
@@ -1864,8 +1963,6 @@ function frame(now) {
   paintKpi();
   updateDock();
   paintLock();
-  if (selected && selected.crop >= 0) { U.uSelOn.value = 1; U.uSel.value.set(selected.x0, selected.x0 + L.FIELD, selected.z0, selected.z0 + L.FIELD); }
-  else U.uSelOn.value = 0;
   drainLog();
   if (frames === 0) {
     $('clock').textContent = paused ? `第 ${Math.floor(worldDay)} 日 · 暂停` : `第 ${Math.floor(worldDay)} 日`;
@@ -1890,7 +1987,10 @@ window.__farm = {
   get selected() { return selected; },
   get worldDay() { return worldDay; },
   get mode() { return mode; },
-  get camera() { return { x: camS.x, z: camS.z, y: cam.position.y, d: camS.d, deck: !!camS.deck, ground: ground.visible }; },
+  get camera() { return { x: camS.x, z: camS.z, y: cam.position.y, d: camS.d, yaw: camS.yaw, pOff: camS.pOff, deck: !!camS.deck, ground: ground.visible, layer: viewLayer }; },
+  get layer() { return viewLayer; },
+  get hover() { return deckHover && { i: deckHover.i, j: deckHover.j, tank: deckHover.tank, x0: deckHover.x0, x1: deckHover.x1, z0: deckHover.z0, z1: deckHover.z1 }; },
+  showLayer,
   get arm() {
     return {
       x: armX,
