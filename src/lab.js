@@ -628,22 +628,14 @@ function buildCultPlot(scheme, opts) {
   for (const c of centers) {
     for (const mesh of [
       addStrip(stripLen, 0.28, 1.35, 0, stripY + 0.12, c, housingMat),
-      addStrip(stripLen, 0.07, weak ? 1.7 : 0.55, 0, stripY - 0.08, c, stripMat),
+      addStrip(stripLen, 0.07, 0.55, 0, stripY - 0.08, c, stripMat),
       addStrip(1.35, 0.28, stripLen, c, stripY + 0.18, 0, housingMat),
-      addStrip(weak ? 1.7 : 0.55, 0.07, stripLen, c, stripY - 0.02, 0, stripMat),
+      addStrip(0.55, 0.07, stripLen, c, stripY - 0.02, 0, stripMat),
     ]) groups.strip.meshes.push(mesh);
     hang(new THREE.RectAreaLight(stripColor, 1, stripLen, 2.4), 0, stripY - 0.4, c, false);
     hang(new THREE.RectAreaLight(stripColor, 1, stripLen, 2.4), c, stripY - 0.32, 0, true);
   }
   stripMat.side = THREE.DoubleSide;
-  if (weak) {
-    const soffitMat = mat({ color: '#12080c', emissive: '#7a1520', emissiveIntensity: 0.42, roughness: 0.92, metalness: 0, side: THREE.DoubleSide });
-    const soffit = new THREE.Mesh(new THREE.PlaneGeometry(U.plot - 6, U.plot - 6).rotateX(Math.PI / 2), soffitMat);
-    soffit.position.y = U.clear - 0.85;
-    soffit.castShadow = false;
-    g.add(soffit);
-    groups.strip.meshes.push(soffit);
-  }
   glowMat.side = THREE.DoubleSide;
   wallGlowMat.side = THREE.DoubleSide;
   const padColor = weak ? '#6a1420' : marathon ? '#e9ffe8' : '#e7f7f4';
@@ -1316,9 +1308,10 @@ function buildGrubTrough() {
     carried.visible = false;
     head.position.y = 3.35;
     const lamp = addG(0.7, 0.1, 0.18, 1.05, legH - 0.32, 0, rigMat);
-    const lampLight = new THREE.PointLight('#ff2b30', 700, 18, 2);
-    lampLight.position.set(1.05, legH - 0.55, 0);
-    gantry.add(lampLight);
+    const lampLight = new THREE.SpotLight('#ff2b30', 40, 4.8, 0.32, 0.55, 2);
+    lampLight.position.set(0, legH - 0.45, 0);
+    lampLight.target.position.set(0, 0.35, 0);
+    gantry.add(lampLight, lampLight.target);
     const statusMat = mat({ color: '#2a2418', emissive: statusColor.rest, emissiveIntensity: 3.4, roughness: 0.3, metalness: 0 });
     const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.22, 12, 8), statusMat);
     beacon.position.set(0, legH + 1.02, 0);
@@ -1354,6 +1347,24 @@ function buildGrubTrough() {
       x = x1;
       z = z1;
     };
+    // 西端头廊在槽和地面门外面。换列、送箱、回位只在这里改 Z，其余只沿槽的长边走。
+    const westRail = (x0 - troughL / 2) - 7.6;
+    const nearDoorZ = (zz) => Math.abs(zz - doorA.z) <= 0.35 || Math.abs(zz - doorB.z) <= 0.35;
+    const axisTo = (kind, x1, z1, speed, mode, extra) => {
+      if (Math.abs(z - z1) <= 0.04) {
+        if (Math.abs(x - x1) > 0.05) pushMove(kind, x1, z, speed, mode, extra);
+        return;
+      }
+      const onDoorX = Math.abs(x - doorA.x) <= 0.35 && Math.abs(x1 - doorA.x) <= 0.35;
+      if (onDoorX && nearDoorZ(z) && nearDoorZ(z1)) {
+        pushMove(kind, x, z1, speed, mode, extra);
+        if (Math.abs(x - x1) > 0.05) pushMove(kind, x1, z1, speed, mode, extra);
+        return;
+      }
+      if (Math.abs(x - westRail) > 0.05) pushMove(kind, westRail, z, speed, mode, extra);
+      if (Math.abs(z - z1) > 0.04) pushMove(kind, westRail, z1, speed, mode, extra);
+      if (Math.abs(x - x1) > 0.05) pushMove(kind, x1, z1, speed, mode, extra);
+    };
     for (let i = 0; i < rowList.length; i++) {
       const row = rowList[i];
       const zRow = rowZ(row);
@@ -1365,11 +1376,11 @@ function buildGrubTrough() {
       if (passes) {
         pushMove('work', hx, z, WORK, 'work');
         segs.push({ kind: 'lift', x0: hx, x1: hx, z0: z, z1: z, dur: 1.6, mode: 'work', slot: harvest.i });
-        pushMove('carry', doorA.x, doorA.z, EMPTY, 'work', { slot: harvest.i });
+        axisTo('carry', doorA.x, doorA.z, EMPTY, 'work', { slot: harvest.i });
         segs.push({ kind: 'drop', x0: doorA.x, x1: doorA.x, z0: doorA.z, z1: doorA.z, dur: 1.25, mode: 'work', slot: harvest.i });
-        pushMove('fetch', doorB.x, doorB.z, EMPTY, 'empty');
+        axisTo('fetch', doorB.x, doorB.z, EMPTY, 'empty');
         segs.push({ kind: 'pick', x0: doorB.x, x1: doorB.x, z0: doorB.z, z1: doorB.z, dur: 1.25, mode: 'work' });
-        pushMove('return', hx, zRow, EMPTY, 'work', { slot: harvest.i });
+        axisTo('return', hx, zRow, EMPTY, 'work', { slot: harvest.i });
         segs.push({ kind: 'place', x0: hx, x1: hx, z0: zRow, z1: zRow, dur: 1.25, mode: 'work', slot: harvest.i });
       }
       if (Math.abs(x - dest) > 0.05) pushMove('work', dest, z, WORK, 'work');
@@ -1458,6 +1469,8 @@ function buildGrubTrough() {
     vatColor: '#ff2b30',
     rigColor: '#ff2b30',
     plotDim: { strip: '#8a1824', door: '#ffcc66', wall: 'off' },
+    lamp: { type: 'spot', distance: 4.8, angle: 0.32 },
+    diagonals: rigs.reduce((n, rig) => n + rig.script.segs.filter(s => Math.abs(s.x1 - s.x0) > 0.08 && Math.abs(s.z1 - s.z0) > 0.08).length, 0),
   };
   return {
     group: host,
@@ -1509,7 +1522,7 @@ function buildGrubTrough() {
         statusMat.emissive.set(statusColor[key]);
         statusLight.color.set(statusColor[key]);
         statusLight.intensity = key === 'break' ? 200 : key === 'rest' ? 280 : 700;
-        lampLight.intensity = st === 'job' && mode === 'work' ? 4200 : st === 'sel' ? 1600 : st === 'break' ? 80 : 900;
+        lampLight.intensity = st === 'job' && mode === 'work' ? 90 : st === 'sel' ? 36 : st === 'break' ? 8 : 22;
         const caption = PHASE[kind] || (mode === 'empty' ? '空驶' : '作业');
         setLabel(rig, caption);
         rig.label.lookAt(cam.position);
