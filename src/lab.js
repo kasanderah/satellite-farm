@@ -1,6 +1,7 @@
 // 环穗 · 资产工坊。设计沙盒，不接主进度。网格和预制件跟游戏同一套。
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js';
 import { PALETTE } from './_shared.js';
 import { LAB_CLASSES, LAB_ENTRIES, CULT_EMPTY } from './lab-catalog.js';
 import {
@@ -25,6 +26,7 @@ viewEl.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
 const cam = new THREE.PerspectiveCamera(32, 1, 0.08, 8000);
+RectAreaLightUniformsLib.init();
 const pmrem = new THREE.PMREMGenerator(renderer);
 scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 scene.environmentIntensity = 0.6;
@@ -330,11 +332,6 @@ function buildCultEmpty() {
     m.userData.dispose = true;
     return m;
   };
-  const basic = (color) => {
-    const m = new THREE.MeshBasicMaterial({ color });
-    m.userData.dispose = true;
-    return m;
-  };
   const floorMat = mat({ color: '#5a6164', roughness: 0.94, metalness: 0.04 });
   const seamMat = mat({ color: '#1c2124', roughness: 0.96, metalness: 0.08 });
   const cableMat = mat({ color: '#3a4145', roughness: 0.72, metalness: 0.35 });
@@ -343,11 +340,17 @@ function buildCultEmpty() {
   const doorMat = mat({ color: '#8d9497', roughness: 0.78, metalness: 0.22 });
   const doorBackMat = mat({ color: '#16191c', roughness: 0.9, metalness: 0.1 });
   const apronMat = mat({ color: '#12151a', roughness: 0.96, metalness: 0.02 });
-  const padMat = mat({ color: '#d8dad7', roughness: 0.93, metalness: 0.02, emissive: '#d8dad7', emissiveIntensity: 0 });
+  const padMat = mat({ color: '#c5c9c6', roughness: 0.9, metalness: 0.04, emissive: '#000000', emissiveIntensity: 0 });
   const wearMat = mat({ color: '#6a645c', roughness: 1, metalness: 0 });
-  const glowMat = basic('#9fcfc6');
-  const stripMat = basic('#6e9c96');
-  const slitMat = basic('#6f948f');
+  const ribMat = mat({ color: '#46525a', roughness: 0.58, metalness: 0.42 });
+  const beamMat = mat({ color: '#3c474e', roughness: 0.55, metalness: 0.48 });
+  const lineMat = mat({ color: '#1a1f23', roughness: 0.84, metalness: 0.16 });
+  const housingMat = mat({ color: '#171c20', roughness: 0.5, metalness: 0.55 });
+  const glowMat = mat({ color: '#06211e', emissive: '#c8fff6', emissiveIntensity: 3.2, roughness: 0.32, metalness: 0 });
+  const stripMat = mat({ color: '#041614', emissive: '#b6fff4', emissiveIntensity: 2.4, roughness: 0.28, metalness: 0 });
+  const slitMat = mat({ color: '#06302c', emissive: '#9ee8de', emissiveIntensity: 1.4, roughness: 0.4, metalness: 0 });
+  const gridMap = padGridTexture();
+  const gridMat = mat({ map: gridMap, color: '#f2f4f2', roughness: 0.92, metalness: 0.03, emissive: '#000000', emissiveIntensity: 0 });
   const padBuilt = padGeometry(U.unit, U.raise, U.chamfer, U.bevel);
   const padTop = padBuilt.top;
   const core = 4 * U.unit + 3 * U.seam;
@@ -377,9 +380,11 @@ function buildCultEmpty() {
     addStrip(core - U.seam, 0.045, 0.62, 0, 0.07, at, cableMat);
   }
 
-  const glowW = 0.16;
-  const glowLen = U.unit - U.chamfer * 2 - 1.4;
-  const glowInset = 0.55;
+  const glowW = 0.42;
+  const glowLen = U.unit - U.chamfer * 2 - 1.6;
+  const glowInset = 0.72;
+  const gridSize = U.unit - U.chamfer * 2 - 2.4;
+  const gridGeo = new THREE.PlaneGeometry(gridSize, gridSize).rotateX(-Math.PI / 2);
   for (const p of pads) {
     const mesh = new THREE.Mesh(padBuilt.geo, padMat);
     mesh.position.set(p.x, 0, p.z);
@@ -387,12 +392,17 @@ function buildCultEmpty() {
     mesh.receiveShadow = true;
     mesh.userData.code = `${U.code}-U${String(p.n).padStart(2, '0')}`;
     g.add(mesh);
-    const y = padTop + 0.018;
+    const grid = new THREE.Mesh(gridGeo, gridMat);
+    grid.position.set(p.x, padTop + 0.012, p.z);
+    grid.receiveShadow = true;
+    grid.castShadow = false;
+    g.add(grid);
+    const y = padTop + 0.028;
     const e = U.unit / 2 - glowInset;
-    addStrip(glowLen, 0.012, glowW, p.x, y, p.z - e, glowMat);
-    addStrip(glowLen, 0.012, glowW, p.x, y, p.z + e, glowMat);
-    addStrip(glowW, 0.012, glowLen, p.x - e, y, p.z, glowMat);
-    addStrip(glowW, 0.012, glowLen, p.x + e, y, p.z, glowMat);
+    addStrip(glowLen, 0.02, glowW, p.x, y, p.z - e, glowMat);
+    addStrip(glowLen, 0.02, glowW, p.x, y, p.z + e, glowMat);
+    addStrip(glowW, 0.02, glowLen, p.x - e, y, p.z, glowMat);
+    addStrip(glowW, 0.02, glowLen, p.x + e, y, p.z, glowMat);
   }
 
   const labels = [];
@@ -496,6 +506,10 @@ function buildCultEmpty() {
   addWall(true, 1);
   addWall(false, -1);
   addWall(false, 1);
+  dressCultWall(g, true, -1, U, centers, beamMat, ribMat, lineMat);
+  dressCultWall(g, true, 1, U, centers, beamMat, ribMat, lineMat);
+  dressCultWall(g, false, -1, U, centers, beamMat, ribMat, lineMat);
+  dressCultWall(g, false, 1, U, centers, beamMat, ribMat, lineMat);
 
   const lip = 8;
   const lipH = 0.55;
@@ -505,16 +519,43 @@ function buildCultEmpty() {
     addStrip(U.plot - U.wall * 2, lipH, lip, 0, lipY, sign * (inner - lip / 2), ceilMat);
     addStrip(lip, lipH, U.plot - U.wall * 2 - lip * 2, sign * (inner - lip / 2), lipY, 0, ceilMat);
   }
-  const stripY = U.clear - 1.15;
-  const stripLen = core * 0.92;
+  const stripY = U.clear - 1.05;
+  const stripLen = core * 0.94;
+  const rects = [];
+  const hang = (light, x, y, z, turn) => {
+    light.position.set(x, y, z);
+    light.rotation.set(-Math.PI / 2, 0, turn ? Math.PI / 2 : 0);
+    g.add(light);
+    rects.push(light);
+  };
   for (const c of centers) {
-    const sx = addStrip(stripLen, 0.1, 0.42, 0, stripY, c, stripMat);
-    const sz = addStrip(0.42, 0.1, stripLen, c, stripY, 0, stripMat);
-    sx.material = stripMat;
-    sz.material = stripMat;
+    addStrip(stripLen, 0.28, 1.35, 0, stripY + 0.12, c, housingMat);
+    addStrip(stripLen, 0.07, 0.55, 0, stripY - 0.08, c, stripMat);
+    addStrip(1.35, 0.28, stripLen, c, stripY + 0.18, 0, housingMat);
+    addStrip(0.55, 0.07, stripLen, c, stripY - 0.02, 0, stripMat);
+    hang(new THREE.RectAreaLight('#d8fff8', 1, stripLen, 2.4), 0, stripY - 0.4, c, false);
+    hang(new THREE.RectAreaLight('#d8fff8', 1, stripLen, 2.4), c, stripY - 0.32, 0, true);
   }
   stripMat.side = THREE.DoubleSide;
   glowMat.side = THREE.DoubleSide;
+  const padLights = pads.map(p => {
+    const L = new THREE.PointLight('#e7f7f4', 1, 0, 2);
+    L.position.set(p.x, U.clear - 2.4, p.z);
+    g.add(L);
+    return L;
+  });
+  const wallLights = [];
+  for (const c of [centers[0], centers[3]]) {
+    for (const sign of [-1, 1]) {
+      const inset = sign * (U.plot / 2 - U.wall - 2.2);
+      for (const [x, y, z] of [[c, 8.2, inset], [inset, 8.2, c]]) {
+        const L = new THREE.PointLight('#d5eee8', 1, 0, 2);
+        L.position.set(x, y, z);
+        g.add(L);
+        wallLights.push(L);
+      }
+    }
+  }
 
   const wear = new THREE.Group();
   wear.visible = false;
@@ -537,28 +578,128 @@ function buildCultEmpty() {
   }
   g.add(wear);
 
+  // 满照度记为 1。空闲顶灯约两成，作业略抬，选中把缘光拉开，损坏收暗。
   const look = {
-    idle: { pad: '#d8dad7', emis: 0, rough: 0.93, glow: '#8fbfb8', strip: '#5f8e88', wear: false },
-    job: { pad: '#d8dad7', emis: 0.025, rough: 0.93, glow: '#b5e4dc', strip: '#8ecfc6', wear: false },
-    sel: { pad: '#e7eae6', emis: 0.06, rough: 0.88, glow: '#e7fffa', strip: '#8fd0c8', wear: false },
-    break: { pad: '#aea89f', emis: 0, rough: 1, glow: '#3e524f', strip: '#334845', wear: true },
+    idle: { hemi: 0.11, sun: 0.05, padL: 7000, wallL: 2800, rect: 0.16, glowI: 3.4, stripI: 2.2, wear: false, grid: '#e7e9e7' },
+    job: { hemi: 0.14, sun: 0.06, padL: 16000, wallL: 5600, rect: 0.42, glowI: 5.2, stripI: 4.4, wear: false, grid: '#eceeed' },
+    sel: { hemi: 0.12, sun: 0.05, padL: 9000, wallL: 3400, rect: 0.24, glowI: 11, stripI: 3.2, wear: false, grid: '#eef1ee' },
+    break: { hemi: 0.06, sun: 0.03, padL: 1400, wallL: 600, rect: 0.03, glowI: 0.22, stripI: 0.16, wear: true, grid: '#b7b2aa' },
   };
-  g.userData.cult = { pads: pads.length, doors, labels: labels.length, unit: U.unit, plot: U.plot, seam: U.seam, lane: U.lane, raise: padTop };
+  g.userData.cult = {
+    pads: pads.length, doors, labels: labels.length, unit: U.unit, plot: U.plot,
+    seam: U.seam, lane: U.lane, raise: padTop, lights: padLights.length + wallLights.length + rects.length,
+  };
   return {
     group: g,
     ring: new THREE.Group(),
     ownState: true,
     motion(_p, st) {
       const L = look[st] || look.idle;
-      padMat.color.set(L.pad);
-      padMat.emissive.set(L.pad);
-      padMat.emissiveIntensity = L.emis;
-      padMat.roughness = L.rough;
-      glowMat.color.set(L.glow);
-      stripMat.color.set(L.strip);
+      hemi.intensity = L.hemi;
+      sun.intensity = L.sun;
+      glowMat.emissiveIntensity = L.glowI;
+      stripMat.emissiveIntensity = L.stripI;
+      slitMat.emissiveIntensity = L.stripI * 0.55;
+      gridMat.color.set(L.grid);
+      for (const light of padLights) light.intensity = L.padL;
+      for (const light of wallLights) light.intensity = L.wallL;
+      for (const light of rects) light.intensity = L.rect;
       wear.visible = L.wear;
     },
   };
+}
+
+function dressCultWall(g, horizontal, sign, U, centers, beamMat, ribMat, lineMat) {
+  const fixed = sign * (U.plot / 2 - U.wall / 2);
+  const span0 = horizontal ? -U.plot / 2 : -(U.plot / 2 - U.wall);
+  const span1 = -span0;
+  const length = span1 - span0;
+  const put = (along, y, len, h, depth, side, material) => {
+    if (len <= 0.04 || h <= 0.04 || depth <= 0.01) return;
+    const x = horizontal ? along : fixed + side;
+    const z = horizontal ? fixed + side : along;
+    const m = horizontal
+      ? box(len, h, depth, x, y, z, material)
+      : box(depth, h, len, x, y, z, material);
+    m.castShadow = false;
+    g.add(m);
+  };
+  const ext = depth => sign * (U.wall / 2 + depth / 2);
+  const inn = depth => -sign * (U.wall / 2 + depth / 2);
+  const blocked = (a, pad = 1.1) => centers.some(c => Math.abs(a - c) < U.doorW / 2 + pad);
+  put(0, 16.15, length, 1.2, 0.78, ext(0.78), beamMat);
+  put(0, 16.15, length - 2, 0.7, 0.42, inn(0.42), beamMat);
+  put(0, 11.5, length, 0.36, 0.34, ext(0.34), beamMat);
+  put(0, 8.15, length, 0.32, 0.3, ext(0.3), beamMat);
+  const gaps = centers.map(c => [c - U.doorW / 2 - 1.15, c + U.doorW / 2 + 1.15]);
+  let rail = span0;
+  for (const [a, b] of gaps) {
+    if (a - rail > 3) put((rail + a) / 2, 0.42, a - rail - 0.3, 0.55, 0.36, ext(0.36), beamMat);
+    rail = b;
+  }
+  if (span1 - rail > 3) put((rail + span1) / 2, 0.42, span1 - rail - 0.3, 0.55, 0.36, ext(0.36), beamMat);
+  for (let a = span0 + 12; a < span1 - 8; a += 22) {
+    if (blocked(a, 1.4)) continue;
+    put(a, U.clear * 0.48, 1.35, U.clear - 1.6, 0.72, ext(0.72), ribMat);
+    put(a, U.clear * 0.46, 0.85, U.clear - 2.4, 0.4, inn(0.4), ribMat);
+  }
+  for (let a = span0 + 5; a < span1 - 3; a += 7.4) {
+    if (blocked(a, 0.2)) continue;
+    put(a, 8.4, 0.07, 12.6, 0.05, ext(0.05), lineMat);
+  }
+  for (const c of centers) {
+    for (const s of [-1, 1]) {
+      const a = c + s * (U.doorW / 2 + 0.62);
+      put(a, U.doorH * 0.55, 0.72, U.doorH + 1.1, 0.58, ext(0.58), ribMat);
+    }
+    put(c, U.doorH + 0.55, U.doorW + 2.1, 0.78, 0.62, ext(0.62), beamMat);
+    put(c, U.doorH * 0.5, U.doorW + 0.2, 0.08, 0.08, ext(0.08), lineMat);
+  }
+}
+
+function padGridTexture() {
+  const S = 1024;
+  const c = document.createElement('canvas');
+  c.width = S;
+  c.height = S;
+  const g = c.getContext('2d');
+  g.fillStyle = '#e6e8e6';
+  g.fillRect(0, 0, S, S);
+  const margin = 36;
+  g.strokeStyle = 'rgba(92, 100, 104, 0.55)';
+  g.lineWidth = 4;
+  g.strokeRect(margin, margin, S - margin * 2, S - margin * 2);
+  g.strokeStyle = 'rgba(110, 118, 120, 0.42)';
+  g.lineWidth = 2;
+  g.strokeRect(margin + 18, margin + 18, S - (margin + 18) * 2, S - (margin + 18) * 2);
+  const cells = 4;
+  const inner = S - margin * 2;
+  g.strokeStyle = 'rgba(86, 94, 98, 0.38)';
+  g.lineWidth = 2;
+  for (let i = 1; i < cells; i++) {
+    const p = margin + inner * i / cells;
+    g.beginPath();
+    g.moveTo(margin, p);
+    g.lineTo(S - margin, p);
+    g.stroke();
+    g.beginPath();
+    g.moveTo(p, margin);
+    g.lineTo(p, S - margin);
+    g.stroke();
+  }
+  g.strokeStyle = 'rgba(120, 128, 130, 0.22)';
+  g.lineWidth = 1;
+  for (let i = 0; i < cells; i++) for (let j = 0; j < cells; j++) {
+    const x = margin + inner * i / cells + 22;
+    const y = margin + inner * j / cells + 22;
+    const w = inner / cells - 44;
+    g.strokeRect(x, y, w, w);
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 8;
+  tex.needsUpdate = true;
+  return tex;
 }
 
 function padGeometry(size, height, chamfer, bevel) {
@@ -617,15 +758,15 @@ function labelTexture(text) {
 
 function applyStageLight(entry) {
   const interior = entry && entry.id === 'cult-empty';
-  sun.intensity = interior ? 0.9 : LIGHT0.sun;
-  sun.color.copy(interior ? C('#e4eeef') : LIGHT0.sunColor);
+  sun.intensity = interior ? 0.08 : LIGHT0.sun;
+  sun.color.copy(interior ? C('#d5e6e8') : LIGHT0.sunColor);
   sun.shadow.bias = interior ? -0.0012 : LIGHT0.bias;
   sun.shadow.normalBias = interior ? 0.12 : 0;
-  hemi.intensity = interior ? 0.62 : LIGHT0.hemi;
-  hemi.color.copy(interior ? C('#d5e2e4') : LIGHT0.hemiColor);
-  hemi.groundColor.copy(interior ? C('#3c4244') : LIGHT0.hemiGround);
-  scene.environmentIntensity = interior ? 0.16 : LIGHT0.env;
-  renderer.toneMappingExposure = interior ? 1.42 : LIGHT0.exp;
+  hemi.intensity = interior ? 0.16 : LIGHT0.hemi;
+  hemi.color.copy(interior ? C('#c9ddd8') : LIGHT0.hemiColor);
+  hemi.groundColor.copy(interior ? C('#1c2224') : LIGHT0.hemiGround);
+  scene.environmentIntensity = interior ? 0.08 : LIGHT0.env;
+  renderer.toneMappingExposure = interior ? 1.02 : LIGHT0.exp;
 }
 
 const BUILD = {
@@ -762,7 +903,7 @@ function classLabel(id) {
 }
 function fillBrief(entry) {
   const all = loadBriefs();
-  if (entry.id === 'cult-empty' && !all[entry.id]) {
+  if (entry.id === 'cult-empty' && (!all[entry.id] || !String(all[entry.id].notes || '').includes('分格'))) {
     all[entry.id] = {
       name: entry.name,
       cls: classLabel(entry.cls),

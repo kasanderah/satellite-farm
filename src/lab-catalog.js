@@ -43,16 +43,16 @@ export const CULT_EMPTY_NOTES = `抬缘白台。培育层的空单元：台上�
 台面（抬缘白台）：
 亚光米白 / 浅灰。整台只抬高 ${m2(CULT_EMPTY.raise)} m，是低台阶，不是高基座。平面转角倒角 ${m1(CULT_EMPTY.chamfer)} m，比上一版小；顶缘倒棱 ${m2(CULT_EMPTY.bevel)} m。
 每台四边都有平贴的小号工业编号，样例 ${CULT_EMPTY.code}-U01 到 U16。一台一个号，四边同一串，字躺在台面上。
-台缘只有一条很细的冷青白微光。顶灯带在 ${CULT_EMPTY.clear} m 楼板下，亮度大约两成，是暗的环境光，不是亮廊。
+台面有一层很浅的分格线，亚光，没有噪点。台缘是一条细的冷青白发光缘，会照到台沿。顶灯带在 ${CULT_EMPTY.clear} m 楼板下，空闲时大约两成，是真正的灯，不是贴图。环境光压暗，方便看清照度。
 
 墙与门：
-四面墙各 ${CULT_EMPTY.doorsPerWall} 扇农机门，一共 ${CULT_EMPTY.doorsPerWall * 4} 扇。门宽 ${m1(CULT_EMPTY.doorW)} m，高 ${m1(CULT_EMPTY.doorH)} m，农机进得去，不是机库大开口。门位对准外侧那一排单元。
+墙不是光板。外皮有竖向肋柱、横向梁和板缝，门洞带门框。四面墙各 ${CULT_EMPTY.doorsPerWall} 扇农机门，一共 ${CULT_EMPTY.doorsPerWall * 4} 扇。门宽 ${m1(CULT_EMPTY.doorW)} m，高 ${m1(CULT_EMPTY.doorH)} m，农机进得去，不是机库大开口。门位对准外侧那一排单元。
 
-状态：
-空闲：偏暗的基线。
-作业：和空闲接近，灯带和缘光只抬一点。
-选中：缘光和台面有一层很轻的高光。
-损坏：台面有轻微磨损，缘光变弱。`;
+状态（灯会跟着变）：
+空闲：环境偏暗，顶灯大约两成，缘光细。
+作业：顶灯和缘光一起抬一点。
+选中：缘光明显一些，台面略亮。
+损坏：顶灯和缘光变弱，台面有轻微磨损。`;
 
 // span：沙盒里把镜头框住的边长（米）。和游戏里的模数一致，只用于取景。
 export const LAB_ENTRIES = [
