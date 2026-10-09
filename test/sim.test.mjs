@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { LAB_CLASSES, LAB_ENTRIES, CULT_EMPTY, CULT_EMPTY_NOTES, CULT_B_NOTES } from '../src/lab-catalog.js';
+import { LAB_CLASSES, LAB_ENTRIES, CULT_EMPTY, CULT_EMPTY_NOTES, CULT_B_NOTES, GRUB_TROUGH_NOTES } from '../src/lab-catalog.js';
 import {
   CROPS, L, PLOT, FIELD_HA, fields, fieldAt, fieldAtWorld, focus, rigs,
   plantField, step, economy, quote, log, exportSnapshot, applySnapshot, RING,
@@ -438,6 +438,7 @@ test('empty cultivation unit matches the 4 km plot grid', () => {
   assert.equal(e.notes, CULT_EMPTY_NOTES);
   assert.equal(b.notes, CULT_B_NOTES);
   assert.match(e.notes, /抬缘白台/);
+  assert.match(e.notes, /地灯/);
   assert.match(e.notes, /内皮/);
   assert.match(b.notes, /漆面/);
   assert.match(b.notes, /紫灯/);
@@ -454,4 +455,11 @@ test('empty cultivation unit matches the 4 km plot grid', () => {
   assert.ok(CULT_EMPTY.unit > 130 && CULT_EMPTY.unit < 145);
   assert.ok(e.notes.includes(String(CULT_EMPTY.doorW)));
   assert.ok(e.notes.includes('16'));
+  const grub = LAB_ENTRIES.find(x => x.id === 'grub-trough');
+  assert.equal(grub.cls, 'equip');
+  assert.equal(grub.name, '蛴螬培养槽');
+  assert.equal(grub.notes, GRUB_TROUGH_NOTES);
+  assert.match(grub.notes, /4×15/);
+  assert.match(grub.notes, /龙门/);
+  assert.match(grub.notes, /槽灯/);
 });

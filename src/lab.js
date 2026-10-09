@@ -340,7 +340,7 @@ function buildCultPlot(scheme) {
   };
   const groups = {
     strip: { id: 'strip', label: '顶灯带', on: true, lights: [], meshes: [] },
-    rim: { id: 'rim', label: '台缘', on: true, lights: [], meshes: [] },
+    rim: { id: 'ground', label: marathon ? '台缘' : '地灯', on: true, lights: [], meshes: [] },
     door: { id: 'door', label: '门灯', on: true, lights: [], meshes: [] },
     wall: { id: 'wall', label: '墙灯', on: true, lights: [], meshes: [] },
   };
@@ -429,18 +429,58 @@ function buildCultPlot(scheme) {
     grid.receiveShadow = true;
     grid.castShadow = false;
     g.add(grid);
-    const y = padTop + 0.028;
-    const e = U.unit / 2 - glowInset;
-    for (const mesh of [
-      addStrip(glowLen, 0.02, glowW, p.x, y, p.z - e, glowMat),
-      addStrip(glowLen, 0.02, glowW, p.x, y, p.z + e, glowMat),
-      addStrip(glowW, 0.02, glowLen, p.x - e, y, p.z, glowMat),
-      addStrip(glowW, 0.02, glowLen, p.x + e, y, p.z, glowMat),
-    ]) groups.rim.meshes.push(mesh);
     if (marathon) {
+      const y = padTop + 0.028;
+      const e = U.unit / 2 - glowInset;
+      for (const mesh of [
+        addStrip(glowLen, 0.02, glowW, p.x, y, p.z - e, glowMat),
+        addStrip(glowLen, 0.02, glowW, p.x, y, p.z + e, glowMat),
+        addStrip(glowW, 0.02, glowLen, p.x - e, y, p.z, glowMat),
+        addStrip(glowW, 0.02, glowLen, p.x + e, y, p.z, glowMat),
+      ]) groups.rim.meshes.push(mesh);
       const band = addStrip(U.unit - corner * 2 - 8, 0.03, 0.7, p.x, y + 0.012, p.z, redMat);
       if (p.n % 2) band.rotation.y = Math.PI / 2;
     }
+  }
+  const markerMat = mat({ color: '#d7fff6', emissive: '#e9fff8', emissiveIntensity: 4.2, roughness: 0.22, metalness: 0 });
+  let markerMesh = null;
+  if (!marathon) {
+    const markers = [];
+    const half = U.unit / 2 - 6.2;
+    const step = 15.5;
+    const edge = U.unit / 2 - 1.25;
+    for (const p of pads) {
+      for (let t = -half; t <= half + 0.01; t += step) {
+        markers.push([p.x + t, p.z - edge]);
+        markers.push([p.x + t, p.z + edge]);
+        markers.push([p.x - edge, p.z + t]);
+        markers.push([p.x + edge, p.z + t]);
+      }
+    }
+    const baseGeo = new THREE.CylinderGeometry(0.16, 0.2, 0.06, 8);
+    const postGeo = new THREE.CylinderGeometry(0.055, 0.07, 0.46, 7);
+    const headGeo = new THREE.CylinderGeometry(0.2, 0.2, 0.16, 10);
+    const postMat = mat({ color: '#2c3338', roughness: 0.48, metalness: 0.62 });
+    const base = new THREE.InstancedMesh(baseGeo, postMat, markers.length);
+    const post = new THREE.InstancedMesh(postGeo, postMat, markers.length);
+    markerMesh = new THREE.InstancedMesh(headGeo, markerMat, markers.length);
+    const dummy = new THREE.Object3D();
+    markers.forEach(([x, z], i) => {
+      dummy.position.set(x, padTop + 0.03, z);
+      dummy.scale.set(1, 1, 1);
+      dummy.rotation.set(0, 0, 0);
+      dummy.updateMatrix();
+      base.setMatrixAt(i, dummy.matrix);
+      dummy.position.y = padTop + 0.28;
+      dummy.updateMatrix();
+      post.setMatrixAt(i, dummy.matrix);
+      dummy.position.y = padTop + 0.56;
+      dummy.updateMatrix();
+      markerMesh.setMatrixAt(i, dummy.matrix);
+    });
+    base.castShadow = post.castShadow = markerMesh.castShadow = false;
+    g.add(base, post, markerMesh);
+    groups.rim.meshes.push(base, post, markerMesh);
   }
 
   const labels = [];
@@ -649,7 +689,7 @@ function buildCultPlot(scheme) {
   }
   g.add(wear);
 
-  // 满照度记为 1。空闲顶灯约两成，作业略抬，选中把缘光拉开，损坏收暗。
+  // 满照度记为 1。空闲顶灯约两成。A 的地灯、B 的台缘都走 glowI。损坏收暗。
   // 灯组开关不写在这里：motion 先把该状态的照度铺上，applyLightGroups 再把关掉的组压成 0。
   const look = {
     idle: { hemi: 0.11, sun: 0.05, padL: 7000, wallL: 2800, rect: 0.16, glowI: 3.4, stripI: 2.2, doorL: 1400, accentL: 1800, wear: false, grid: '#e7e9e7' },
@@ -675,6 +715,14 @@ function buildCultPlot(scheme) {
       hemi.intensity = L.hemi;
       sun.intensity = L.sun;
       glowMat.emissiveIntensity = L.glowI;
+      markerMat.emissiveIntensity = L.glowI;
+      if (markerMesh && markerMesh.userData.breakOn !== (st === 'break')) {
+        const off = new THREE.Color('#4a433c');
+        const on = new THREE.Color('#e9fff8');
+        for (let i = 0; i < markerMesh.count; i++) markerMesh.setColorAt(i, st === 'break' && i % 4 === 0 ? off : on);
+        if (markerMesh.instanceColor) markerMesh.instanceColor.needsUpdate = true;
+        markerMesh.userData.breakOn = st === 'break';
+      }
       stripMat.emissiveIntensity = L.stripI;
       wallGlowMat.emissiveIntensity = L.stripI * 0.75;
       slitMat.emissiveIntensity = marathon ? L.stripI * 0.95 : L.stripI * 0.55;
@@ -964,11 +1012,286 @@ function applyStageLight(entry) {
   hemi.groundColor.copy(interior ? C(marathon ? '#0c2414' : '#1c2224') : LIGHT0.hemiGround);
   scene.environmentIntensity = interior ? (marathon ? 0.72 : 0.08) : LIGHT0.env;
   renderer.toneMappingExposure = interior ? (marathon ? 1.05 : 1.02) : LIGHT0.exp;
+  if (id === 'grub-trough') {
+    sun.intensity = 0.42;
+    sun.color.copy(C('#e4eee6'));
+    hemi.intensity = 0.24;
+    hemi.color.copy(C('#d7e6de'));
+    hemi.groundColor.copy(C('#1a221e'));
+    scene.environmentIntensity = 0.3;
+    renderer.toneMappingExposure = 1.12;
+  }
+}
+
+function grubTexture() {
+  const S = 1024;
+  const c = document.createElement('canvas');
+  c.width = S;
+  c.height = S;
+  const g = c.getContext('2d');
+  g.fillStyle = '#c6a56a';
+  g.fillRect(0, 0, S, S);
+  for (let i = 0; i < 1600; i++) {
+    const x = Math.random() * S;
+    const y = Math.random() * S;
+    const len = 6 + Math.random() * 15;
+    const fat = 2.6 + Math.random() * 4.2;
+    g.save();
+    g.translate(x, y);
+    g.rotate(Math.random() * Math.PI);
+    g.fillStyle = i % 7 === 0 ? '#8a7044' : i % 3 === 0 ? '#f6ead0' : '#e4d0a2';
+    g.beginPath();
+    g.ellipse(0, 0, len, fat, 0, 0, Math.PI * 2);
+    g.fill();
+    g.fillStyle = 'rgba(42, 30, 16, 0.62)';
+    g.beginPath();
+    g.arc(len * 0.58, 0, Math.max(1.2, fat * 0.42), 0, Math.PI * 2);
+    g.fill();
+    g.restore();
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(4, 2);
+  tex.anisotropy = 8;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+// 一整套蛴螬培养槽：占一个培育单元，槽排之间走龙门。
+function buildGrubTrough() {
+  const U = CULT_EMPTY;
+  const g = new THREE.Group();
+  const mat = (opts) => {
+    const m = new THREE.MeshStandardMaterial(opts);
+    m.userData.dispose = true;
+    return m;
+  };
+  const apronMat = mat({ color: '#12151a', roughness: 0.96, metalness: 0.02 });
+  const padMatLocal = mat({ color: '#c5c9c6', roughness: 0.9, metalness: 0.04 });
+  const shellMat = mat({ color: '#8a9296', roughness: 0.62, metalness: 0.28 });
+  const wallMat = mat({ color: '#6e777c', roughness: 0.55, metalness: 0.34 });
+  const railMat = mat({ color: '#3c4448', roughness: 0.7, metalness: 0.4 });
+  const steelMat = mat({ color: '#9aa3a6', roughness: 0.42, metalness: 0.55 });
+  const darkMat = mat({ color: '#2a3136', roughness: 0.58, metalness: 0.45 });
+  const grubMap = grubTexture();
+  const grubMat = mat({ map: grubMap, color: '#f3e6c8', roughness: 0.86, metalness: 0 });
+  const vatMat = mat({ color: '#12302c', emissive: '#b7fff0', emissiveIntensity: 1.6, roughness: 0.35, metalness: 0 });
+  const rigMat = mat({ color: '#102824', emissive: '#d8fff4', emissiveIntensity: 3.2, roughness: 0.3, metalness: 0 });
+  const groups = {
+    vat: { id: 'vat', label: '槽灯', on: true, lights: [], meshes: [] },
+    rig: { id: 'rig', label: '巡灯', on: true, lights: [], meshes: [] },
+  };
+
+  const apron = new THREE.Mesh(new THREE.PlaneGeometry(U.unit + 46, U.unit + 46).rotateX(-Math.PI / 2), apronMat);
+  apron.position.y = -0.04;
+  apron.receiveShadow = true;
+  g.add(apron);
+  const padBuilt = padGeometry(U.unit, U.raise, U.chamfer, U.bevel, false);
+  const pad = new THREE.Mesh(padBuilt.geo, padMatLocal);
+  pad.receiveShadow = true;
+  g.add(pad);
+  const gridSize = U.unit - U.chamfer * 2 - 2.4;
+  const grid = new THREE.Mesh(new THREE.PlaneGeometry(gridSize, gridSize).rotateX(-Math.PI / 2), mat({ map: padGridTexture(false), color: '#f2f4f2', roughness: 0.92, metalness: 0.03 }));
+  grid.position.y = padBuilt.top + 0.012;
+  grid.receiveShadow = true;
+  g.add(grid);
+
+  const troughL = 15;
+  const troughW = 4;
+  const endGap = 1.15;
+  const aisle = 3.15;
+  const usable = U.unit - 16;
+  const nLong = Math.floor((usable + endGap) / (troughL + endGap));
+  const nRows = Math.floor((usable + aisle) / (troughW + aisle));
+  const n = nLong * nRows;
+  const spanX = nLong * troughL + (nLong - 1) * endGap;
+  const spanZ = nRows * troughW + (nRows - 1) * aisle;
+  const x0 = -spanX / 2 + troughL / 2;
+  const z0 = -spanZ / 2 + troughW / 2;
+  const pitch = troughW + aisle;
+  const y0 = padBuilt.top;
+
+  const placeAll = (mesh, y, lift = 0) => {
+    const dummy = new THREE.Object3D();
+    for (let i = 0; i < n; i++) {
+      const col = i % nLong;
+      const row = Math.floor(i / nLong);
+      dummy.position.set(x0 + col * (troughL + endGap), y0 + y + lift, z0 + row * pitch);
+      dummy.rotation.set(0, 0, 0);
+      dummy.scale.set(1, 1, 1);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(i, dummy.matrix);
+    }
+    mesh.castShadow = false;
+    g.add(mesh);
+    return mesh;
+  };
+  placeAll(new THREE.InstancedMesh(new THREE.BoxGeometry(troughL, 0.1, troughW), shellMat, n), 0.05);
+  const longGeo = new THREE.BoxGeometry(troughL, 0.78, 0.12);
+  for (const side of [-1, 1]) {
+    const mesh = new THREE.InstancedMesh(longGeo, wallMat, n);
+    const dummy = new THREE.Object3D();
+    for (let i = 0; i < n; i++) {
+      const col = i % nLong;
+      const row = Math.floor(i / nLong);
+      dummy.position.set(x0 + col * (troughL + endGap), y0 + 0.49, z0 + row * pitch + side * (troughW / 2 - 0.06));
+      dummy.updateMatrix();
+      mesh.setMatrixAt(i, dummy.matrix);
+    }
+    mesh.castShadow = false;
+    g.add(mesh);
+  }
+  const shortGeo = new THREE.BoxGeometry(0.12, 0.78, troughW - 0.24);
+  for (const side of [-1, 1]) {
+    const mesh = new THREE.InstancedMesh(shortGeo, wallMat, n);
+    const dummy = new THREE.Object3D();
+    for (let i = 0; i < n; i++) {
+      const col = i % nLong;
+      const row = Math.floor(i / nLong);
+      dummy.position.set(x0 + col * (troughL + endGap) + side * (troughL / 2 - 0.06), y0 + 0.49, z0 + row * pitch);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(i, dummy.matrix);
+    }
+    mesh.castShadow = false;
+    g.add(mesh);
+  }
+  const grubMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(troughL - 0.46, 0.5, troughW - 0.42), grubMat, n);
+  const grubDummy = new THREE.Object3D();
+  const grubBase = [];
+  for (let i = 0; i < n; i++) {
+    const col = i % nLong;
+    const row = Math.floor(i / nLong);
+    grubDummy.position.set(x0 + col * (troughL + endGap), y0 + 0.38, z0 + row * pitch);
+    grubDummy.scale.set(1, 1, 1);
+    grubDummy.updateMatrix();
+    grubBase.push(grubDummy.matrix.clone());
+    grubMesh.setMatrixAt(i, grubDummy.matrix);
+    grubMesh.setColorAt(i, new THREE.Color('#ffffff'));
+  }
+  grubMesh.castShadow = false;
+  g.add(grubMesh);
+  const vatMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(troughL - 0.8, 0.06, 0.08), vatMat, n);
+  const vatDummy = new THREE.Object3D();
+  for (let i = 0; i < n; i++) {
+    const col = i % nLong;
+    const row = Math.floor(i / nLong);
+    vatDummy.position.set(x0 + col * (troughL + endGap), y0 + 0.9, z0 + row * pitch + troughW / 2 - 0.16);
+    vatDummy.updateMatrix();
+    vatMesh.setMatrixAt(i, vatDummy.matrix);
+  }
+  vatMesh.castShadow = false;
+  g.add(vatMesh);
+  groups.vat.meshes.push(vatMesh);
+
+  for (let r = -1; r < nRows; r++) {
+    const z = z0 + r * pitch + troughW / 2 + aisle / 2;
+    const rail = box(spanX + 8, 0.045, 0.12, 0, y0 + 0.03, z, railMat);
+    rail.castShadow = false;
+    g.add(rail);
+  }
+
+  const patrolRow = Math.floor(nRows / 2);
+  const patrolZ = z0 + patrolRow * pitch;
+  const legZ = troughW / 2 + aisle / 2;
+  const gantry = new THREE.Group();
+  gantry.position.y = y0;
+  const legH = 4.55;
+  const addG = (w, h, d, x, y, z, material) => {
+    const m = box(w, h, d, x, y, z, material);
+    m.castShadow = false;
+    gantry.add(m);
+    return m;
+  };
+  for (const s of [-1, 1]) {
+    addG(0.34, legH, 0.34, 0, legH / 2, s * legZ, steelMat);
+    addG(0.85, 0.2, 0.62, 0, 0.12, s * legZ, darkMat);
+  }
+  addG(0.46, 0.34, legZ * 2 + 0.7, 0, legH, 0, steelMat);
+  addG(0.16, 0.12, legZ * 2 - 0.4, 0, legH - 0.72, 0, steelMat);
+  addG(1.25, 0.62, 0.9, 0, legH + 0.46, 0, darkMat);
+  const head = new THREE.Group();
+  gantry.add(head);
+  const headBody = box(0.62, 0.28, 0.62, 0, 0, 0, steelMat);
+  headBody.castShadow = false;
+  head.add(headBody);
+  const nozzle = box(0.2, 0.85, 0.2, 0, -0.52, 0, steelMat);
+  nozzle.castShadow = false;
+  head.add(nozzle);
+  const tip = box(0.32, 0.08, 0.32, 0, -0.98, 0, rigMat);
+  tip.castShadow = false;
+  head.add(tip);
+  head.position.y = legH - 1.15;
+  const lamp = addG(0.7, 0.1, 0.18, 1.05, legH - 0.32, 0, rigMat);
+  const lampLight = new THREE.PointLight('#e8fff6', 1800, 18, 2);
+  lampLight.position.set(1.05, legH - 0.55, 0);
+  gantry.add(lampLight);
+  groups.rig.meshes.push(lamp, tip);
+  groups.rig.lights.push(lampLight);
+  g.add(gantry);
+
+  const xStart = x0 - troughL / 2 + 1.2;
+  const xEnd = x0 + (nLong - 1) * (troughL + endGap) + troughL / 2 - 1.2;
+  const ring = salmonRing(U.unit * 1.01, U.unit * 1.01, y0 + 0.2);
+  g.add(ring);
+  const bad = new Set();
+  for (let i = 0; i < n; i++) if (i % 11 === 4) bad.add(i);
+
+  g.userData.grub = { n, nLong, nRows, troughL, troughW, aisle };
+  return {
+    group: g,
+    ring,
+    ownState: true,
+    lightGroups: [groups.vat, groups.rig],
+    motion(p, st) {
+      const travel = xStart + (xEnd - xStart) * (0.5 - 0.5 * Math.cos(p * Math.PI * 2));
+      if (st === 'job') {
+        gantry.position.x = travel;
+        gantry.position.z = patrolZ;
+        gantry.rotation.z = 0;
+        head.position.y = legH - 2.05;
+      } else if (st === 'break') {
+        gantry.position.x = xStart + (xEnd - xStart) * 0.37;
+        gantry.position.z = patrolZ;
+        gantry.rotation.z = 0.045;
+        head.position.y = legH - 1.7;
+      } else {
+        gantry.position.x = xStart;
+        gantry.position.z = patrolZ;
+        gantry.rotation.z = 0;
+        head.position.y = legH - 1.15;
+      }
+      vatMat.emissiveIntensity = st === 'job' ? 2.8 : st === 'sel' ? 2.2 : st === 'break' ? 0.25 : 1.15;
+      rigMat.emissiveIntensity = st === 'job' ? 6.5 : st === 'sel' ? 3.4 : st === 'break' ? 0.2 : 1.4;
+      lampLight.intensity = st === 'job' ? 9000 : st === 'sel' ? 2800 : st === 'break' ? 80 : 700;
+      ring.visible = st === 'sel' || st === 'break';
+      for (const m of ring.children) m.material = st === 'break' ? alertMat : zoneMat;
+      const dim = st === 'break';
+      if (grubMesh.userData.dim !== dim) {
+        const pale = new THREE.Color('#ffffff');
+        const dead = new THREE.Color('#6d6254');
+        for (let i = 0; i < n; i++) {
+          grubMesh.setColorAt(i, dim && bad.has(i) ? dead : pale);
+          const base = grubBase[i];
+          if (dim && bad.has(i)) {
+            grubDummy.matrix.copy(base);
+            grubDummy.matrix.elements[5] = 0.42;
+            grubDummy.matrix.elements[13] = y0 + 0.22;
+            grubMesh.setMatrixAt(i, grubDummy.matrix);
+          } else grubMesh.setMatrixAt(i, base);
+        }
+        grubMesh.instanceMatrix.needsUpdate = true;
+        if (grubMesh.instanceColor) grubMesh.instanceColor.needsUpdate = true;
+        grubMesh.userData.dim = dim;
+      }
+    },
+  };
 }
 
 const BUILD = {
   'cult-a': () => buildCultPlot('a'),
   'cult-b': () => buildCultPlot('b'),
+  'grub-trough': buildGrubTrough,
   field: () => buildUnit('field', 128),
   deck: () => buildUnit('deck', 128),
   hub: () => buildUnit('hub', 530),
@@ -1011,6 +1334,12 @@ function frameSpan(entry) {
   eye.tz = 0;
   eye.yaw = entry.cls === 'rail' ? 0.7 : 0.85;
   eye.pitch = entry.cls === 'unit' ? 0.95 : entry.cls === 'rail' ? 0.42 : 0.46;
+  if (entry.id === 'grub-trough') {
+    eye.yaw = 0.78;
+    eye.pitch = 0.7;
+    eye.ty = 1.6;
+    eye.dist *= 0.8;
+  }
   if (entry.id === 'cult-a' || entry.id === 'cult-b') {
     eye.yaw = entry.id === 'cult-b' ? 0.58 : 0.46;
     eye.pitch = entry.id === 'cult-b' ? 0.58 : 0.72;
@@ -1148,7 +1477,7 @@ function classLabel(id) {
 }
 function fillBrief(entry) {
   const all = loadBriefs();
-  const marker = entry.id === 'cult-b' ? '漆面' : entry.id === 'cult-a' ? '分格' : '';
+  const marker = entry.id === 'cult-b' ? '漆面' : entry.id === 'cult-a' ? '地灯' : entry.id === 'grub-trough' ? '龙门' : '';
   if (marker && (!all[entry.id] || !String(all[entry.id].notes || '').includes(marker))) {
     all[entry.id] = {
       name: entry.name,
