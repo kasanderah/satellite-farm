@@ -1,7 +1,7 @@
 // 环穗 · 资产工坊。设计沙盒，不接主进度。网格和预制件跟游戏同一套。
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { PALETTE } from './_shared.js';
+import { PALETTE, RING } from './_shared.js';
 import { LAB_CLASSES, LAB_ENTRIES, CULT_EMPTY, planGrubColumns, GRUB_DEMO_GANTRIES, GRUB_WORK_MPS, GRUB_EMPTY_MPS } from './lab-catalog.js';
 import {
   tractorKit, planterKit, hillerKit, topperKit, potatoLifterKit,
@@ -1719,7 +1719,7 @@ function buildGrubTrough() {
   };
 }
 
-// 中枢地块。正中一格，四层，主井朝环轴。每层整板封住，只在井筒里留口。下层用剖面藏起上面。
+// 中枢地块。正中一格，四层，主井收到环心。每层整板封住，只在井筒里留口。下层用剖面藏起上面。
 function buildHubPlot() {
   const plot = CULT_EMPTY.plot;
   const H = plot / 2;
@@ -1749,6 +1749,7 @@ function buildHubPlot() {
   const coolMat = mat({ color: '#1c3332', emissive: '#c8fff4', emissiveIntensity: 1.35, roughness: 0.4, metalness: 0 });
   const deckGlow = mat({ color: '#1a2428', emissive: '#d5e4ea', emissiveIntensity: 1.15, roughness: 0.4, metalness: 0 });
   const curbMat = mat({ color: '#9aa09c', roughness: 0.86, metalness: 0.08 });
+  const trunkMat = mat({ color: '#d5d8d6', emissive: '#9aa19e', emissiveIntensity: 0.42, roughness: 0.7, metalness: 0.14 });
 
   const F = 44;
   // 井口留在六边形内壁里。板的其余部分铺满地块，东北角不再挖掉。
@@ -1859,9 +1860,63 @@ function buildHubPlot() {
     return yLo + nLevel * modH;
   };
 
+  // 地块以上的主井：同一口径的六边形筒，一直收到环半径处的中轴。
+  const addRise = (flat, y0, y1) => {
+    const panelT = 1.35;
+    const side = flat / Math.sqrt(3);
+    const panelW = side * 0.62;
+    const faceDist = flat / 2 - panelT / 2;
+    const h = y1 - y0;
+    const yc = (y0 + y1) / 2;
+    for (let i = 0; i < 6; i++) {
+      const a = i * Math.PI / 3;
+      const m = put(box(panelW, h, panelT, Math.cos(a) * faceDist, yc, Math.sin(a) * faceDist, trunkMat));
+      m.rotation.y = Math.PI / 2 - a;
+    }
+    const rv = side * 0.72;
+    for (let i = 0; i < 6; i++) {
+      const a = Math.PI / 6 + i * Math.PI / 3;
+      put(box(1.2, h, 1.2, Math.cos(a) * rv, yc, Math.sin(a) * rv, charMat));
+    }
+    const step = 92;
+    const n = Math.max(1, Math.floor(h / step));
+    const pitch = h / n;
+    const bands = new THREE.InstancedMesh(new THREE.BoxGeometry(panelW * 1.06, 0.8, panelT + 0.55), charMat, n * 6);
+    const ticks = new THREE.InstancedMesh(new THREE.BoxGeometry(0.6, pitch * 0.55, 0.3), yelMat, n);
+    bands.frustumCulled = false;
+    ticks.frustumCulled = false;
+    let bi = 0;
+    for (let lv = 0; lv < n; lv++) {
+      const y = y0 + (lv + 0.5) * pitch;
+      for (let i = 0; i < 6; i++) {
+        const a = i * Math.PI / 3;
+        dummy.position.set(Math.cos(a) * faceDist, y, Math.sin(a) * faceDist);
+        dummy.rotation.set(0, Math.PI / 2 - a, 0);
+        dummy.scale.set(1, 1, 1);
+        dummy.updateMatrix();
+        bands.setMatrixAt(bi++, dummy.matrix);
+      }
+      dummy.position.set(faceDist + 0.55, y, 0);
+      dummy.rotation.set(0, 0, 0);
+      dummy.updateMatrix();
+      ticks.setMatrixAt(lv, dummy.matrix);
+      if (lv % 6 === 0) halo.shaft.push(faceDist + 2.2, y, 0);
+    }
+    for (const mesh of [bands, ticks]) {
+      mesh.castShadow = mesh.receiveShadow = false;
+      g.add(mesh);
+    }
+    groups.shaft.meshes.push(ticks);
+  };
+
   const halo = { shaft: [], deck: [], energy: [], store: [], alarm: [] };
-  const yTop = addHexStack(F, -58, 16, 9.2, halo);
-  addHexStack(26, yTop + 1.2, 4, 7.4, halo);
+  const yStack = addHexStack(F, -58, 16, 9.2, halo);
+  const axisY = RING.R;
+  addRise(F, yStack, axisY);
+  addHexStack(F * 1.22, axisY - 16, 1, 16, halo);
+  put(box(16, 16, 2200, 0, axisY, 0, trunkMat));
+  const axisKnot = put(box(40, 6.5, 40, 0, axisY, 0, yelMat));
+  groups.shaft.meshes.push(axisKnot);
 
   const land = (y) => {
     const dist = F / 2 + 8;
@@ -1994,13 +2049,13 @@ function buildHubPlot() {
     floor: f.y,
     clip: i === 0 ? null : floors[i - 1].y - 1.55,
   }));
-  const clipMats = [shellMat, charMat, padMat, deckMat, equipMat, hullMat, hallMat, yelMat, redMat, coolMat, deckGlow, curbMat];
+  const clipMats = [shellMat, charMat, padMat, deckMat, equipMat, hullMat, hallMat, yelMat, redMat, coolMat, deckGlow, curbMat, trunkMat];
   for (const pts of [shaftHalo, deckHalo, energyHalo, storeHalo, alarmHalo]) {
     if (pts && pts.material) clipMats.push(pts.material);
   }
   const clipPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), 0);
   let clipOn = false;
-  g.userData.hub = { plot, layers: floors.map(f => f.name), shaft: 'hex', top: yTop, section: 'surface' };
+  g.userData.hub = { plot, layers: floors.map(f => f.name), shaft: 'hex', top: axisY, axis: axisY, stack: yStack, section: 'surface' };
   const applySection = (sec) => {
     const on = sec.clip != null;
     if (on !== clipOn) {
@@ -2027,7 +2082,7 @@ function buildHubPlot() {
     motion(p, st) {
       const job = st === 'job';
       const br = st === 'break';
-      car.position.y = job ? -46 + p * (yTop - 8 + 46) : br ? -36 : 8;
+      car.position.y = job ? -46 + p * (yStack - 8 + 46) : br ? -36 : 8;
       yelMat.emissiveIntensity = br ? 0.22 : job ? 4.4 : st === 'sel' ? 3.2 : 1.7;
       deckGlow.emissiveIntensity = br ? 0.18 : job ? 2.8 : st === 'sel' ? 2.2 : 1.05;
       coolMat.emissiveIntensity = br ? 0.2 : job ? 2.6 : st === 'sel' ? 3.1 : 1.25;
@@ -2103,12 +2158,17 @@ function frameSpan(entry) {
     eye.dist = 72;
   }
   if (entry.id === 'hub') {
-    eye.yaw = 0.72;
-    eye.pitch = 0.58;
-    eye.ty = -12;
-    eye.tx = -24;
-    eye.tz = -36;
-    eye.dist = 430;
+    const y0 = -RING.HULL;
+    const y1 = RING.R;
+    const mid = (y0 + y1) / 2;
+    const half = (y1 - y0) / 2;
+    const vfov = cam.fov * Math.PI / 180;
+    eye.pitch = 0.18;
+    eye.yaw = 0.9;
+    eye.tx = 0;
+    eye.ty = mid;
+    eye.tz = 0;
+    eye.dist = ((half / Math.cos(eye.pitch)) / Math.tan(vfov / 2)) * 1.35;
   }
   if (entry.id === 'cult-a' || entry.id === 'cult-b') {
     eye.yaw = entry.id === 'cult-b' ? 0.58 : 0.46;
@@ -2201,7 +2261,12 @@ function setHubSection(id) {
   const sec = sections.find(s => s.id === id) || sections[0];
   shown.section = sec.id;
   if (shown.applySection) shown.applySection(sec);
+  eye.yaw = 0.72;
+  eye.pitch = 0.58;
+  eye.tx = -24;
+  eye.tz = -36;
   eye.ty = sec.id === 'surface' ? -12 : sec.floor + 6;
+  eye.dist = 430;
   paintSection();
 }
 
@@ -2283,7 +2348,7 @@ function classLabel(id) {
 }
 function fillBrief(entry) {
   const all = loadBriefs();
-  const marker = entry.id === 'cult-b' ? '漆面' : entry.id === 'cult-a' ? '后开始' : entry.id === 'grub-trough' ? '光晕' : entry.id === 'hub' ? '剖面' : '';
+  const marker = entry.id === 'cult-b' ? '漆面' : entry.id === 'cult-a' ? '后开始' : entry.id === 'grub-trough' ? '光晕' : entry.id === 'hub' ? '环心' : '';
   if (marker && (!all[entry.id] || !String(all[entry.id].notes || '').includes(marker))) {
     all[entry.id] = {
       name: entry.name,
@@ -2376,7 +2441,8 @@ canvas.addEventListener('pointercancel', () => { drag = null; });
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
-  eye.dist = Math.min(6000, Math.max(2.5, eye.dist * (e.deltaY > 0 ? 1.08 : 0.92)));
+  const distCap = curId === 'hub' ? 90000 : 6000;
+  eye.dist = Math.min(distCap, Math.max(2.5, eye.dist * (e.deltaY > 0 ? 1.08 : 0.92)));
 }, { passive: false });
 
 for (const e of LAB_ENTRIES) {

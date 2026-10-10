@@ -426,6 +426,7 @@ test('asset lab lists the four classes and the live placeholders', () => {
   assert.match(LAB_ENTRIES.find(e => e.id === 'hub').notes, /仓储/);
   assert.match(LAB_ENTRIES.find(e => e.id === 'hub').notes, /571\.4/);
   assert.match(LAB_ENTRIES.find(e => e.id === 'hub').notes, /剖面/);
+  assert.match(LAB_ENTRIES.find(e => e.id === 'hub').notes, /环心/);
   assert.match(LAB_ENTRIES.find(e => e.id === 'hub').notes, /整层/);
   assert.doesNotMatch(LAB_ENTRIES.find(e => e.id === 'hub').notes, /东北角/);
   assert.equal(LAB_ENTRIES.find(e => e.id === 'tank').cls, 'equip');
