@@ -109,6 +109,24 @@ export const GRUB_TROUGH_NOTES = `蛴螬培养槽。一整套设备，放在培�
 
 占地：一个培育单元，净边 ${m1(CULT_EMPTY.unit)} m。不占中枢，不放进地表田。`;
 
+export const HUB_PLOT_NOTES = `中枢地块。农场 7×7 的正中一格。不种，不养，培育台不进这一格。
+
+尺度：地块外边 ${m1(CULT_EMPTY.plot)} m（4 km / 7），和培育地块同一条网格。工坊里这一格就是样例，不是 ${CULT_EMPTY.code}。东北角剖开，好看见下面几层。
+
+四层的中心是同一口主井，井道朝空间站中轴接上去：
+地表：硬化坪。井口在正中。西侧是这一农场的能源场，南侧是仓储。
+培育层：井穿过去。四周是冷藏和料罐，不放培育台。
+设备层：变电和机厅围着井。
+承压壳：井的根。电池和结构环停在这一层，再往下不挖。
+
+主井：六边形模块叠起来，浅灰壳体，炭黑接缝，黄条和红标。作业时轿厢沿井走。井灯、层灯、能源、仓储、警示都是灯心上的光晕，不往场景里打光。
+
+灯组可逐组开关。1–4 仍是空闲、作业、选中、损坏。
+空闲：灯大约两成，轿厢停在井口附近。
+作业：轿厢沿井上下，井灯和层灯抬亮。
+选中：地块有选中圈，指示更亮。
+损坏：警示变红，能源收暗，轿厢停在设备层。`;
+
 // span：沙盒里把镜头框住的边长（米）。和游戏里的模数一致，只用于取景。
 export const LAB_ENTRIES = [
   {
@@ -129,7 +147,14 @@ export const LAB_ENTRIES = [
   },
   { id: 'field', cls: 'unit', name: '地表田块', size: '128 × 128 m', span: 128, notes: '露天小格。地面是垄，四周是田埂。没有顶。' },
   { id: 'deck', cls: 'unit', name: '培育层地板', size: '128 × 128 m', span: 128, notes: '密封小格。金属地板、墙和顶缘。冷色缝灯。' },
-  { id: 'hub', cls: 'unit', name: '中枢格', size: '530 × 530 m', span: 530, notes: '中枢地块。硬化板和 8 m 板缝。不种，不养。' },
+  {
+    id: 'hub',
+    cls: 'unit',
+    name: '中枢地块',
+    size: `${m1(CULT_EMPTY.plot)} × ${m1(CULT_EMPTY.plot)} m · 四层`,
+    span: 640,
+    notes: HUB_PLOT_NOTES,
+  },
   { id: 'tractor', cls: 'machine', name: '拖拉机', size: '约 4.5 m', span: 16, notes: '地表农机。自由行驶，后面可换农具。' },
   { id: 'planter', cls: 'machine', name: '播种机', size: '约 6 m', span: 18, notes: '拖拉机拖着覆土起垄器。' },
   { id: 'hiller', cls: 'machine', name: '培土机', size: '约 6 m', span: 18, notes: '圆盘把土抛回垄脊。' },

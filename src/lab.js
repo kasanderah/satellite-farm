@@ -1182,7 +1182,7 @@ function applyStageLight(entry) {
   hemi.groundColor.copy(interior ? C(marathon ? '#0c2414' : '#1c2224') : LIGHT0.hemiGround);
   scene.environmentIntensity = interior ? (marathon ? 0.72 : 0.08) : LIGHT0.env;
   renderer.toneMappingExposure = interior ? (marathon ? 1.05 : 1.02) : LIGHT0.exp;
-  sun.castShadow = !(interior || id === 'grub-trough');
+  sun.castShadow = !(interior || id === 'grub-trough' || id === 'hub');
   renderer.shadowMap.enabled = sun.castShadow;
   if (id === 'grub-trough') {
     sun.intensity = 0;
@@ -1719,13 +1719,327 @@ function buildGrubTrough() {
   };
 }
 
+// 中枢地块。正中一格，四层，主井朝环轴。东北角剖开，方便看见井和下面几层。
+function buildHubPlot() {
+  const plot = CULT_EMPTY.plot;
+  const H = plot / 2;
+  const g = new THREE.Group();
+  g.userData.alive = true;
+  const mat = (opts) => {
+    const m = new THREE.MeshStandardMaterial(opts);
+    m.userData.dispose = true;
+    return m;
+  };
+  const groups = {
+    shaft: { id: 'shaft', label: '井灯', on: true, lights: [], meshes: [] },
+    deck: { id: 'deck', label: '层灯', on: true, lights: [], meshes: [] },
+    energy: { id: 'energy', label: '能源', on: true, lights: [], meshes: [] },
+    store: { id: 'store', label: '仓储', on: true, lights: [], meshes: [] },
+    alarm: { id: 'alarm', label: '警示', on: true, lights: [], meshes: [] },
+  };
+  const shellMat = mat({ color: '#d5d8d6', roughness: 0.78, metalness: 0.12 });
+  const charMat = mat({ color: '#2a3034', roughness: 0.64, metalness: 0.38 });
+  const padMat = mat({ color: '#c4c6c1', roughness: 0.92, metalness: 0.04 });
+  const deckMat = mat({ color: '#8b9196', roughness: 0.88, metalness: 0.1 });
+  const equipMat = mat({ color: '#6d7378', roughness: 0.84, metalness: 0.16 });
+  const hullMat = mat({ color: '#4e5459', roughness: 0.8, metalness: 0.22 });
+  const hallMat = mat({ color: '#b7bbb8', roughness: 0.82, metalness: 0.08 });
+  const yelMat = mat({ color: '#3a3014', emissive: '#e2b15c', emissiveIntensity: 1.8, roughness: 0.42, metalness: 0 });
+  const redMat = mat({ color: '#3a1416', emissive: '#e23b3b', emissiveIntensity: 0.85, roughness: 0.46, metalness: 0 });
+  const coolMat = mat({ color: '#1c3332', emissive: '#c8fff4', emissiveIntensity: 1.35, roughness: 0.4, metalness: 0 });
+  const deckGlow = mat({ color: '#1a2428', emissive: '#d5e4ea', emissiveIntensity: 1.15, roughness: 0.4, metalness: 0 });
+  const curbMat = mat({ color: '#9aa09c', roughness: 0.86, metalness: 0.08 });
+
+  const F = 44;
+  const gap = F / 2 + 12;
+  const floors = [
+    { name: '地表', y: 0, mat: padMat },
+    { name: '培育层', y: -17, mat: deckMat },
+    { name: '设备层', y: -40, mat: equipMat },
+    { name: '承压壳', y: -64, mat: hullMat },
+  ];
+  const put = (mesh) => {
+    mesh.castShadow = mesh.receiveShadow = false;
+    g.add(mesh);
+    return mesh;
+  };
+  const addSlab = (y, material) => {
+    const t = 1.5;
+    const westW = H - gap;
+    const southD = H - gap;
+    put(box(westW, t, plot, -(H + gap) / 2, y - t / 2, 0, material));
+    put(box(H + gap, t, southD, (H - gap) / 2, y - t / 2, -(H + gap) / 2, material));
+  };
+  for (const f of floors) addSlab(f.y, f.mat);
+
+  const curbH = 1.15;
+  const curbT = 2.4;
+  put(box(plot, curbH, curbT, 0, curbH / 2, -H + curbT / 2, curbMat));
+  put(box(plot, curbH, curbT, 0, curbH / 2, H - curbT / 2, curbMat));
+  put(box(curbT, curbH, plot - curbT * 2, -H + curbT / 2, curbH / 2, 0, curbMat));
+  put(box(curbT, curbH, plot - curbT * 2, H - curbT / 2, curbH / 2, 0, curbMat));
+  for (const z of [-180, -80, 20, 120, 220]) put(box(2.2, 64, 2.2, -gap, -32, z, charMat));
+  for (const x of [-180, -80, 20, 120, 220]) put(box(2.2, 64, 2.2, x, -32, -gap, charMat));
+
+  const faceLabel = (text) => {
+    const c = document.createElement('canvas');
+    c.width = 512;
+    c.height = 128;
+    const ctx = c.getContext('2d');
+    ctx.clearRect(0, 0, 512, 128);
+    ctx.fillStyle = '#efeae2';
+    ctx.font = '500 72px BarlowSC, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, 256, 68);
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const m = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false });
+    m.userData.dispose = true;
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(36, 9), m);
+    mesh.renderOrder = 2;
+    return mesh;
+  };
+  for (const f of floors) {
+    const label = faceLabel(f.name);
+    label.position.set(gap + 6, f.y + 5.5, gap + 22);
+    label.rotation.y = 0.78;
+    g.add(label);
+    if (f.y === 0) continue;
+    put(box(H - 20, 0.28, 0.55, -(H + gap) / 2, f.y + 0.45, -gap + 0.4, deckGlow));
+    put(box(0.55, 0.28, H - 20, -gap + 0.4, f.y + 0.55, -(H + gap) / 2, deckGlow));
+    groups.deck.meshes.push(g.children[g.children.length - 1], g.children[g.children.length - 2]);
+  }
+
+  const sideLen = F / Math.sqrt(3);
+  const up = new THREE.Vector3(0, 1, 0);
+  const outward = new THREE.Vector3();
+  const dummy = new THREE.Object3D();
+  const addHexStack = (flat, yLo, nLevel, modH, halo) => {
+    const panelW = sideLen * (flat / F) * 0.62;
+    const panelT = 1.35;
+    const faceDist = flat / 2 - panelT / 2;
+    const panelGeo = new THREE.BoxGeometry(panelW, modH * 0.68, panelT);
+    const panels = new THREE.InstancedMesh(panelGeo, shellMat, nLevel * 6);
+    const bands = new THREE.InstancedMesh(new THREE.BoxGeometry(panelW * 1.04, 0.5, panelT + 0.4), charMat, nLevel * 6);
+    const ticks = new THREE.InstancedMesh(new THREE.BoxGeometry(0.42, modH * 0.38, 0.22), yelMat, nLevel * 6);
+    const ports = new THREE.InstancedMesh(new THREE.CylinderGeometry(1.7 * flat / F, 1.7 * flat / F, 0.26, 14), charMat, Math.ceil(nLevel / 2) * 6);
+    const marks = new THREE.InstancedMesh(new THREE.BoxGeometry(1.15, 0.32, 0.16), redMat, nLevel * 2);
+    let pi = 0;
+    let oi = 0;
+    let mi = 0;
+    for (let lv = 0; lv < nLevel; lv++) {
+      const y = yLo + (lv + 0.5) * modH;
+      const dark = lv % 3 === 1;
+      for (let i = 0; i < 6; i++) {
+        const a = i * Math.PI / 3;
+        dummy.position.set(Math.cos(a) * faceDist, y, Math.sin(a) * faceDist);
+        dummy.rotation.set(0, Math.PI / 2 - a, 0);
+        dummy.scale.set(1, 1, 1);
+        dummy.updateMatrix();
+        panels.setMatrixAt(pi, dummy.matrix);
+        panels.setColorAt(pi, new THREE.Color(dark ? '#9aa1a6' : '#ffffff'));
+        dummy.position.y = y - modH * 0.4;
+        dummy.updateMatrix();
+        bands.setMatrixAt(pi, dummy.matrix);
+        dummy.position.set(
+          Math.cos(a) * (faceDist + 0.45) + Math.cos(a + Math.PI / 2) * panelW * 0.32,
+          y + modH * 0.08,
+          Math.sin(a) * (faceDist + 0.45) + Math.sin(a + Math.PI / 2) * panelW * 0.32,
+        );
+        dummy.updateMatrix();
+        ticks.setMatrixAt(pi, dummy.matrix);
+        if (lv % 2 === 0) {
+          outward.set(Math.cos(a), 0, Math.sin(a));
+          dummy.position.set(Math.cos(a) * (faceDist + 0.85), y, Math.sin(a) * (faceDist + 0.85));
+          dummy.quaternion.setFromUnitVectors(up, outward);
+          dummy.updateMatrix();
+          ports.setMatrixAt(oi++, dummy.matrix);
+          dummy.rotation.set(0, Math.PI / 2 - a, 0);
+        }
+        if (i % 3 === 0) {
+          dummy.position.set(Math.cos(a) * (faceDist + 0.8), y - modH * 0.2, Math.sin(a) * (faceDist + 0.8));
+          dummy.rotation.set(0, Math.PI / 2 - a, 0);
+          dummy.updateMatrix();
+          marks.setMatrixAt(mi++, dummy.matrix);
+          halo.alarm.push(dummy.position.x, dummy.position.y, dummy.position.z);
+        }
+        if (i === 0) halo.shaft.push(Math.cos(a) * (faceDist + 1.4), y, Math.sin(a) * (faceDist + 1.4));
+        pi++;
+      }
+    }
+    ports.count = oi;
+    marks.count = mi;
+    for (const mesh of [panels, bands, ticks, ports, marks]) {
+      mesh.castShadow = mesh.receiveShadow = false;
+      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+      g.add(mesh);
+    }
+    groups.shaft.meshes.push(ticks);
+    groups.alarm.meshes.push(marks);
+    const postH = nLevel * modH;
+    const postY = yLo + postH / 2;
+    const rv = (flat / Math.sqrt(3)) * 0.72;
+    for (let i = 0; i < 6; i++) {
+      const a = Math.PI / 6 + i * Math.PI / 3;
+      put(box(1.15, postH, 1.15, Math.cos(a) * rv, postY, Math.sin(a) * rv, charMat));
+    }
+    return yLo + nLevel * modH;
+  };
+
+  const halo = { shaft: [], deck: [], energy: [], store: [], alarm: [] };
+  const yTop = addHexStack(F, -58, 16, 9.2, halo);
+  addHexStack(26, yTop + 1.2, 4, 7.4, halo);
+
+  const land = (y) => {
+    const dist = F / 2 + 8;
+    const w = sideLen * 0.95;
+    for (let i = 0; i < 6; i++) {
+      const a = i * Math.PI / 3;
+      const m = put(box(w, 0.55, 14, Math.cos(a) * dist, y + 0.4, Math.sin(a) * dist, charMat));
+      m.rotation.y = Math.PI / 2 - a;
+    }
+  };
+  for (const f of floors) land(f.y);
+
+  const halls = [];
+  for (const z of [-86, 48]) {
+    const hall = put(box(92, 14, 36, -158, 7.1, z, hallMat));
+    halls.push(hall);
+    const strip = put(box(80, 0.45, 1.1, -158, 14.5, z, yelMat));
+    groups.energy.meshes.push(strip);
+    halo.energy.push(-158, 16.2, z);
+  }
+  const finGeo = new THREE.BoxGeometry(0.7, 12, 18);
+  const fins = new THREE.InstancedMesh(finGeo, charMat, 8);
+  for (let i = 0; i < 8; i++) {
+    dummy.position.set(-236, 6.2, -16 + i * 10);
+    dummy.rotation.set(0, 0, 0);
+    dummy.scale.set(1, 1, 1);
+    dummy.updateMatrix();
+    fins.setMatrixAt(i, dummy.matrix);
+    halo.energy.push(-236, 13, -16 + i * 10);
+  }
+  fins.castShadow = false;
+  g.add(fins);
+  const finCap = put(box(2.2, 0.35, 78, -236, 12.5, 19, yelMat));
+  groups.energy.meshes.push(finCap);
+
+  for (let i = 0; i < 4; i++) {
+    const x = -130 + i * 78;
+    put(box(62, 16, 30, x, 8.2, -178, hallMat));
+    const mark = put(box(10, 0.4, 0.45, x, 16.6, -163, coolMat));
+    groups.store.meshes.push(mark);
+    halo.store.push(x, 18, -163);
+  }
+  const siloGeo = new THREE.CylinderGeometry(7.2, 7.2, 24, 16);
+  const silos = new THREE.InstancedMesh(siloGeo, shellMat, 7);
+  for (let i = 0; i < 7; i++) {
+    dummy.position.set(-150 + i * 28, 12.2, -236);
+    dummy.rotation.set(0, 0, 0);
+    dummy.updateMatrix();
+    silos.setMatrixAt(i, dummy.matrix);
+  }
+  silos.castShadow = false;
+  g.add(silos);
+
+  const tankGeo = new THREE.CylinderGeometry(6.4, 6.4, 8, 14);
+  const tanks = new THREE.InstancedMesh(tankGeo, shellMat, 5);
+  for (let i = 0; i < 5; i++) {
+    dummy.position.set(-130 - (i % 2) * 26, -12.6, -20 + i * 34);
+    dummy.rotation.set(0, 0, 0);
+    dummy.scale.set(1, 1, 1);
+    dummy.updateMatrix();
+    tanks.setMatrixAt(i, dummy.matrix);
+  }
+  tanks.castShadow = false;
+  g.add(tanks);
+  put(box(46, 7.5, 20, -188, -12.8, 92, hallMat));
+  const growPow = put(box(36, 0.35, 0.8, -188, -8.6, 92, yelMat));
+  groups.energy.meshes.push(growPow);
+  halo.energy.push(-188, -7.2, 92);
+  const growCold = put(box(8, 0.35, 0.4, -150, -8.2, 48, coolMat));
+  groups.store.meshes.push(growCold);
+  halo.store.push(-150, -7, 48);
+
+  put(box(130, 11, 24, 20, -34.2, -150, hallMat));
+  const bus = put(box(110, 0.4, 1.1, 20, -28.4, -150, yelMat));
+  groups.energy.meshes.push(bus);
+  halo.energy.push(20, -26.5, -150);
+  put(box(48, 9, 22, -70, -35.2, -96, hallMat));
+  put(box(40, 8, 18, 90, -35.6, -210, hallMat));
+  const partsMark = put(box(8, 0.35, 0.4, 90, -31.3, -201, coolMat));
+  groups.store.meshes.push(partsMark);
+  halo.store.push(90, -30, -201);
+
+  for (const [x, z] of [[-78, -48], [-78, 36], [-46, -88]]) {
+    put(box(24, 6, 16, x, -60.7, z, charMat));
+    const pip = put(box(1.2, 1.6, 0.3, x + 8, -57.2, z, redMat));
+    groups.alarm.meshes.push(pip);
+    halo.alarm.push(x + 8, -55.5, z);
+  }
+  put(box(18, 7, 18, -40, -60.2, -150, hullMat));
+  const ballast = put(box(6, 0.3, 0.35, -40, -56.4, -141, coolMat));
+  groups.store.meshes.push(ballast);
+  halo.store.push(-40, -55, -141);
+
+  for (const f of floors) {
+    if (f.y === 0) continue;
+    halo.deck.push(-80, f.y + 1.2, -gap);
+    halo.deck.push(-gap, f.y + 1.2, -120);
+  }
+
+  const car = new THREE.Group();
+  const carBody = new THREE.Mesh(new THREE.CylinderGeometry(F * 0.26, F * 0.24, 2.4, 6), shellMat);
+  carBody.castShadow = false;
+  const carBand = new THREE.Mesh(new THREE.CylinderGeometry(F * 0.28, F * 0.28, 0.32, 6), yelMat);
+  carBand.position.y = 0.85;
+  carBand.castShadow = false;
+  car.add(carBody, carBand);
+  g.add(car);
+  groups.shaft.meshes.push(carBand);
+
+  const shaftHalo = addHaloPoints(g, groups.shaft.meshes, halo.shaft, '#e2b15c', 3.4, 0.5);
+  const deckHalo = addHaloPoints(g, groups.deck.meshes, halo.deck, '#d5e4ea', 4.2, 0.42);
+  const energyHalo = addHaloPoints(g, groups.energy.meshes, halo.energy, '#e2b15c', 4.6, 0.48);
+  const storeHalo = addHaloPoints(g, groups.store.meshes, halo.store, '#c8fff4', 3.8, 0.45);
+  const alarmHalo = addHaloPoints(g, groups.alarm.meshes, halo.alarm, '#e23b3b', 3.2, 0.4);
+
+  const ring = salmonRing(plot * 1.012, plot * 1.012, 0.55);
+  g.add(ring);
+  g.userData.hub = { plot, layers: floors.map(f => f.name), shaft: 'hex', top: yTop };
+  return {
+    group: g,
+    ring,
+    ownState: true,
+    lightGroups: [groups.shaft, groups.deck, groups.energy, groups.store, groups.alarm],
+    motion(p, st) {
+      const job = st === 'job';
+      const br = st === 'break';
+      car.position.y = job ? -46 + p * (yTop - 8 + 46) : br ? -36 : 8;
+      yelMat.emissiveIntensity = br ? 0.22 : job ? 4.4 : st === 'sel' ? 3.2 : 1.7;
+      deckGlow.emissiveIntensity = br ? 0.18 : job ? 2.8 : st === 'sel' ? 2.2 : 1.05;
+      coolMat.emissiveIntensity = br ? 0.2 : job ? 2.6 : st === 'sel' ? 3.1 : 1.25;
+      redMat.emissiveIntensity = br ? 4.6 : 0.7;
+      fadeHaloMat(shaftHalo && shaftHalo.material, br ? 0.2 : job ? 1 : 0.62);
+      fadeHaloMat(deckHalo && deckHalo.material, br ? 0.16 : job ? 1 : 0.55);
+      fadeHaloMat(energyHalo && energyHalo.material, br ? 0.12 : job ? 1 : st === 'sel' ? 0.9 : 0.5);
+      fadeHaloMat(storeHalo && storeHalo.material, br ? 0.2 : job ? 0.9 : st === 'sel' ? 1 : 0.55);
+      fadeHaloMat(alarmHalo && alarmHalo.material, br ? 1 : 0.35);
+      if (halls[0]) halls[0].rotation.z = br ? 0.012 : 0;
+      ring.visible = st === 'sel' || br;
+      for (const m of ring.children) m.material = br ? alertMat : zoneMat;
+    },
+  };
+}
+
 const BUILD = {
   'cult-a': () => buildCultPlot('a'),
   'cult-b': () => buildCultPlot('b'),
   'grub-trough': buildGrubTrough,
   field: () => buildUnit('field', 128),
   deck: () => buildUnit('deck', 128),
-  hub: () => buildUnit('hub', 530),
+  hub: buildHubPlot,
   tractor: () => machine(tractorKit, 5),
   planter: () => machine(planterKit, 5.5),
   hiller: () => machine(hillerKit, 5.5),
@@ -1775,6 +2089,14 @@ function frameSpan(entry) {
     eye.pitch = 0.04;
     eye.ty = 5.5;
     eye.dist = 72;
+  }
+  if (entry.id === 'hub') {
+    eye.yaw = 0.72;
+    eye.pitch = 0.58;
+    eye.ty = -12;
+    eye.tx = -24;
+    eye.tz = -36;
+    eye.dist = 430;
   }
   if (entry.id === 'cult-a' || entry.id === 'cult-b') {
     eye.yaw = entry.id === 'cult-b' ? 0.58 : 0.46;
@@ -1913,7 +2235,7 @@ function classLabel(id) {
 }
 function fillBrief(entry) {
   const all = loadBriefs();
-  const marker = entry.id === 'cult-b' ? '漆面' : entry.id === 'cult-a' ? '后开始' : entry.id === 'grub-trough' ? '光晕' : '';
+  const marker = entry.id === 'cult-b' ? '漆面' : entry.id === 'cult-a' ? '后开始' : entry.id === 'grub-trough' ? '光晕' : entry.id === 'hub' ? '主井' : '';
   if (marker && (!all[entry.id] || !String(all[entry.id].notes || '').includes(marker))) {
     all[entry.id] = {
       name: entry.name,

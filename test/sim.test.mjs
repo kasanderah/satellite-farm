@@ -420,6 +420,11 @@ test('asset lab lists the four classes and the live placeholders', () => {
     assert.ok(e.name && e.size && e.notes, e.id);
   }
   assert.equal(LAB_ENTRIES.find(e => e.id === 'hub').cls, 'unit');
+  assert.equal(LAB_ENTRIES.find(e => e.id === 'hub').name, '中枢地块');
+  assert.match(LAB_ENTRIES.find(e => e.id === 'hub').notes, /主井/);
+  assert.match(LAB_ENTRIES.find(e => e.id === 'hub').notes, /能源/);
+  assert.match(LAB_ENTRIES.find(e => e.id === 'hub').notes, /仓储/);
+  assert.match(LAB_ENTRIES.find(e => e.id === 'hub').notes, /571\.4/);
   assert.equal(LAB_ENTRIES.find(e => e.id === 'tank').cls, 'equip');
   assert.equal(LAB_ENTRIES.find(e => e.id === 'arm').cls, 'rail');
   assert.equal(LAB_ENTRIES.find(e => e.id === 'tractor').cls, 'machine');
