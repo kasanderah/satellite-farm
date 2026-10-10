@@ -199,9 +199,10 @@ export const DAY_SECONDS = 60;
 export const MACHINE_MPS = 2.8;
 export const SIM = { CUT: MACHINE_MPS, MOVE: MACHINE_MPS, STUBBLE: 8, TILL: 0 };
 export const POTATO_DAYS = 120;
-// 满电能走的米数。一趟田加大约两公里路还回得了机库。空了必须回库，充到能出门才再派工。
-export const BATT_RANGE = 4200;
-export const BATT_LEAVE = 0.34;
+// 满电能走的米数，是原先 4200 的五倍。一趟田加来回路程只占几个百分点。
+// 出库门槛是满电。人已经在田上、电还够走，就接着去下一块，不回库补满。
+export const BATT_RANGE = 21000;
+export const BATT_LEAVE = 1;
 export const RECHARGE_S = 24;
 // 软上限。maxSlots / maxLiters 为 null 时不拒收。以后把这两个数填上，warehouseCanStore 就会拦住。
 export const WAREHOUSE_CAP = { maxSlots: null, maxLiters: null };
@@ -252,6 +253,8 @@ export const focus = { x: 0, z: 0, i: 0, j: 0 };
 export const signals = [];
 export const harvesters = [];
 export const rigs = [];
+let nextRigId = 0;
+let garageOrigin = { x: 0, z: 0 };
 export function setTimeScale(v) {
   const n = Number(v);
   if (!Number.isFinite(n) || n <= 0) return;
@@ -267,6 +270,14 @@ const JOBS = {
   topper: { at: 100, label: '杀秧机' },
   lifter: { at: 114, label: '收获机' },
 };
+// 农机店。拖拉机进库、能看见，这一季没有单独的作业。不要写进 SHOP，商店仍是种薯、肥料、饲料。
+export const MACHINE_SHOP = [
+  { id: 'tractor', name: '拖拉机', price: 12000 },
+  { id: 'planter', name: '播种机', price: 9000 },
+  { id: 'hiller', name: '培土机', price: 7000 },
+  { id: 'topper', name: '杀秧机', price: 7000 },
+  { id: 'lifter', name: '收获机', price: 14000 },
+];
 export function potatoPhase(day) {
   if (day < 6) return 'plant';
   if (day < 18) return 'ridge';
@@ -313,9 +324,27 @@ export function cropDossier(id) {
     name: s.name, from: s.from, to: s.to, days: s.to - s.from, color: s.color,
     machine: s.machine, machineAt: s.machineAt, effect: s.effect,
   }));
+  const recipe = c.id === 'potato' ? recipeById('potato-field') : null;
+  const inputs = [];
+  const outputs = [];
+  if (recipe) {
+    for (const row of recipe.inputs) {
+      const p = productById(row.id);
+      inputs.push({ id: row.id, name: p?.nameZh || row.id, qty: row.qty, unit: row.unit || p?.unit || '', charged: true });
+    }
+    for (const key of Object.keys(recipe.utilities || {})) {
+      const p = productById(key);
+      inputs.push({ id: key, name: p?.nameZh || key, qty: recipe.utilities[key], unit: p?.unit || '', charged: !recipe.stub });
+    }
+    outputs.push({
+      id: c.id, name: c.name, liters: Math.round(FIELD_HA * (c.yieldL || 0)), unit: 'L',
+      price: quote(CROPS.indexOf(c)), batch: recipe.outputs[0]?.unit || '',
+    });
+  }
   return {
     id: c.id, name: c.name, analog: c.analog, plantable: !!c.plantable,
     days: c.days || c.season, family: c.family, stages, yieldNote: c.yieldNote || '',
+    inputs, outputs,
   };
 }
 const JOB_ORDER = ['planter', 'hiller', 'topper', 'lifter'];
@@ -443,6 +472,7 @@ function fieldRank(f) {
   return [0, f.plantedAt, f.idx];
 }
 function pickField(kind) {
+  if (!JOBS[kind]) return null;
   let best = null;
   for (const f of potatoLive) {
     if (!jobReady(f, kind)) continue;
@@ -527,16 +557,21 @@ function useCharge(r, meters) {
   r.charge = Math.max(0, (r.charge ?? 1) - meters / BATT_RANGE);
   return r.intent !== 'home' && r.charge <= 0;
 }
+function atGarage(r) {
+  return Math.hypot(r.x - r.parkX, r.z - r.parkZ) < 2;
+}
 function assignIdleRigs() {
   for (const r of rigs) {
     if (r.mode === 'work' || r.mode === 'turn' || r.mode === 'travel') continue;
-    if ((r.charge ?? 1) < BATT_LEAVE) {
+    const home = atGarage(r);
+    // 充满再出库。人已经在田上、电还大于零，就接着派，不回库补到满。
+    if (home && (r.charge ?? 1) < BATT_LEAVE) {
       r.mode = 'charge'; r.busy = false; r.f = null; r.intent = null;
       continue;
     }
     const f = pickField(r.kind);
     if (!f) {
-      if (Math.hypot(r.x - r.parkX, r.z - r.parkZ) > 2) goHome(r);
+      if (!home) goHome(r);
       else r.mode = (r.charge ?? 1) < 1 ? 'charge' : 'park';
       continue;
     }
@@ -546,7 +581,7 @@ function assignIdleRigs() {
 function finishPass(r) {
   const f = r.f;
   if (f?.jobS) f.jobS[r.kind] = L.LANES;
-  if ((r.charge ?? 1) < BATT_LEAVE) { goHome(r); return; }
+  if ((r.charge ?? 1) <= 0) { goHome(r); return; }
   const nxt = pickField(r.kind);
   if (!nxt) { goHome(r); return; }
   routeToJob(r, nxt);
@@ -616,7 +651,7 @@ function stepTurn(r, dt) {
 function stepTravel(r, dt) {
   if (r.intent === 'job') {
     if (!r.f || !jobReady(r.f, r.kind)) {
-      const nxt = (r.charge ?? 1) >= BATT_LEAVE ? pickField(r.kind) : null;
+      const nxt = (r.charge ?? 1) > 0 ? pickField(r.kind) : null;
       if (!nxt) { goHome(r); return; }
       if (nxt !== r.f) routeToJob(r, nxt);
     }
@@ -656,12 +691,10 @@ function stepTravel(r, dt) {
 function stepRigs(dt) {
   for (const r of rigs) {
     if ((r.mode === 'work' || r.mode === 'turn') && r.f && (!r.f.live || r.f.paid)) goHome(r);
-    if (r.mode === 'park' || r.mode === 'charge') {
-      if ((r.charge ?? 1) < 1) {
-        r.charge = Math.min(1, (r.charge ?? 1) + dt / RECHARGE_S);
-        r.mode = r.charge >= 1 ? 'park' : 'charge';
-        r.x = r.parkX; r.z = r.parkZ; r.ang = -Math.PI / 2;
-      }
+    if ((r.mode === 'park' || r.mode === 'charge') && atGarage(r) && (r.charge ?? 1) < 1) {
+      r.charge = Math.min(1, (r.charge ?? 1) + dt / RECHARGE_S);
+      r.mode = r.charge >= 1 ? 'park' : 'charge';
+      r.x = r.parkX; r.z = r.parkZ; r.ang = -Math.PI / 2;
     }
   }
   assignIdleRigs();
@@ -730,10 +763,12 @@ export function rigReadout(r) {
     return { x: f.x0 + L.FIELD / 2, z: f.z0 + L.FIELD / 2 };
   };
   const garageAt = hubPad(3, 2);
+  garageOrigin = { x: garageAt.x, z: garageAt.z };
   ['planter', 'hiller', 'topper', 'lifter'].forEach((kind, n) => {
     const x = garageAt.x - 18 + n * 12, z = garageAt.z + 22;
     rigs.push({ id: n, kind, label: JOBS[kind].label, busy: false, f: null, mode: 'park', intent: null, route: null, ri: 0, charge: 1, lane: 0, u: 0, parkX: x, parkZ: z, x, z, ang: -Math.PI / 2 });
   });
+  nextRigId = rigs.length;
   for (const [di, dj, kind] of [[3, 1, 'warehouse'], [3, 2, 'garage'], [3, 3, 'process']]) {
     const at = hubPad(di, dj);
     const spec = BUILDING_KINDS[kind];
@@ -1106,10 +1141,48 @@ export function resetGame() {
   nextDevice = 1;
   blankTanks();
   restoreStarters();
+  restoreFleet();
   for (const r of rigs) parkRig(r, true);
   syncPotatoLive();
   rebuildDemo();
   assignIdleRigs();
+}
+function parkSpot(n) {
+  const col = n % 6;
+  const row = Math.floor(n / 6);
+  let x = garageOrigin.x - 30 + col * 12;
+  let z = garageOrigin.z + 22 + row * 9;
+  while (rigs.some(r => Math.hypot(r.parkX - x, r.parkZ - z) < 3)) z += 9;
+  return { x, z };
+}
+function addRig(kind) {
+  const spec = MACHINE_SHOP.find(m => m.id === kind);
+  if (!spec) return null;
+  const spot = parkSpot(rigs.length);
+  const r = {
+    id: nextRigId++, kind, label: JOBS[kind]?.label || spec.name,
+    busy: false, f: null, mode: 'park', intent: null, route: null, ri: 0,
+    charge: 1, lane: 0, u: 0, parkX: spot.x, parkZ: spot.z, x: spot.x, z: spot.z, ang: -Math.PI / 2,
+  };
+  rigs.push(r);
+  return r;
+}
+function restoreFleet(list) {
+  while (rigs.length > 4) rigs.pop();
+  nextRigId = 4;
+  if (!Array.isArray(list)) return;
+  for (const item of list) {
+    if (item && MACHINE_SHOP.some(m => m.id === item.kind)) addRig(item.kind);
+  }
+}
+export function buyMachine(kind) {
+  const item = MACHINE_SHOP.find(m => m.id === kind);
+  if (!item) return { ok: false, reason: 'kind' };
+  if (!(economy.revenue >= item.price)) return { ok: false, reason: 'money', cost: item.price };
+  economy.revenue -= item.price;
+  const r = addRig(kind);
+  log.push({ type: 'buy', pay: item.price, name: item.name, n: 1, t: worldDay });
+  return { ok: true, cost: item.price, name: item.name, id: r.id, kind };
 }
 export function buyItem(id, qty) {
   const item = SHOP.find(s => s.id === id);
@@ -1245,6 +1318,7 @@ export function exportSnapshot() {
       paid: !!f.paid, sprayed: !!f.sprayed,
       jobs: f.jobS ? { planter: +f.jobS.planter || 0, hiller: +f.jobS.hiller || 0, topper: +f.jobS.topper || 0, lifter: +f.jobS.lifter || 0 } : undefined,
     })),
+    fleet: rigs.slice(4).map(r => ({ kind: r.kind })),
     harvesters: harvesters.map(h => ({
       id: h.id, mode: h.mode, lane: h.lane, u: +h.u.toFixed(2),
       x: +h.x.toFixed(2), z: +h.z.toFixed(2), ang: +h.ang.toFixed(4),
@@ -1335,6 +1409,7 @@ export function applySnapshot(data) {
   worldDay = +(data.worldDay ?? data.simTime) || 0;
   simTime = worldDay;
   rebuildDemo();
+  restoreFleet(data.fleet);
   for (const r of rigs) parkRig(r, true);
   syncPotatoLive();
   assignIdleRigs();

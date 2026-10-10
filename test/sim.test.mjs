@@ -7,6 +7,7 @@ import {
   stores, worldDay, cropWatch, fieldVisual, setPaused, setTimeScale,
   DAY_SECONDS, MACHINE_MPS, warehouse, sellLot, sellStack, warehouseCapacity, placeBuilding, removeBuilding, buildings, rigReadout,
   SHOP, buySeed, buyItem, SEED_PER_FIELD, resetGame, paused, onHubParcel, HUB_SITES, POTATO_STAGES, cropDossier,
+  BATT_RANGE, BATT_LEAVE, MACHINE_SHOP, buyMachine,
   CULTURES, tanks, startCulture, harvestCulture, CULTURE_CELLS, inPlotBlock, fieldOrigin,
   devices, potatoStock, fertPlan, cultureFeedPlan, millWatch, startMill, orderProcess, removeMill,
 } from '../src/_shared.js';
@@ -696,7 +697,36 @@ test('an empty machine returns to the garage and recharges before the next job',
   const before = planter.charge;
   step(6, 0, 1);
   assert.ok(planter.charge > before, planter.charge);
-  assert.ok(planter.charge < 1 || planter.mode === 'travel' || planter.mode === 'work');
+  assert.ok(planter.charge < 1, planter.charge);
+  assert.ok(planter.mode === 'charge' || planter.mode === 'park');
+  assert.notEqual(planter.mode, 'travel');
+});
+
+test('a machine stays in the garage until the battery is full', () => {
+  resetGame();
+  setPaused(false);
+  setTimeScale(1);
+  assert.equal(BATT_RANGE, 21000);
+  assert.equal(BATT_LEAVE, 1);
+  stores.seed = 2;
+  stores.fertilizer = 2;
+  const a = fieldAt(focus.i, focus.j);
+  const planter = rigs.find(r => r.kind === 'planter');
+  planter.charge = 0.5;
+  planter.mode = 'charge';
+  assert.equal(plantField(a, 'potato').ok, true);
+  step(0.2, 0, 1);
+  assert.notEqual(planter.mode, 'travel');
+  assert.ok(Math.hypot(planter.x - planter.parkX, planter.z - planter.parkZ) < 2);
+  planter.x = a.x0 + 20;
+  planter.z = a.z0 + 20;
+  planter.charge = 0.5;
+  planter.mode = 'park';
+  planter.busy = false;
+  planter.f = null;
+  step(0.05, 0, 1);
+  assert.equal(planter.f, a, 'partial charge outside the garage still resumes the field');
+  assert.equal(planter.mode, 'travel');
 });
 
 test('warehouse stacks lots and keeps a soft capacity', () => {
@@ -719,8 +749,61 @@ test('warehouse stacks lots and keeps a soft capacity', () => {
   assert.equal(dossier.plantable, true);
   assert.equal(dossier.stages.length, POTATO_STAGES.length);
   assert.ok(dossier.stages.every(s => s.color && s.days > 0));
-  assert.equal(cropDossier('wheat').plantable, false);
+  assert.equal(dossier.stages.reduce((sum, s) => sum + s.days, 0), 120);
+  assert.equal(dossier.inputs.find(i => i.id === 'seed').qty, 1);
+  assert.equal(dossier.inputs.find(i => i.id === 'fertilizer').qty, 1);
+  const water = dossier.inputs.find(i => i.id === 'water');
+  assert.equal(water.qty, 40);
+  assert.equal(water.charged, false);
+  assert.equal(dossier.outputs[0].liters, Math.round(FIELD_HA * 44000));
+  assert.equal(dossier.outputs[0].price, quote(CROPS.findIndex(c => c.id === 'potato')));
+  const wheat = cropDossier('wheat');
+  assert.equal(wheat.plantable, false);
+  assert.equal(wheat.inputs.length, 0);
+  assert.equal(wheat.outputs.length, 0);
   assert.equal(HUB_SITES.filter(s => s.local).length, 1);
   assert.equal(HUB_SITES.length, Math.floor(L.NBX / 7));
   assert.ok(HUB_SITES.every(s => s.bj === L.HUBZ));
+});
+
+test('the machine shop spends revenue and a reload keeps the extra rigs', () => {
+  resetGame();
+  const before = rigs.length;
+  assert.equal(before, 4);
+  assert.equal(SHOP.length, 3);
+  assert.ok(MACHINE_SHOP.length >= 5);
+  assert.ok(MACHINE_SHOP.some(m => m.id === 'tractor' && m.name === '拖拉机'));
+  assert.ok(MACHINE_SHOP.some(m => m.id === 'planter'));
+  assert.ok(MACHINE_SHOP.some(m => m.id === 'hiller'));
+  assert.ok(MACHINE_SHOP.some(m => m.id === 'topper'));
+  assert.ok(MACHINE_SHOP.some(m => m.id === 'lifter'));
+  economy.revenue = 0;
+  const broke = buyMachine('planter');
+  assert.equal(broke.ok, false);
+  assert.equal(broke.reason, 'money');
+  assert.equal(rigs.length, before);
+  economy.revenue = 9000;
+  const bought = buyMachine('planter');
+  assert.equal(bought.ok, true);
+  assert.equal(economy.revenue, 0);
+  assert.equal(rigs.filter(r => r.kind === 'planter').length, 2);
+  economy.revenue = 12000;
+  const tractor = buyMachine('tractor');
+  assert.equal(tractor.ok, true);
+  assert.equal(rigs.filter(r => r.kind === 'tractor').length, 1);
+  const snap = exportSnapshot();
+  assert.equal(snap.schema, 2);
+  assert.deepEqual(snap.fleet.map(x => x.kind).sort(), ['planter', 'tractor']);
+  resetGame();
+  assert.equal(rigs.length, before);
+  assert.equal(rigs.some(r => r.kind === 'tractor'), false);
+  assert.equal(applySnapshot(snap), true);
+  assert.equal(rigs.filter(r => r.kind === 'tractor').length, 1);
+  assert.equal(rigs.filter(r => r.kind === 'planter').length, 2);
+  assert.equal(applySnapshot(snap), true);
+  assert.equal(rigs.filter(r => r.kind === 'tractor').length, 1);
+  assert.equal(rigs.filter(r => r.kind === 'planter').length, 2);
+  const starters = rigs.slice(0, 4);
+  assert.deepEqual(starters.map(r => r.kind), ['planter', 'hiller', 'topper', 'lifter']);
+  resetGame();
 });
