@@ -1413,8 +1413,9 @@ function buildGrubTrough(opts) {
   };
 }
 
-// 中枢地块。正中一格，四层，主井收到环心。每层整板封住，只在井筒里留口。下层用剖面藏起上面。
-function buildHubPlot() {
+// 中枢地块。正中一格，四层，主井收到环心。每层整板封住，只在井筒里留口。
+// 游戏里不铺这整板：剖开培育层时那块浅灰板会盖住一格，像从别的层穿上来。井、层内设备和落台还在。
+function buildHubPlot(opts) {
   const plot = CULT_EMPTY.plot;
   const H = plot / 2;
   const g = new THREE.Group();
@@ -1459,17 +1460,18 @@ function buildHubPlot() {
     g.add(mesh);
     return mesh;
   };
-  const addSlab = (y, material) => {
+  const addSlab = (y, material, layer) => {
     const t = 1.5;
     const yc = y - t / 2;
     const side = H - opening;
-    put(box(side, t, plot, -(H + opening) / 2, yc, 0, material));
-    put(box(side, t, plot, (H + opening) / 2, yc, 0, material));
+    const piece = (mesh) => { mesh.userData.layer = layer; mesh.userData.slab = true; return put(mesh); };
+    piece(box(side, t, plot, -(H + opening) / 2, yc, 0, material));
+    piece(box(side, t, plot, (H + opening) / 2, yc, 0, material));
     const ns = H - opening;
-    put(box(opening * 2, t, ns, 0, yc, -(H + opening) / 2, material));
-    put(box(opening * 2, t, ns, 0, yc, (H + opening) / 2, material));
+    piece(box(opening * 2, t, ns, 0, yc, -(H + opening) / 2, material));
+    piece(box(opening * 2, t, ns, 0, yc, (H + opening) / 2, material));
   };
-  for (const f of floors) addSlab(f.y, f.mat);
+  if (!(opts && opts.game)) for (const f of floors) addSlab(f.y, f.mat, f.id);
 
   const curbH = 1.15;
   const curbT = 2.4;
@@ -1726,6 +1728,7 @@ function buildHubPlot() {
   carBand.position.y = 0.85;
   carBand.castShadow = false;
   car.add(carBody, carBand);
+  car.userData.layer = 'shaft';
   g.add(car);
   groups.shaft.meshes.push(carBand);
 
@@ -1750,7 +1753,42 @@ function buildHubPlot() {
   const clipPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), 0);
   let clipOn = false;
   g.userData.hub = { plot, layers: floors.map(f => f.name), shaft: 'hex', top: axisY, axis: axisY, stack: yStack, section: 'surface' };
+  // 按所在高度归层。井筒跨层，单独留下。剖面只显示当前这一层，上面和下面的板、厅都关掉。
+  {
+    g.updateMatrixWorld(true);
+    const inv = new THREE.Matrix4().copy(g.matrixWorld).invert();
+    const bb = new THREE.Box3();
+    g.traverse(obj => {
+      if (obj.userData.layer) return;
+      let inherited = null;
+      for (let p = obj.parent; p; p = p.parent) if (p.userData.layer) { inherited = p.userData.layer; break; }
+      if (inherited) { obj.userData.layer = inherited; return; }
+      if (!obj.geometry) return;
+      if (obj.isInstancedMesh) { obj.computeBoundingBox(); bb.copy(obj.boundingBox); }
+      else { if (!obj.geometry.boundingBox) obj.geometry.computeBoundingBox(); bb.copy(obj.geometry.boundingBox); }
+      bb.applyMatrix4(obj.matrixWorld).applyMatrix4(inv);
+      const y = (bb.min.y + bb.max.y) / 2;
+      const h = bb.max.y - bb.min.y;
+      let layer = 'shaft';
+      if (h <= 40 && y <= 20) {
+        if (y > -2) layer = 'surface';
+        else if (y > -20) layer = 'grow';
+        else if (y > -42) layer = 'equip';
+        else if (y > -72) layer = 'hull';
+      }
+      obj.userData.layer = layer;
+    });
+  }
+  let shownLayer = null;
   const applySection = (sec) => {
+    if (shownLayer !== sec.id) {
+      shownLayer = sec.id;
+      g.traverse(obj => {
+        const layer = obj.userData.layer;
+        if (!layer) return;
+        obj.visible = layer === 'shaft' || layer === sec.id;
+      });
+    }
     const on = sec.clip != null;
     if (on !== clipOn) {
       renderer.localClippingEnabled = on;

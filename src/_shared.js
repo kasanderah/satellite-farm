@@ -225,6 +225,7 @@ export const devices = [];
 let nextLot = 1;
 let nextBuilding = 1;
 let nextDevice = 1;
+let planSeq = 1;
 export let paused = false;
 export function setPaused(v) { paused = !!v; }
 export let simTime = 0;
@@ -275,7 +276,8 @@ function blankJobs() { return { planter: 0, hiller: 0, topper: 0, lifter: 0 }; }
 function ensureJobs(f) { if (!f.jobS) f.jobS = blankJobs(); }
 // 田面上的作业前沿是这台机器真正走过的距离，不是钟点推出来的。没做完就停在那儿。
 function visualFront(f) {
-  const day = Math.max(0, worldDay - (f.plantedAt || 0));
+  if (f.plantedAt == null) return 0;
+  const day = Math.max(0, worldDay - f.plantedAt);
   ensureJobs(f);
   let front = 0;
   for (const kind of JOB_ORDER) {
@@ -286,6 +288,7 @@ function visualFront(f) {
 }
 export function fieldVisual(f) {
   if (f && f.live && !f.paid && f.crop >= 0 && CROPS[f.crop].id === 'potato') {
+    if (f.plantedAt == null) return { crop: f.crop, g: 0, s: 0, dir: f.dir };
     const day = Math.max(0, worldDay - f.plantedAt);
     if (day < POTATO_DAYS) return { crop: f.crop, g: stageNum(day) + 0.2, s: visualFront(f), dir: f.dir };
   }
@@ -293,9 +296,10 @@ export function fieldVisual(f) {
 }
 export function cropWatch(f) {
   if (!f?.live || f.paid || f.crop < 0 || CROPS[f.crop].id !== 'potato') return null;
+  if (f.plantedAt == null) return { day: 0, phase: 'plan', label: '待播种', front: 0, days: POTATO_DAYS, waiting: true };
   const day = Math.max(0, worldDay - f.plantedAt);
   const phase = potatoPhase(Math.min(day, POTATO_DAYS - 0.001));
-  return { day, phase, label: PHASE_LABEL[phase], front: visualFront(f), days: POTATO_DAYS };
+  return { day, phase, label: PHASE_LABEL[phase], front: visualFront(f), days: POTATO_DAYS, waiting: false };
 }
 
 // 与 v3.1 相同次数的随机数，好让后面的运输车 / 无人机还落在原来的位置上
@@ -377,15 +381,26 @@ function dropPotato(f) {
 }
 function jobReady(f, kind) {
   if (!f || !f.live || f.paid || f.crop < 0 || CROPS[f.crop].id !== 'potato') return false;
-  if (worldDay - f.plantedAt < JOBS[kind].at) return false;
   ensureJobs(f);
-  return f.jobS[kind] < L.LANES - 1e-3;
+  if (f.jobS[kind] >= L.LANES - 1e-3) return false;
+  if (kind !== 'planter') {
+    if (f.plantedAt == null) return false;
+    if (worldDay - f.plantedAt < JOBS[kind].at) return false;
+  }
+  return true;
+}
+function fieldRank(f) {
+  const seq = f.planSeq ?? f.idx;
+  if (f.plantedAt == null) return [1, seq, f.idx];
+  return [0, f.plantedAt, f.idx];
 }
 function pickField(kind) {
   let best = null;
   for (const f of potatoLive) {
     if (!jobReady(f, kind)) continue;
-    if (!best || f.plantedAt < best.plantedAt || (f.plantedAt === best.plantedAt && f.idx < best.idx)) best = f;
+    if (!best) { best = f; continue; }
+    const ra = fieldRank(f), rb = fieldRank(best);
+    if (ra[0] < rb[0] || (ra[0] === rb[0] && (ra[1] < rb[1] || (ra[1] === rb[1] && ra[2] < rb[2])))) best = f;
   }
   return best;
 }
@@ -395,6 +410,7 @@ function parkRig(r) {
 }
 function beginJob(r, f) {
   ensureJobs(f);
+  if (r.kind === 'planter' && f.plantedAt == null) f.plantedAt = worldDay;
   const s = Math.min(Math.max(f.jobS[r.kind], 0), L.LANES - 1e-4);
   const lane = Math.floor(s);
   const frac = s - lane;
@@ -509,6 +525,7 @@ function settlePotatoCalendar() {
   for (let i = potatoLive.length - 1; i >= 0; i--) {
     const f = potatoLive[i];
     if (!f.live || f.paid) { potatoLive.splice(i, 1); continue; }
+    if (f.plantedAt == null) continue;
     const day = worldDay - f.plantedAt;
     if (!f.sprayed && day >= JOBS.topper.at) {
       f.sprayed = true;
@@ -693,7 +710,17 @@ export function onHubParcel(x, z) {
   return Math.floor(f.i / L.PER) === L.HUBX && Math.floor(f.j / L.PER) === L.HUBZ;
 }
 function blankTanks() {
-  for (const t of tanks) { t.species = null; t.startedAt = 0; t.tended = false; }
+  for (const t of tanks) { t.species = null; t.startedAt = 0; t.tended = false; t.bi = null; t.bj = null; }
+}
+export function tankSite(tank) {
+  if (!tank) return null;
+  if (Number.isInteger(tank.bi) && Number.isInteger(tank.bj)) return { bi: tank.bi, bj: tank.bj };
+  if (!tank.species) return null;
+  const home = CULTURE_CELLS[tank.id] || CULTURE_CELLS[0];
+  return { bi: home.bi, bj: home.bj };
+}
+function blockCulturing(bi, bj) {
+  return tanks.some(t => t.species && tankSite(t)?.bi === bi && tankSite(t)?.bj === bj);
 }
 function potatoLiters() {
   let n = 0;
@@ -753,7 +780,7 @@ export function millWatch() {
 export function startMill(cell) {
   if (devices.some(d => d.kind === 'mill')) return { ok: false, reason: 'have' };
   if (!cell || cell.hub) return { ok: false, reason: 'hub' };
-  if (cell.bi === L.HUBX + 1 && cell.bj === L.HUBZ) return { ok: false, reason: 'grub' };
+  if (blockCulturing(cell.bi, cell.bj)) return { ok: false, reason: 'grub' };
   const dev = deviceById('mill');
   if (!(economy.revenue >= dev.buildCost)) return { ok: false, reason: 'money', cost: dev.buildCost };
   economy.revenue -= dev.buildCost;
@@ -843,11 +870,16 @@ export function cultureWatch(tank) {
   const day = Math.max(0, worldDay - (tank.startedAt || 0));
   return { day, days: spec.days, ready: day >= spec.days - 1e-9, name: spec.name, id: spec.id, tended: !!tank.tended };
 }
-export function startCulture(tankId, speciesId) {
+export function startCulture(tankId, speciesId, block) {
   const tank = tanks[tankId];
   const spec = CULTURES.find(c => c.id === speciesId);
   if (!tank || !spec) return { ok: false, reason: 'tank' };
   if (tank.species) return { ok: false, reason: 'busy' };
+  const site = block || tankSite(tank) || CULTURE_CELLS[tank.id] || CULTURE_CELLS[0];
+  if (site.hub || (site.bi === L.HUBX && site.bj === L.HUBZ)) return { ok: false, reason: 'hub' };
+  const mill = devices.find(d => d.kind === 'mill');
+  if (mill && mill.bi === site.bi && mill.bj === site.bj) return { ok: false, reason: 'mill' };
+  if (tanks.some(t => t !== tank && t.species && t.bi === site.bi && t.bj === site.bj)) return { ok: false, reason: 'busy' };
   const plan = cultureFeedPlan(spec.id);
   if (stores.feed + 1e-9 < plan.fromShop) return { ok: false, reason: 'feed', need: plan.fromShop };
   const recipe = spec.id === 'grub' ? recipeById('grub-culture') : null;
@@ -858,6 +890,8 @@ export function startCulture(tankId, speciesId) {
   tank.species = spec.id;
   tank.startedAt = worldDay;
   tank.tended = false;
+  tank.bi = site.bi;
+  tank.bj = site.bj;
   return { ok: true, name: spec.name, day: worldDay, feed: plan.fromShop, peel: plan.peel, utility: util.cost || 0, deferred: !!util.deferred };
 }
 export function tendCulture(tankId) {
@@ -889,6 +923,8 @@ export function harvestCulture(tankId) {
   tank.species = null;
   tank.startedAt = 0;
   tank.tended = false;
+  tank.bi = null;
+  tank.bj = null;
   return { ok: true, lot };
 }
 export function resetGame() {
@@ -963,7 +999,9 @@ export function plantField(f, cropId) {
   stores.frass -= fert.frass;
   f.crop = crop; f.state = 1; f.g = 0; f.s = 0; f.timer = 0;
   f.live = true; f.hold = false; f.frozen = false;
-  f.plantedAt = worldDay; f.paid = false; f.sprayed = false; f.claimed = false;
+  // 点种薯只是规划。120 日从播种机真正开始这一趟才计。
+  f.plantedAt = null; f.paid = false; f.sprayed = false; f.claimed = false;
+  f.planSeq = planSeq++;
   f.jobS = blankJobs();
   trackPotato(f);
   assignIdleRigs();
@@ -987,11 +1025,14 @@ export function exportSnapshot() {
       bi: d.bi, bj: d.bj, fi: d.fi, fj: d.fj, startedAt: d.startedAt || 0, readyAt: d.readyAt || 0,
       job: d.job ? { startedAt: d.job.startedAt, doneAt: d.job.doneAt, potato: d.job.potato } : null,
     })),
-    tanks: tanks.map(t => ({ id: t.id, species: t.species, startedAt: t.startedAt || 0, tended: !!t.tended })),
+    tanks: tanks.map(t => ({
+      id: t.id, species: t.species, startedAt: t.startedAt || 0, tended: !!t.tended,
+      bi: Number.isInteger(t.bi) ? t.bi : null, bj: Number.isInteger(t.bj) ? t.bj : null,
+    })),
     fields: fields.filter(f => f.owned).map(f => ({
       i: f.i, j: f.j, crop: f.crop, dir: f.dir, state: f.state,
       g: +f.g.toFixed(4), s: +f.s.toFixed(4), timer: +(+f.timer || 0).toFixed(3),
-      growT: f.growT, live: !!f.live, hold: !!f.hold, plantedAt: f.plantedAt || 0,
+      growT: f.growT, live: !!f.live, hold: !!f.hold, plantedAt: f.plantedAt == null ? null : f.plantedAt, planSeq: f.planSeq || 0,
       paid: !!f.paid, sprayed: !!f.sprayed,
       jobs: f.jobS ? { planter: +f.jobS.planter || 0, hiller: +f.jobS.hiller || 0, topper: +f.jobS.topper || 0, lifter: +f.jobS.lifter || 0 } : undefined,
     })),
@@ -1021,7 +1062,9 @@ export function applySnapshot(data) {
     if (s.crop >= 0 && s.crop < CROPS.length) f.crop = s.crop;
     if (s.dir === 0 || s.dir === 1) f.dir = s.dir;
     f.state = s.state; f.g = +s.g || 0; f.s = +s.s || 0; f.timer = +s.timer || 0;
-    f.growT = s.growT || f.growT; f.live = !!s.live; f.hold = !!s.hold; f.plantedAt = s.plantedAt || 0;
+    f.growT = s.growT || f.growT; f.live = !!s.live; f.hold = !!s.hold;
+    f.plantedAt = s.plantedAt == null ? null : +s.plantedAt;
+    if (s.planSeq) f.planSeq = +s.planSeq;
     f.paid = !!s.paid; f.sprayed = !!s.sprayed;
     f.claimed = false; f.frozen = false; f.owned = true;
     if (s.jobs) {
@@ -1076,6 +1119,8 @@ export function applySnapshot(data) {
       tank.species = spec ? spec.id : null;
       tank.startedAt = +t.startedAt || 0;
       tank.tended = !!t.tended;
+      tank.bi = Number.isInteger(+t.bi) && t.bi != null && t.bi !== '' ? +t.bi : null;
+      tank.bj = Number.isInteger(+t.bj) && t.bj != null && t.bj !== '' ? +t.bj : null;
     }
   } else blankTanks();
   worldDay = +(data.worldDay ?? data.simTime) || 0;

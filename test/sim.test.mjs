@@ -192,6 +192,8 @@ test('a working machine stays on its field, and the next machine starts from tha
   assert.ok(progressed > 3 && progressed < 8, progressed);
   assert.equal(planter.f, a);
   assert.equal(plantField(b, 'potato').ok, true);
+  assert.equal(b.plantedAt, null, 'assigning the crop does not start the 120-day clock');
+  assert.equal(cropWatch(b).waiting, true);
   assert.equal(planter.f, a, 'planting a second field does not pull the machine off');
   assert.ok(Math.abs(a.jobS.planter - progressed) < 0.02, 'the current step is not marked done');
   assert.equal(b.jobS.planter, 0, 'the new field does not inherit the other field’s progress');
@@ -526,7 +528,13 @@ test('the potato loop reads prices from the product table and closes peel and fr
   economy.revenue = 0;
   assert.equal(startMill(west).reason, 'money');
   assert.equal(startMill({ hub: true, bi: L.HUBX, bj: L.HUBZ, x: 0, z: 0 }).reason, 'hub');
+  assert.equal(startMill({ hub: false, bi: L.HUBX + 1, bj: L.HUBZ, x: 500, z: 0 }).reason, 'money');
+  stores.feed = 1;
+  assert.equal(startCulture(0, 'grub', { bi: L.HUBX + 1, bj: L.HUBZ }).ok, true);
   assert.equal(startMill({ hub: false, bi: L.HUBX + 1, bj: L.HUBZ, x: 500, z: 0 }).reason, 'grub');
+  assert.equal(startCulture(1, 'grub', { bi: L.HUBX, bj: L.HUBZ, hub: true }).reason, 'hub');
+  tanks[0].species = null; tanks[0].bi = null; tanks[0].bj = null;
+  stores.feed = 0; stores.peel = 0;
   const cost = deviceById('mill').buildCost;
   const util = recipeById('starch-mill').utilities.water + recipeById('starch-mill').utilities.power;
   economy.revenue = cost + util;
@@ -599,4 +607,35 @@ test('the potato loop reads prices from the product table and closes peel and fr
   assert.equal(stores.peel, 0);
   assert.equal(stores.frass, 0);
   assert.equal(removeMill().reason, 'none');
+});
+
+test('planning a potato does not start the growth clock until the planter begins', () => {
+  resetGame();
+  setPaused(false);
+  setTimeScale(1);
+  stores.seed = 4;
+  stores.fertilizer = 4;
+  const a = fieldAt(focus.i, focus.j);
+  const b = fields.find(f => f.owned && f !== a && !f.live && f.state !== 3);
+  assert.equal(plantField(a, 'potato').ok, true);
+  assert.equal(a.plantedAt, worldDay);
+  assert.equal(cropWatch(a).waiting, false);
+  assert.equal(plantField(b, 'potato').ok, true);
+  assert.equal(b.plantedAt, null);
+  assert.equal(cropWatch(b).waiting, true);
+  assert.equal(cropWatch(b).day, 0);
+  assert.equal(fieldVisual(b).g, 0);
+  const held = worldDay;
+  step(2 * DAY_SECONDS, 0, 1);
+  assert.equal(b.plantedAt, null);
+  assert.equal(cropWatch(b).day, 0);
+  assert.ok(cropWatch(a).day >= 2);
+  assert.ok(worldDay > held);
+  const snap = exportSnapshot();
+  const saved = snap.fields.find(f => f.i === b.i && f.j === b.j);
+  assert.equal(saved.plantedAt, null);
+  b.plantedAt = 4;
+  assert.equal(applySnapshot(snap), true);
+  assert.equal(fieldAt(b.i, b.j).plantedAt, null);
+  assert.equal(typeof fieldAt(a.i, a.j).plantedAt, 'number');
 });

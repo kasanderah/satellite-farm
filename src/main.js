@@ -11,7 +11,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { HorizontalTiltShiftShader } from 'three/addons/shaders/HorizontalTiltShiftShader.js';
 import { VerticalTiltShiftShader } from 'three/addons/shaders/VerticalTiltShiftShader.js';
-import { PALETTE, CROPS, TEX_ID, L, fields, harvesters, haulers, drones, step, TRUNKS_X, TRUNKS_Z, depots, inCrater, ROADS, RING, LAYERS, CUT, wrapX, PLOT, economy, focus, signals, log, plantField, quote, setTimeScale, setPaused, paused, exportSnapshot, applySnapshot, fieldAtWorld, fieldAt, fieldOrigin, simTime, worldDay, stores, rigs, fieldVisual, cropWatch, POTATO_DAYS, warehouse, buildings, sellLot, placeBuilding, removeBuilding, rigReadout, SHOP, buySeed, buyItem, SEED_PER_FIELD, FERT_PER_FIELD, resetGame, CULTURES, DECK_CLIMATE, tanks, cultureWatch, startCulture, tendCulture, harvestCulture, BUILDING_KINDS, CULTURE_CELLS, devices, potatoStock, fertPlan, cultureFeedPlan, millWatch, startMill, removeMill, orderProcess } from './_shared.js';
+import { PALETTE, CROPS, TEX_ID, L, fields, harvesters, haulers, drones, step, TRUNKS_X, TRUNKS_Z, depots, inCrater, ROADS, RING, LAYERS, CUT, wrapX, PLOT, economy, focus, signals, log, plantField, quote, setTimeScale, setPaused, paused, exportSnapshot, applySnapshot, fieldAtWorld, fieldAt, fieldOrigin, simTime, worldDay, stores, rigs, fieldVisual, cropWatch, POTATO_DAYS, warehouse, buildings, sellLot, placeBuilding, removeBuilding, rigReadout, SHOP, buySeed, buyItem, SEED_PER_FIELD, FERT_PER_FIELD, resetGame, CULTURES, DECK_CLIMATE, tanks, cultureWatch, startCulture, tendCulture, harvestCulture, BUILDING_KINDS, CULTURE_CELLS, tankSite, devices, potatoStock, fertPlan, cultureFeedPlan, millWatch, startMill, removeMill, orderProcess } from './_shared.js';
 import { productById } from './products.js';
 import { NOISE, FARM, CURVE_DECL, CURVE_PROJECT } from './glsl.js';
 import { harvesterKit, haulerKit, droneKit, personKit, conveyorKit, depotKit, hubKit, plantGeometry, mastKit, irrigatorKit, growRackKit, tankKit, pumpKit, pipeRackKit, tractorKit, planterKit, hillerKit, topperKit, potatoLifterKit, shedKit, warehouseKit, garageKit, processKit, cultureTankKit, armKit, deckLightKit } from './prefabs.js';
@@ -798,7 +798,7 @@ function seatPlot(group, bi, bj, y) {
   return at;
 }
 
-const hubArt = colony.buildHubPlot();
+const hubArt = colony.buildHubPlot({ game: true });
 hubArt.group.scale.set(cultScale, 1, cultScale);
 hubArt.group.position.set(0, 0.15, 0);
 hubArt.group.traverse(obj => { obj.frustumCulled = false; });
@@ -815,31 +815,58 @@ cultRoot.visible = false;
 scene.add(cultRoot);
 const emptyArt = colony.buildCultPlot('a', { game: true });
 packStatic(emptyArt.group);
-const grubArt = colony.buildGrubTrough({ game: true });
-const grubBi = L.HUBX + 1, grubBj = L.HUBZ;
-const grubAt = seatPlot(grubArt.group, grubBi, grubBj, LAYERS[1].floor);
-cultRoot.add(grubArt.group);
-const grubOcc = grubArt.group.userData.cult.occupied;
-const deckArtInfo = {
-  grub: {
-    ...grubAt, bi: grubBi, bj: grubBj,
-    pad: { n: grubOcc.n, x: grubAt.x + grubOcc.x * cultScale, z: grubAt.z + grubOcc.z * cultScale },
-    gantries: grubArt.group.userData.grub.gantries,
-    troughs: grubArt.group.userData.grub.n,
-  },
-  empty: null,
-};
+const emptyGroups = new Map();
+const grubInstalled = new Map();
+let cultureSig = '';
+const deckArtInfo = { grub: null, grubs: [], empty: null };
 let seatedEmpty = false;
 for (let bj = PLOT.bj0; bj <= PLOT.bj1; bj++) {
   for (let bi = PLOT.bi0; bi <= PLOT.bi1; bi++) {
     if (bi === L.HUBX && bj === L.HUBZ) continue;
-    if (bi === grubBi && bj === grubBj) continue;
     const group = seatedEmpty ? emptyArt.group.clone(true) : emptyArt.group;
     seatedEmpty = true;
     const at = seatPlot(group, bi, bj, LAYERS[1].floor);
     cultRoot.add(group);
+    emptyGroups.set(bi + ':' + bj, group);
     if (!deckArtInfo.empty) deckArtInfo.empty = { ...at, bi, bj };
   }
+}
+function cultureKey(bi, bj) { return bi + ':' + bj; }
+function syncCultureArt() {
+  const live = new Set();
+  for (const t of tanks) {
+    if (!t.species) continue;
+    const site = tankSite(t);
+    if (!site || (site.bi === L.HUBX && site.bj === L.HUBZ)) continue;
+    live.add(cultureKey(site.bi, site.bj));
+  }
+  for (const [key, group] of emptyGroups) group.visible = !live.has(key);
+  for (const [key, art] of grubInstalled) art.group.visible = live.has(key);
+  deckArtInfo.grubs = [];
+  for (const key of live) {
+    let art = grubInstalled.get(key);
+    if (!art) {
+      const [bi, bj] = key.split(':').map(Number);
+      art = colony.buildGrubTrough({ game: true });
+      const at = seatPlot(art.group, bi, bj, LAYERS[1].floor);
+      art.group.traverse(obj => { obj.frustumCulled = false; });
+      cultRoot.add(art.group);
+      art.at = at;
+      art.bi = bi;
+      art.bj = bj;
+      grubInstalled.set(key, art);
+    }
+    art.group.visible = true;
+    const occ = art.group.userData.cult.occupied;
+    const info = {
+      ...art.at, bi: art.bi, bj: art.bj,
+      pad: { n: occ.n, x: art.at.x + occ.x * cultScale, z: art.at.z + occ.z * cultScale },
+      gantries: art.group.userData.grub.gantries,
+      troughs: art.group.userData.grub.n,
+    };
+    deckArtInfo.grubs.push(info);
+  }
+  deckArtInfo.grub = deckArtInfo.grubs[0] || null;
 }
 // TODO: 门框照料机（龙门）台数是升级项。现在固定沙盒默认的 2 台。商店不卖 4 台这一档。
 // TODO: 地块级照明跟最近一次开始的单元；弱光减产。见 harvestCulture。这里只把蛴螬地块画成弱光。
@@ -911,8 +938,8 @@ function placeTanks() {
   const y = LAYERS[1].floor;
   tankPos = [];
   for (let i = 0; i < tanks.length; i++) {
-    const c = CULTURE_CELLS[Math.min(i, CULTURE_CELLS.length - 1)];
-    const at = cellCenter(c.bi, c.bj, c.fi, c.fj);
+    const c = tankSite(tanks[i]) || { bi: L.HUBX + 1, bj: L.HUBZ, fi: 1, fj: 1 };
+    const at = tanks[i].species || Number.isInteger(tanks[i].bi) ? cellCenter(c.bi, c.bj, c.fi ?? 1, c.fj ?? 1) : { x: 1e9, z: 1e9, y };
     tankPos.push(at);
     setInst(cultureSet, i, at.x, y, at.z, 0);
     const spec = CULTURES.find(c => c.id === tanks[i].species);
@@ -1235,8 +1262,6 @@ function applyDeckView() {
   plotSection.visible = on;
   deckFloor.visible = on && viewLayer !== 'grow';
   deckFloor.position.y = layerFloor();
-  railMesh.visible = grow && tankPos.length > 1;
-  cableMesh.visible = grow && tankPos.length > 1;
   for (const m of hubMeshes) m.visible = false;
   setShown(peopleSet, !on);
   for (const k in buildingSets) setShown(buildingSets[k], !on);
@@ -1245,17 +1270,18 @@ function applyDeckView() {
   if (netMesh) netMesh.visible = !on;
   icons.visible = !on;
   deckSlabs.visible = !on && !!cut.on;
-  const lab = grow || !!cut.on;
   setShown(cultureSet, false);
-  setShown(armSet, lab);
+  setShown(armSet, !!cut.on && !grow);
   setShown(deckLightSet, false);
+  railMesh.visible = false;
+  cableMesh.visible = false;
   cultRoot.visible = grow;
   syncHubSection();
   document.body.classList.toggle('underground', on);
 }
 // 交互：左键平移 / 右键旋转 / 滚轮缩放 / WASD / QE / N 昼夜 / M 地图模式 / H 隐藏界面
 let drag = null, ptr = null, selected = null, selNote = '';
-let mode = 'plan', watchRig = null, pickedLot = null, shopPick = 'seed', deckTank = 0, buildAct = 'place', buildKind = 'warehouse', buildPick = null, millPlace = false;
+let mode = 'plan', watchRig = null, pickedLot = null, shopPick = 'seed', deckTank = 0, deckBlock = null, deckHub = false, buildAct = 'place', buildKind = 'warehouse', buildPick = null, millPlace = false;
 const raycaster = new THREE.Raycaster();
 function pickFlat(cx, cy) {
   const ndc = new THREE.Vector2((cx / innerWidth) * 2 - 1, -(cy / innerHeight) * 2 + 1);
@@ -1289,7 +1315,17 @@ function onMapClick(cx, cy) {
       paintKpi();
       return;
     }
-    if (cell && cell.tank >= 0 && viewLayer === 'grow') { deckTank = cell.tank; paintSheet(); }
+    if (cell && viewLayer === 'grow') {
+      if (cell.hub) { deckBlock = null; deckHub = true; }
+      else {
+        deckBlock = { bi: cell.bi, bj: cell.bj };
+        deckHub = false;
+        const here = tanks.find(t => t.species && t.bi === cell.bi && t.bj === cell.bj);
+        if (here) deckTank = here.id;
+        else if (cell.tank >= 0) deckTank = cell.tank;
+      }
+      paintSheet();
+    }
     return;
   }
   if (mode === 'build') {
@@ -1549,7 +1585,8 @@ function paintSheet() {
   } else if (mode === 'deck') {
     const rows = tanks.map(t => {
       const w = cultureWatch(t);
-      const line = w ? `${w.name} · 第 ${Math.floor(w.day)} / ${w.days} 日${w.tended ? ' · 臂已照料' : ''}${w.ready ? ' · 可收' : ''}` : '空槽';
+      const where = Number.isInteger(t.bi) ? secName(t.bi, t.bj) : '';
+      const line = w ? `${w.name}${where ? ' · ' + where : ''} · 第 ${Math.floor(w.day)} / ${w.days} 日${w.tended ? ' · 臂已照料' : ''}${w.ready ? ' · 可收' : ''}` : '空槽';
       return `<button type="button" class="rowbtn${deckTank === t.id ? ' on' : ''}" data-tank="${t.id}"><b>槽 ${t.id + 1}</b><small>${line}</small></button>`;
     }).join('');
     const { mill, line: millLine } = millStatusText();
@@ -1558,7 +1595,8 @@ function paintSheet() {
       ? `<button type="button" class="sell${millPlace ? ' on' : ''}" id="mill-arm">${millPlace ? '取消选址' : '选址建造'}</button>`
       : `<button type="button" class="sell" id="mill-run"${mill.state === 'ready' ? '' : ' disabled'}>加工一批</button><button type="button" class="sell" id="mill-del"${mill.state === 'job' ? ' disabled' : ''}>拆除</button>`;
     const feedLine = `开蛴螬：饲料 ${stockText(feed.fromShop)}（皮最多抵 ${Math.round(feed.cap * 100)}%）· 现有皮 ${stockText(stores.peel)} · 饲料 ${stockText(stores.feed)}`;
-    el.innerHTML = `<div class="who"><b>培育层</b><span>${DECK_CLIMATE.temp}°C · 湿度 ${DECK_CLIMATE.rh}%</span></div><p class="note">设定值，不是天气。${feedLine}</p><div class="who"><b>加工厂</b><span data-mill>${millLine}</span></div><p class="note">土豆进，土豆淀粉和土豆皮出。皮可以抵一部分饲料。建造 ${fmt(mill.cost)} · ${mill.days} 日。水电在加工时从营收扣。</p><div class="buyline">${millBtns}</div>${rows}<div class="buyline"><button type="button" class="sell" data-spawn="grub">养蛴螬</button><button type="button" class="sell" data-spawn="bsf">养黑水虻</button></div><div class="buyline"><button type="button" class="sell" id="tend">照料</button><button type="button" class="sell" id="harvest">收获</button></div>`;
+    const picked = deckBlock ? secName(deckBlock.bi, deckBlock.bj) : '先点一块非中枢单元';
+    el.innerHTML = `<div class="who"><b>培育层</b><span>${DECK_CLIMATE.temp}°C · 湿度 ${DECK_CLIMATE.rh}%</span></div><p class="note">设定值，不是天气。${feedLine}</p><p class="note">养殖装在点中的单元上。当前 ${picked}。中枢不装培养槽。</p><div class="who"><b>加工厂</b><span data-mill>${millLine}</span></div><p class="note">土豆进，土豆淀粉和土豆皮出。皮可以抵一部分饲料。建造 ${fmt(mill.cost)} · ${mill.days} 日。水电在加工时从营收扣。</p><div class="buyline">${millBtns}</div>${rows}<div class="buyline"><button type="button" class="sell" data-spawn="grub">养蛴螬</button><button type="button" class="sell" data-spawn="bsf">养黑水虻</button></div><div class="buyline"><button type="button" class="sell" id="tend">照料</button><button type="button" class="sell" id="harvest">收获</button></div>`;
   }
 }
 function setMode(id) {
@@ -1640,15 +1678,22 @@ $('sheet').addEventListener('click', e => {
     return;
   }
   if (spawn) {
-    const started = startCulture(deckTank, spawn.dataset.spawn);
-    if (!started.ok) toast(started.reason === 'feed' ? '饲料不足' : started.reason === 'busy' ? '这口槽已经在养' : '不能开始');
+    if (!deckBlock) { toast(deckHub ? '中枢不养殖' : '先点一块非中枢的培育单元'); paintSheet(); return; }
+    const here = tanks.find(t => t.species && t.bi === deckBlock.bi && t.bj === deckBlock.bj);
+    if (here) { deckTank = here.id; toast('这块已经在养'); paintSheet(); return; }
+    const free = tanks.find(t => !t.species);
+    if (!free) { toast('四个槽都在用'); paintSheet(); return; }
+    deckTank = free.id;
+    const started = startCulture(free.id, spawn.dataset.spawn, deckBlock);
+    if (!started.ok) toast(started.reason === 'feed' ? '饲料不足' : started.reason === 'hub' ? '中枢不养殖' : started.reason === 'mill' ? '这块是加工厂' : started.reason === 'busy' ? '这块已经在养' : '不能开始');
     else {
       const extra = started.peel ? ` · 皮 −${stockText(started.peel)}` : '';
       const bill = started.utility ? ` · 水电 −${fmt(started.utility)}` : '';
-      toast(`${started.name}已入槽${extra}${bill}`);
-      orderArm(deckTank, 'tend');
+      toast(`${started.name}已装上 ${secName(deckBlock.bi, deckBlock.bj)}${extra}${bill}`);
       saveSoon();
     }
+    syncCultureArt();
+    placeTanks();
     paintSheet();
     paintKpi();
     return;
@@ -1664,7 +1709,7 @@ $('sheet').addEventListener('click', e => {
     orderArm(deckTank, 'harvest');
     const got = harvestCulture(deckTank);
     if (!got.ok) toast(got.reason === 'early' ? '还没到收获日' : '这口槽是空的');
-    else { toast(`<b>入仓</b>${got.lot.name}`); saveSoon(); }
+    else { toast(`<b>入仓</b>${got.lot.name}`); syncCultureArt(); placeTanks(); saveSoon(); }
     paintSheet();
     return;
   }
@@ -1872,6 +1917,7 @@ function updateDock() {
   let stat = selNote;
   if (!stat) {
     if (!f.owned) stat = '邻区快照 · 只读';
+    else if (watch?.waiting) stat = '已规划 · 等播种机开工，生长还没计时';
     else if (watch) stat = `中熟商品薯 · ${watch.label} · 播后 ${Math.floor(watch.day)} / ${watch.days} 日`;
     else if (stores.seed < SEED_PER_FIELD) stat = '种薯不足。打开商店买一份。';
     else if (stores.fertilizer + 1e-9 < fertPlan().fromFert) stat = stores.frass > 0 ? '肥料不足。虫粪只能抵一半。' : '肥料不足。打开商店买一份。';
@@ -1880,11 +1926,11 @@ function updateDock() {
   }
   $('selid').textContent = `F-${String(f.i).padStart(3, '0')}${String(f.j).padStart(2, '0')}`;
   $('selstat').textContent = stat;
-  const p = watch ? Math.max(0, Math.min(1, watch.day / watch.days)) : 0;
+  const p = watch && !watch.waiting ? Math.max(0, Math.min(1, watch.day / watch.days)) : 0;
   $('selbar').style.width = (p * 100).toFixed(1) + '%';
   document.querySelectorAll('#selbtns button').forEach(b => {
     b.disabled = !f.owned;
-    b.classList.toggle('on', !!watch && stores.seed >= SEED_PER_FIELD);
+    b.classList.toggle('on', !!watch && !watch.waiting && stores.seed >= SEED_PER_FIELD);
     const small = b.querySelector('small');
     if (small && b.dataset.crop === 'potato') {
       const fert = fertPlan();
@@ -2221,9 +2267,12 @@ function frame(now) {
     }
     if (cultureSet.light?.instanceColor) cultureSet.light.instanceColor.needsUpdate = true;
   }
+  {
+    const sig = tanks.map(t => `${t.species || ''}:${t.bi ?? 'x'}:${t.bj ?? 'x'}`).join('|');
+    if (sig !== cultureSig) { cultureSig = sig; syncCultureArt(); placeTanks(); }
+  }
   if (viewLayer === 'grow') {
-    const running = tanks.some(t => t.species);
-    grubArt.motion(0, running ? 'job' : 'idle');
+    for (const art of grubInstalled.values()) if (art.group.visible) art.motion(0, 'job');
   }
   applyDeckView();
   composer.render();
