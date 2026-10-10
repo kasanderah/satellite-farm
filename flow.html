@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>环穗 · 产物流向</title>
+<style>
+:root{--void:#0a0c14;--line:rgba(188,195,196,.4);--fg:#e8d8d0;--mut:#a2998a;--sig:#d8693c;--data:#85eed9;
+  --font:"PingFang SC","Microsoft YaHei","Noto Sans CJK SC","Noto Sans SC","WenQuanYi Micro Hei","Droid Sans Fallback",sans-serif}
+html,body{margin:0;background:var(--void);color:var(--fg);font-family:var(--font)}
+body{padding:28px 32px 64px}
+a{color:var(--data);text-decoration:none}
+header{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;margin-bottom:8px}
+h1{margin:0;font-weight:500;font-size:22px;letter-spacing:.28em}
+.sub{color:var(--mut);font-size:13px;letter-spacing:.06em;line-height:1.6;max-width:640px}
+#board{margin-top:22px;display:flex;flex-direction:column;gap:14px}
+.stage{display:grid;grid-template-columns:minmax(180px,1.1fr) 36px minmax(200px,1.2fr) 36px minmax(180px,1.1fr);gap:8px 6px;align-items:center;border:1px solid var(--line);padding:14px 16px;background:rgba(23,24,28,.65)}
+.col{display:flex;flex-direction:column;gap:8px}
+.arr{text-align:center;color:var(--sig);font-size:22px;letter-spacing:0}
+.chip,.proc{border:1px solid var(--line);padding:8px 10px}
+.chip b,.proc b{display:block;font-weight:500;letter-spacing:.12em;font-size:14px}
+.chip small,.proc small,.chip em,.proc em{display:block;font-style:normal;color:var(--mut);font-size:12px;letter-spacing:.04em;margin-top:3px}
+.chip.out em{color:var(--sig)}
+.chip.in em{color:var(--data)}
+.dev,.off,.note{grid-column:1 / -1;margin:0;color:var(--mut);font-size:12px;letter-spacing:.04em;line-height:1.5}
+.caps{border:1px solid var(--line);padding:14px 16px}
+.caps h2{margin:0 0 8px;font-weight:500;font-size:13px;letter-spacing:.2em}
+.caps ul{margin:0;padding-left:18px}
+.caps li{margin:4px 0;font-size:13px;letter-spacing:.04em}
+@media (max-width:800px){
+  .stage{grid-template-columns:1fr}
+  .arr{transform:rotate(90deg);padding:4px 0}
+}
+</style></head><body>
+<header>
+  <div><h1>环穗 · 产物流向</h1><p class="sub">土豆 → 加工 → 蛴螬。节点和箭头来自同一张产品表。后来加品种，改表即可。</p></div>
+  <a href="index.html">回到环穗</a>
+</header>
+<div id="board"></div>
+<script>(()=>{var m=[{id:"potato",nameZh:"\u571F\u8C46",tier:1,tag:"\u5546\u54C1",sellPrice:29701,buyPrice:null,unit:"L"},{id:"seed",nameZh:"\u79CD\u85AF",tier:1,tag:"\u6295\u5165\u54C1",sellPrice:null,buyPrice:1800,shop:!0,unit:"\u4EFD"},{id:"fertilizer",nameZh:"\u80A5\u6599",tier:1,tag:"\u6295\u5165\u54C1",sellPrice:null,buyPrice:900,shop:!0,unit:"\u4EFD"},{id:"water",nameZh:"\u6C34",tier:1,tag:"\u6295\u5165\u54C1",sellPrice:null,buyPrice:null,utility:!0,unit:"\u8BB0"},{id:"power",nameZh:"\u7535",tier:1,tag:"\u6295\u5165\u54C1",sellPrice:null,buyPrice:null,utility:!0,unit:"\u8BB0"},{id:"starch",nameZh:"\u571F\u8C46\u6DC0\u7C89",tier:2,tag:"\u5546\u54C1",sellPrice:4800,buyPrice:null,unit:"kg"},{id:"peel",nameZh:"\u571F\u8C46\u76AE",tier:2,tag:"\u4E2D\u95F4\u4F53",sellPrice:null,buyPrice:null,unit:"\u4EFD"},{id:"feed",nameZh:"\u6709\u673A\u8D28\u9972\u6599",shopName:"\u9972\u6599",tier:1,tag:"\u6295\u5165\u54C1",sellPrice:null,buyPrice:800,shop:!0,unit:"\u4EFD"},{id:"grub",nameZh:"\u86F4\u87AC",tier:2,tag:"\u5546\u54C1",sellPrice:2600,buyPrice:null,lotKg:180,unit:"kg"},{id:"frass",nameZh:"\u866B\u7CAA\u6C99",tier:2,tag:"\u4E2D\u95F4\u4F53",sellPrice:null,buyPrice:null,unit:"\u4EFD"},{id:"media",nameZh:"\u866B\u5375/\u57F9\u517B\u57FA",tier:1,tag:"\u6295\u5165\u54C1",sellPrice:null,buyPrice:null,note:"\u672C\u5207\u7247\u4E0D\u53E6\u6536\u8D39\uFF0C\u5F00\u69FD\u4ECD\u53EA\u8017\u9972\u6599",unit:"\u4EFD"},{id:"bsf",nameZh:"\u9ED1\u6C34\u867B",tier:2,tag:"\u5546\u54C1",sellPrice:1400,buyPrice:null,lotKg:420,unit:"kg",flow:!1}],d={peelToFeed:{id:"peelToFeed",from:"peel",to:"feed",maxFraction:.4,peelPerFullOffset:4,note:"\u571F\u8C46\u76AE\u6700\u591A\u62B5\u56DB\u6210\u9972\u6599\uFF0C\u5176\u4F59\u4ECD\u4E70\u9972\u6599"},frassToFert:{id:"frassToFert",from:"frass",to:"fertilizer",maxFraction:.5,frassPerFullOffset:1,note:"\u866B\u7CAA\u6C99\u6700\u591A\u62B5\u4E00\u534A\u80A5\u6599\uFF0C\u4E0D\u80FD\u628A\u80A5\u6599\u4E70\u6210\u96F6"}},P=[{id:"potato-field",nameZh:"\u5546\u54C1\u85AF\u4E00\u832C",device:"field",timeDays:120,stub:!0,utilities:{water:40},inputs:[{id:"seed",qty:1},{id:"fertilizer",qty:1}],outputs:[{id:"potato",qty:1,unit:"\u4ED3\u6279"}],offsets:["frassToFert"]},{id:"starch-mill",nameZh:"\u571F\u8C46\u5236\u6DC0\u7C89",device:"mill",timeDays:2,utilities:{water:150,power:150},inputs:[{id:"potato",qty:18e3,unit:"L"}],outputs:[{id:"starch",qty:4e3,unit:"kg"},{id:"peel",qty:4,unit:"\u4EFD"}]},{id:"grub-culture",nameZh:"\u86F4\u87AC\u57F9\u517B",device:"grub-tank",timeDays:65,utilities:{water:80,power:80},inputs:[{id:"feed",qty:1}],outputs:[{id:"grub",qty:180,unit:"kg"},{id:"frass",qty:1,unit:"\u4EFD"}],offsets:["peelToFeed"]}],f=[{id:"mill",nameZh:"\u52A0\u5DE5\u5382",layer:"grow",hub:!1,buildCost:6e3,buildDays:3,recipe:"starch-mill"}];function $(t){return m.find(e=>e.id===t)||null}function v(t){return f.find(e=>e.id===t)||null}function a(t){if(!t)return 0;let e=0;for(let i of Object.keys(t))e+=+t[i]||0;return e}function c(t){let e=$(t.id);return{id:t.id,nameZh:e?e.nameZh:t.id,qty:t.qty,unit:t.unit||e?.unit||"",sellPrice:e?.sellPrice??null,buyPrice:e?.buyPrice??null,tag:e?.tag||"",note:e?.note||""}}function p(){let t=P.map(e=>({id:e.id,nameZh:e.nameZh,timeDays:e.timeDays,stub:!!e.stub,utilities:{...e.utilities},utilityCost:a(e.utilities),inputs:e.inputs.map(c),outputs:e.outputs.map(c),offsets:(e.offsets||[]).map(i=>d[i]).filter(Boolean),device:v(e.device)}));return{products:m.filter(e=>e.flow!==!1),stages:t,offsets:Object.values(d),devices:f}}var Z=t=>document.getElementById(t),s=p(),r=t=>t==null?"\u2014":Math.round(t).toLocaleString("en-US");function g(t,e){let i=Object.entries(t||{}).map(([u,o])=>{let l=s.products.find(b=>b.id===u);return`${l?l.nameZh:u} ${o}`});if(!i.length)return"";let n=e?"\uFF08\u7530\u9762\u8FD9\u4E00\u7B14\u5148\u4E0D\u6263\uFF0C\u5F00\u5C40\u8425\u6536\u662F 0 \u4ECD\u80FD\u64AD\u79CD\uFF09":`\u5171 ${r(a(t))}`;return i.join(" \xB7 ")+" "+n}function y(t,e){let i=e==="out"&&t.sellPrice!=null?`\u724C\u4EF7 ${r(t.sellPrice)}`:e==="in"&&t.buyPrice!=null?`\u4E70\u4EF7 ${r(t.buyPrice)}`:t.tag||"",n=`${t.qty==null?"":t.qty}${t.unit?" "+t.unit:""}`.trim();return`<div class="chip ${e}"><b>${t.nameZh}</b><small>${n}</small><em>${i}</em></div>`}function q(t){let e=t.inputs.map(l=>y(l,"in")).join(""),i=t.outputs.map(l=>y(l,"out")).join(""),n=t.device?`<p class="dev">\u8BBE\u5907 ${t.device.nameZh} \xB7 \u57F9\u80B2\u5C42\u975E\u4E2D\u67A2 \xB7 \u5EFA\u9020 ${r(t.device.buildCost)} \xB7 ${t.device.buildDays} \u65E5</p>`:"",u=t.offsets.map(l=>`<p class="off">${l.note}</p>`).join(""),o=g(t.utilities,t.stub);return`<section class="stage">
+    <div class="col ins">${e}</div>
+    <div class="arr" aria-hidden="true">\u2192</div>
+    <div class="col mid">
+      <div class="proc"><b>${t.nameZh}</b><small>${t.timeDays} \u4E16\u754C\u65E5</small>${o?`<em>${o}</em>`:""}</div>
+      ${n}
+    </div>
+    <div class="arr" aria-hidden="true">\u2192</div>
+    <div class="col outs">${i}</div>
+    ${u}
+  </section>`}var h=s.products.filter(t=>t.note).map(t=>`<li><b>${t.nameZh}</b> \xB7 ${t.note}</li>`).join(""),x=s.offsets.map(t=>{let e=s.products.find(n=>n.id===t.from),i=s.products.find(n=>n.id===t.to);return`<li><b>${e?.nameZh||t.from}</b> \u2192 <b>${i?.nameZh||t.to}</b> \xB7 \u6700\u591A\u62B5 ${Math.round(t.maxFraction*100)}% \xB7 ${t.note}</li>`}).join("");Z("board").innerHTML=s.stages.map(q).join("")+`<section class="caps"><h2>\u62B5\u6263\u4E0A\u9650</h2><ul>${x}</ul>${h?`<ul>${h}</ul>`:""}<p class="note">\u86CB\u767D\u7816\uFF08\u7B2C\u4E09\u6863\uFF09\u8FD9\u4E00\u8F6E\u4E0D\u505A\u3002\u9ED1\u6C34\u867B\u4ECD\u53EF\u517B\uFF0C\u4E0D\u753B\u8FDB\u8FD9\u6761\u571F\u8C46\u73AF\u3002</p></section>`;})();
+</script>
+</body></html>

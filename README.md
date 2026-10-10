@@ -8,6 +8,8 @@ Open `index.html` in a browser. It is a single file: no server, no network.
 
 `asset-lab.html` is the design sandbox, titled 环穗 · 资产工坊. The playable game uses the hub plot, the empty grow-deck unit (抬缘白台), and the grub trough from that sandbox. Notes typed in the sandbox stay in this browser and do not touch a saved game.
 
+`flow.html` is 环穗 · 产物流向. It draws the potato → starch and peel → grub and frass loop from `src/products.js`, the same table the shop, the mill, and the culture tanks read. A header link and the admin panel both open it.
+
 To rebuild after changing `src/`:
 
 ```bash

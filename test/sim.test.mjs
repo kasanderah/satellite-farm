@@ -8,7 +8,9 @@ import {
   DAY_SECONDS, MACHINE_MPS, warehouse, sellLot, placeBuilding, removeBuilding, buildings, rigReadout,
   SHOP, buySeed, buyItem, SEED_PER_FIELD, resetGame, paused, onHubParcel,
   CULTURES, tanks, startCulture, harvestCulture, CULTURE_CELLS, inPlotBlock, fieldOrigin,
+  devices, potatoStock, fertPlan, cultureFeedPlan, millWatch, startMill, orderProcess, removeMill,
 } from '../src/_shared.js';
+import { productById, recipeById, deviceById, flowModel, LOOP_OFFSETS } from '../src/products.js';
 
 test('one colonist plot is about 4 km on the ring', () => {
   assert.ok(PLOT.along > 3500 && PLOT.along < 4500, PLOT.along);
@@ -494,4 +496,107 @@ test('empty cultivation unit matches the 4 km plot grid', () => {
   assert.deepEqual(two.flat(), [...Array(17).keys()]);
   assert.deepEqual(four.flat(), [...Array(17).keys()]);
   for (const part of four) assert.ok(part.length >= 4);
+});
+
+test('the potato loop reads prices from the product table and closes peel and frass', () => {
+  const potato = CROPS.findIndex(c => c.id === 'potato');
+  const listed = Math.round(FIELD_HA * 44000 * 412 / 1000);
+  assert.equal(productById('potato').sellPrice, listed);
+  assert.equal(quote(potato), listed);
+  assert.equal(SHOP.find(s => s.id === 'seed').price, productById('seed').buyPrice);
+  assert.equal(SHOP.find(s => s.id === 'fertilizer').price, 900);
+  assert.equal(SHOP.find(s => s.id === 'feed').price, 800);
+  assert.equal(SHOP.find(s => s.id === 'feed').name, '饲料');
+  assert.equal(deviceById('mill').buildCost, 6000);
+  assert.equal(deviceById('mill').hub, false);
+  assert.equal(recipeById('starch-mill').timeDays, 2);
+  assert.equal(recipeById('potato-field').stub, true);
+  assert.equal(LOOP_OFFSETS.peelToFeed.maxFraction, 0.4);
+  assert.equal(LOOP_OFFSETS.frassToFert.maxFraction, 0.5);
+  const flow = flowModel();
+  assert.deepEqual(flow.stages.map(s => s.id), ['potato-field', 'starch-mill', 'grub-culture']);
+  assert.ok(flow.stages[1].outputs.some(o => o.id === 'peel'));
+  assert.ok(flow.offsets.some(o => o.id === 'peelToFeed'));
+  assert.equal(flow.products.some(p => p.id === 'bsf'), false);
+
+  resetGame();
+  assert.equal(DAY_SECONDS, 60);
+  assert.equal(MACHINE_MPS, 2.8);
+  const west = { hub: false, bi: L.HUBX - 1, bj: L.HUBZ, fi: 1, fj: 1, x: -400, z: 40 };
+  economy.revenue = 0;
+  assert.equal(startMill(west).reason, 'money');
+  assert.equal(startMill({ hub: true, bi: L.HUBX, bj: L.HUBZ, x: 0, z: 0 }).reason, 'hub');
+  assert.equal(startMill({ hub: false, bi: L.HUBX + 1, bj: L.HUBZ, x: 500, z: 0 }).reason, 'grub');
+  const cost = deviceById('mill').buildCost;
+  const util = recipeById('starch-mill').utilities.water + recipeById('starch-mill').utilities.power;
+  economy.revenue = cost + util;
+  assert.equal(startMill(west).ok, true);
+  assert.equal(economy.revenue, util);
+  assert.equal(millWatch().state, 'build');
+  assert.equal(orderProcess().reason, 'building');
+  step(deviceById('mill').buildDays * DAY_SECONDS, 0, 1);
+  assert.equal(millWatch().state, 'ready');
+  assert.equal(orderProcess().reason, 'potato');
+  const liters = Math.round(FIELD_HA * 44000);
+  warehouse.push({ id: 80, crop: 'potato', name: '中熟商品薯', liters, listPrice: listed, unit: 'L', i: 1, j: 1, t: 0 });
+  const batch = recipeById('starch-mill').inputs.find(i => i.id === 'potato').qty;
+  assert.equal(orderProcess().ok, true);
+  assert.equal(economy.revenue, 0);
+  assert.equal(potatoStock(), liters - batch);
+  assert.equal(millWatch().state, 'job');
+  step(recipeById('starch-mill').timeDays * DAY_SECONDS, 0, 1);
+  const starch = warehouse.find(lot => lot.crop === 'starch');
+  assert.ok(starch);
+  assert.equal(starch.listPrice, productById('starch').sellPrice);
+  assert.equal(starch.name, '土豆淀粉');
+  assert.equal(stores.peel, recipeById('starch-mill').outputs.find(o => o.id === 'peel').qty);
+  assert.equal(sellLot(starch.id).listPrice, productById('starch').sellPrice);
+  assert.equal(economy.revenue, productById('starch').sellPrice);
+
+  stores.feed = 0;
+  stores.peel = 4;
+  assert.equal(startCulture(0, 'grub').reason, 'feed');
+  assert.equal(stores.peel, 4);
+  stores.feed = 0.6;
+  const beforeRev = economy.revenue;
+  const started = startCulture(0, 'grub');
+  assert.equal(started.ok, true);
+  assert.ok(Math.abs(stores.feed) < 1e-9, stores.feed);
+  assert.equal(stores.peel, 0);
+  assert.ok(economy.revenue < beforeRev, 'grub utilities burn when the purse can pay');
+  step(65 * DAY_SECONDS, 0, 1);
+  const grub = harvestCulture(0);
+  assert.equal(grub.ok, true);
+  assert.equal(grub.lot.listPrice, 2600);
+  assert.equal(stores.frass, 1);
+  assert.equal(sellLot(grub.lot.id).name, '蛴螬');
+
+  const bare = fieldAt(focus.i, focus.j);
+  stores.seed = 1;
+  stores.fertilizer = 0;
+  assert.equal(plantField(bare, 'potato').reason, 'fertilizer');
+  stores.fertilizer = 0.5;
+  assert.equal(fertPlan().fromFert, 0.5);
+  assert.equal(plantField(bare, 'potato').ok, true);
+  assert.ok(Math.abs(stores.fertilizer) < 1e-9);
+  assert.ok(Math.abs(stores.frass) < 1e-9);
+  stores.frass = 5;
+  stores.fertilizer = 0;
+  stores.seed = 1;
+  const other = fields.find(f => f.owned && f !== bare && !f.live && f.state !== 3);
+  assert.equal(plantField(other, 'potato').reason, 'fertilizer');
+
+  const snap = exportSnapshot();
+  assert.equal(snap.schema, 2);
+  assert.equal(snap.devices.length, 1);
+  assert.equal(snap.devices[0].kind, 'mill');
+  delete snap.devices;
+  delete snap.stores.peel;
+  delete snap.stores.frass;
+  stores.peel = 3;
+  assert.equal(applySnapshot(snap), true);
+  assert.equal(devices.length, 0);
+  assert.equal(stores.peel, 0);
+  assert.equal(stores.frass, 0);
+  assert.equal(removeMill().reason, 'none');
 });

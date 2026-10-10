@@ -11,7 +11,8 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { HorizontalTiltShiftShader } from 'three/addons/shaders/HorizontalTiltShiftShader.js';
 import { VerticalTiltShiftShader } from 'three/addons/shaders/VerticalTiltShiftShader.js';
-import { PALETTE, CROPS, TEX_ID, L, fields, harvesters, haulers, drones, step, TRUNKS_X, TRUNKS_Z, depots, inCrater, ROADS, RING, LAYERS, CUT, wrapX, PLOT, economy, focus, signals, log, plantField, quote, setTimeScale, setPaused, paused, exportSnapshot, applySnapshot, fieldAtWorld, fieldAt, fieldOrigin, simTime, worldDay, stores, rigs, fieldVisual, cropWatch, POTATO_DAYS, warehouse, buildings, sellLot, placeBuilding, removeBuilding, rigReadout, SHOP, buySeed, buyItem, SEED_PER_FIELD, FERT_PER_FIELD, resetGame, CULTURES, DECK_CLIMATE, tanks, cultureWatch, startCulture, tendCulture, harvestCulture, BUILDING_KINDS, CULTURE_CELLS } from './_shared.js';
+import { PALETTE, CROPS, TEX_ID, L, fields, harvesters, haulers, drones, step, TRUNKS_X, TRUNKS_Z, depots, inCrater, ROADS, RING, LAYERS, CUT, wrapX, PLOT, economy, focus, signals, log, plantField, quote, setTimeScale, setPaused, paused, exportSnapshot, applySnapshot, fieldAtWorld, fieldAt, fieldOrigin, simTime, worldDay, stores, rigs, fieldVisual, cropWatch, POTATO_DAYS, warehouse, buildings, sellLot, placeBuilding, removeBuilding, rigReadout, SHOP, buySeed, buyItem, SEED_PER_FIELD, FERT_PER_FIELD, resetGame, CULTURES, DECK_CLIMATE, tanks, cultureWatch, startCulture, tendCulture, harvestCulture, BUILDING_KINDS, CULTURE_CELLS, devices, potatoStock, fertPlan, cultureFeedPlan, millWatch, startMill, removeMill, orderProcess } from './_shared.js';
+import { productById } from './products.js';
 import { NOISE, FARM, CURVE_DECL, CURVE_PROJECT } from './glsl.js';
 import { harvesterKit, haulerKit, droneKit, personKit, conveyorKit, depotKit, hubKit, plantGeometry, mastKit, irrigatorKit, growRackKit, tankKit, pumpKit, pipeRackKit, tractorKit, planterKit, hillerKit, topperKit, potatoLifterKit, shedKit, warehouseKit, garageKit, processKit, cultureTankKit, armKit, deckLightKit } from './prefabs.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
@@ -716,6 +717,7 @@ const buildingSets = {
   process: instanced(processKit(), 8),
   shed: instanced(shedKit(), 8),
 };
+const millSet = instanced(processKit(), 2);
 const parked = Array.from({ length: PARKED }, (_, n) => ({ x: HUBC + 85 + (n % 7) * 14.6, z: HUBC + 150 + Math.floor(n / 7) * 22, ang: -Math.PI / 2 }));
 const haulSet = instanced(haulerKit(), haulers.length);
 const droneSet = instanced(droneKit(), drones.length, false);
@@ -1238,6 +1240,7 @@ function applyDeckView() {
   for (const m of hubMeshes) m.visible = false;
   setShown(peopleSet, !on);
   for (const k in buildingSets) setShown(buildingSets[k], !on);
+  setShown(millSet, grow);
   for (const k in rigMesh) setShown(rigMesh[k], !on);
   if (netMesh) netMesh.visible = !on;
   icons.visible = !on;
@@ -1252,7 +1255,7 @@ function applyDeckView() {
 }
 // 交互：左键平移 / 右键旋转 / 滚轮缩放 / WASD / QE / N 昼夜 / M 地图模式 / H 隐藏界面
 let drag = null, ptr = null, selected = null, selNote = '';
-let mode = 'plan', watchRig = null, pickedLot = null, shopPick = 'seed', deckTank = 0, buildAct = 'place', buildKind = 'warehouse', buildPick = null;
+let mode = 'plan', watchRig = null, pickedLot = null, shopPick = 'seed', deckTank = 0, buildAct = 'place', buildKind = 'warehouse', buildPick = null, millPlace = false;
 const raycaster = new THREE.Raycaster();
 function pickFlat(cx, cy) {
   const ndc = new THREE.Vector2((cx / innerWidth) * 2 - 1, -(cy / innerHeight) * 2 + 1);
@@ -1276,6 +1279,16 @@ function onMapClick(cx, cy) {
   const p = pickFlat(cx, cy);
   if (viewLayer !== 'surface' && mode !== 'build') {
     const cell = p ? cellAt(p.x, p.z) : null;
+    if (millPlace && viewLayer === 'grow') {
+      millPlace = false;
+      if (!cell) { toast('点在培育层的单元上'); paintSheet(); return; }
+      const r = startMill({ ...cell, x: (cell.x0 + cell.x1) / 2, z: (cell.z0 + cell.z1) / 2 });
+      if (!r.ok) toast(r.reason === 'hub' ? '加工厂不建在中枢地块上' : r.reason === 'grub' ? '这块是蛴螬培养槽' : r.reason === 'have' ? '已经有一座加工厂' : r.reason === 'money' ? '营收不够' : '不能建在这里');
+      else { toast(`<b>−${fmt(r.cost)}</b>加工厂开工`); saveSoon(); }
+      paintSheet();
+      paintKpi();
+      return;
+    }
     if (cell && cell.tank >= 0 && viewLayer === 'grow') { deckTank = cell.tank; paintSheet(); }
     return;
   }
@@ -1502,9 +1515,10 @@ function paintSheet() {
   if (mode === 'machines') {
     el.innerHTML = `<div class="who"><b>农机</b><span>点一台，镜头跟着它</span></div>` + rigs.map(r => `<button type="button" class="rowbtn${watchRig && watchRig.id === r.id ? ' on' : ''}" data-rig="${r.id}"><b>${r.label}</b><small>${rigLine(r)}</small></button>`).join('');
   } else if (mode === 'store') {
-    const potato = CROPS.find(c => c.id === 'potato');
-    const price = quote(CROPS.indexOf(potato));
-    const quotes = [`<div class="price"><span>${potato.name}</span><em>牌价 ${fmt(price)}</em></div>`].concat(CULTURES.map(c => `<div class="price"><span>${c.name}</span><em>牌价 ${fmt(c.price)}</em></div>`)).join('');
+    const quotes = ['potato', 'starch', 'grub', 'bsf'].map(id => {
+      const p = productById(id);
+      return `<div class="price"><span>${p.nameZh}</span><em>牌价 ${fmt(p.sellPrice)}</em></div>`;
+    }).join('');
     const lots = warehouse.map(lot => {
       const where = lot.i == null || lot.j == null ? '培育层' : fieldCode(lot);
       return `<button type="button" class="rowbtn${pickedLot === lot.id ? ' on' : ''}" data-lot="${lot.id}"><b>${lot.name}</b><small>${where} · ${fmt(lot.liters)} ${lot.unit || 'L'}</small></button>`;
@@ -1538,7 +1552,19 @@ function paintSheet() {
       const line = w ? `${w.name} · 第 ${Math.floor(w.day)} / ${w.days} 日${w.tended ? ' · 臂已照料' : ''}${w.ready ? ' · 可收' : ''}` : '空槽';
       return `<button type="button" class="rowbtn${deckTank === t.id ? ' on' : ''}" data-tank="${t.id}"><b>槽 ${t.id + 1}</b><small>${line}</small></button>`;
     }).join('');
-    el.innerHTML = `<div class="who"><b>培育层</b><span>${DECK_CLIMATE.temp}°C · 湿度 ${DECK_CLIMATE.rh}%</span></div><p class="note">设定值，不是天气。饲料 ${stores.feed}。选一种，臂去照料，到日再收。</p>${rows}<div class="buyline"><button type="button" class="sell" data-spawn="grub">养蛴螬</button><button type="button" class="sell" data-spawn="bsf">养黑水虻</button></div><div class="buyline"><button type="button" class="sell" id="tend">照料</button><button type="button" class="sell" id="harvest">收获</button></div>`;
+    const mill = millWatch();
+    const feed = cultureFeedPlan('grub');
+    const potatoL = Math.round(potatoStock());
+    const need = mill.recipe.inputs.find(i => i.id === 'potato').qty;
+    let millLine = '还没建。点选址，再点一块非中枢的单元。';
+    if (mill.state === 'build') millLine = `施工中 · 还要 ${Math.ceil(mill.left)} 日`;
+    else if (mill.state === 'job') millLine = `正在加工 · 还要 ${Math.ceil(mill.left)} 日`;
+    else if (mill.state === 'ready') millLine = `可以加工 · 仓库土豆 ${potatoL.toLocaleString('en-US')} L · 一批 ${need.toLocaleString('en-US')} L`;
+    const millBtns = mill.state === 'none'
+      ? `<button type="button" class="sell${millPlace ? ' on' : ''}" id="mill-arm">${millPlace ? '取消选址' : '选址建造'}</button>`
+      : `<button type="button" class="sell" id="mill-run"${mill.state === 'ready' ? '' : ' disabled'}>加工一批</button><button type="button" class="sell" id="mill-del"${mill.state === 'job' ? ' disabled' : ''}>拆除</button>`;
+    const feedLine = `开蛴螬：饲料 ${stockText(feed.fromShop)}（皮最多抵 ${Math.round(feed.cap * 100)}%）· 现有皮 ${stockText(stores.peel)} · 饲料 ${stockText(stores.feed)}`;
+    el.innerHTML = `<div class="who"><b>培育层</b><span>${DECK_CLIMATE.temp}°C · 湿度 ${DECK_CLIMATE.rh}%</span></div><p class="note">设定值，不是天气。${feedLine}</p><div class="who"><b>加工厂</b><span data-mill>${millLine}</span></div><p class="note">土豆进，土豆淀粉和土豆皮出。皮可以抵一部分饲料。建造 ${fmt(mill.cost)} · ${mill.days} 日。水电在加工时从营收扣。</p><div class="buyline">${millBtns}</div>${rows}<div class="buyline"><button type="button" class="sell" data-spawn="grub">养蛴螬</button><button type="button" class="sell" data-spawn="bsf">养黑水虻</button></div><div class="buyline"><button type="button" class="sell" id="tend">照料</button><button type="button" class="sell" id="harvest">收获</button></div>`;
   }
 }
 function setMode(id) {
@@ -1596,11 +1622,41 @@ $('sheet').addEventListener('click', e => {
   const tankRow = e.target.closest('[data-tank]');
   if (tankRow) { deckTank = +tankRow.dataset.tank; paintSheet(); return; }
   const spawn = e.target.closest('[data-spawn]');
+  if (e.target.id === 'mill-arm') {
+    millPlace = !millPlace;
+    if (millPlace) toast('点一块非中枢的培育层单元');
+    paintSheet();
+    return;
+  }
+  if (e.target.id === 'mill-run') {
+    const ran = orderProcess();
+    if (!ran.ok) {
+      const why = ran.reason === 'money' ? '营收不够' : ran.reason === 'potato' ? '仓库土豆不够一批' : ran.reason === 'building' ? '加工厂还在施工' : ran.reason === 'busy' ? '这一批还在加工' : '先建加工厂';
+      toast(why);
+    } else { toast(`<b>−${fmt(ran.cost)}</b>开始加工`); saveSoon(); }
+    paintSheet();
+    paintKpi();
+    return;
+  }
+  if (e.target.id === 'mill-del') {
+    const gone = removeMill();
+    if (!gone.ok) toast(gone.reason === 'busy' ? '这一批还在加工' : '没有加工厂');
+    else { toast('加工厂已拆除'); saveSoon(); }
+    paintSheet();
+    return;
+  }
   if (spawn) {
     const started = startCulture(deckTank, spawn.dataset.spawn);
     if (!started.ok) toast(started.reason === 'feed' ? '饲料不足' : started.reason === 'busy' ? '这口槽已经在养' : '不能开始');
-    else { toast(`${started.name}已入槽`); orderArm(deckTank, 'tend'); saveSoon(); }
+    else {
+      const extra = started.peel ? ` · 皮 −${stockText(started.peel)}` : '';
+      const bill = started.utility ? ` · 水电 −${fmt(started.utility)}` : '';
+      toast(`${started.name}已入槽${extra}${bill}`);
+      orderArm(deckTank, 'tend');
+      saveSoon();
+    }
     paintSheet();
+    paintKpi();
     return;
   }
   if (e.target.id === 'tend') {
@@ -1678,6 +1734,13 @@ function fillDeckLabels(want, d) {
     if (viewLayer === 'grow') for (let t = 0; t < tankPos.length; t++) if (Math.abs(tankPos[t].x - x) < 2 && Math.abs(tankPos[t].z - z) < 2) tank = t;
     const hub = Math.floor(f.i / L.PER) === L.HUBX && Math.floor(f.j / L.PER) === L.HUBZ;
     let title = cellCode(f.i, f.j), sub = hub ? '中枢格' : '空格';
+    const mill = devices.find(d => d.kind === 'mill');
+    const millHere = !!(mill && Math.abs(mill.x - x) < 2 && Math.abs(mill.z - z) < 2);
+    if (millHere) {
+      const w = millWatch();
+      title = '加工厂';
+      sub = w.state === 'build' ? '施工中' : w.state === 'job' ? '加工中' : '可加工';
+    }
     if (tank >= 0) {
       const w = cultureWatch(tanks[tank]);
       title = `槽 ${tank + 1}`;
@@ -1761,6 +1824,10 @@ if (Q.has('cut') || VIEW === 'cut') setCut(true, camS.x, camS.z);
 
 const SAVE_KEY = 'ringsheaf.nongshen8.v1';
 const fmt = n => Math.round(n).toLocaleString('en-US');
+function stockText(n) {
+  const r = Math.round((+n || 0) * 10) / 10;
+  return Number.isInteger(r) ? String(r) : r.toFixed(1);
+}
 function saveNow() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(exportSnapshot())); } catch (e) { /* private mode */ } }
 function saveSoon() { clearTimeout(saveSoon.t); saveSoon.t = setTimeout(saveNow, 400); }
 function loadNow() { try { const raw = localStorage.getItem(SAVE_KEY); return raw ? applySnapshot(JSON.parse(raw)) : false; } catch (e) { return false; } }
@@ -1789,7 +1856,7 @@ function paintKpi() {
   $('kpi-day').textContent = String(Math.floor(worldDay));
   $('kpi-seed').textContent = String(stores.seed);
   $('kpi-act').textContent = String(act);
-  $('stores').textContent = `种薯 ${stores.seed} · 肥料 ${stores.fertilizer} · 干燥剂 ${stores.spray}`;
+  $('stores').textContent = `种薯 ${stores.seed} · 肥料 ${stockText(stores.fertilizer)} · 干燥剂 ${stores.spray} · 皮 ${stockText(stores.peel)} · 虫粪 ${stockText(stores.frass)}`;
 }
 function updateDock() {
   const el = $('dock');
@@ -1802,7 +1869,7 @@ function updateDock() {
     if (!f.owned) stat = '邻区快照 · 只读';
     else if (watch) stat = `中熟商品薯 · ${watch.label} · 播后 ${Math.floor(watch.day)} / ${watch.days} 日`;
     else if (stores.seed < SEED_PER_FIELD) stat = '种薯不足。打开商店买一份。';
-    else if (stores.fertilizer < FERT_PER_FIELD) stat = '肥料不足。打开商店买一份。';
+    else if (stores.fertilizer + 1e-9 < fertPlan().fromFert) stat = stores.frass > 0 ? '肥料不足。虫粪只能抵一半。' : '肥料不足。打开商店买一份。';
     else if (f.state === 0) stat = '裸地 · 点种薯，播种机起垄';
     else stat = '定格冠层 · 可改种商品薯';
   }
@@ -1813,6 +1880,12 @@ function updateDock() {
   document.querySelectorAll('#selbtns button').forEach(b => {
     b.disabled = !f.owned;
     b.classList.toggle('on', !!watch && stores.seed >= SEED_PER_FIELD);
+    const small = b.querySelector('small');
+    if (small && b.dataset.crop === 'potato') {
+      const fert = fertPlan();
+      const fertTxt = Math.abs(fert.fromFert - 1) < 1e-6 ? '1' : stockText(fert.fromFert);
+      small.textContent = `种薯 ${SEED_PER_FIELD} · 肥料 ${fertTxt} · ${POTATO_DAYS} 日 · ${fmt(quote(CROPS.findIndex(c => c.id === 'potato')))}`;
+    }
   });
 }
 function paintRates() {
@@ -1855,6 +1928,7 @@ $('reset').addEventListener('click', () => askReset(true));
 $('reset-no').addEventListener('click', () => askReset(false));
 $('reset-yes').addEventListener('click', () => {
   askReset(false);
+  millPlace = false;
   resetGame();
   try { localStorage.removeItem(SAVE_KEY); } catch (e) { /* private mode */ }
   clearTimeout(saveSoon.t);
@@ -2104,6 +2178,9 @@ function frame(now) {
     for (let i = 0; i < n; i++) setInst(set, i, list[i].x, 0, list[i].z, list[i].ang || 0);
     setCount(set, n);
   }
+  const mill = devices.find(x => x.kind === 'mill');
+  if (viewLayer === 'grow' && mill) setInst(millSet, 0, mill.x, LAYERS[1].floor, mill.z, 0, 2.4);
+  setCount(millSet, viewLayer === 'grow' && mill ? 1 : 0);
   if (viewLayer !== 'surface' && hoverPtr && !drag) {
     const hp = pickFlat(hoverPtr.x, hoverPtr.y);
     deckHover = hp ? cellAt(hp.x, hp.z) : null;
@@ -2150,11 +2227,30 @@ function frame(now) {
     const r = rigs.find(x => x.id === +el.parentElement.dataset.rig);
     if (r) el.textContent = rigLine(r);
   });
-  if (mode === 'deck') document.querySelectorAll('#sheet [data-tank] small').forEach(el => {
-    const tank = tanks[+el.parentElement.dataset.tank];
-    const w = cultureWatch(tank);
-    el.textContent = w ? `${w.name} · 第 ${Math.floor(w.day)} / ${w.days} 日${w.tended ? ' · 臂已照料' : ''}${w.ready ? ' · 可收' : ''}` : '空槽';
-  });
+  if (mode === 'deck') {
+    document.querySelectorAll('#sheet [data-tank] small').forEach(el => {
+      const tank = tanks[+el.parentElement.dataset.tank];
+      const w = cultureWatch(tank);
+      el.textContent = w ? `${w.name} · 第 ${Math.floor(w.day)} / ${w.days} 日${w.tended ? ' · 臂已照料' : ''}${w.ready ? ' · 可收' : ''}` : '空槽';
+    });
+    const millEl = document.querySelector('#sheet [data-mill]');
+    if (millEl) {
+      const w = millWatch();
+      const potatoL = Math.round(potatoStock());
+      const need = w.recipe.inputs.find(i => i.id === 'potato').qty;
+      let line = '还没建。点选址，再点一块非中枢的单元。';
+      if (w.state === 'build') line = `施工中 · 还要 ${Math.ceil(w.left)} 日`;
+      else if (w.state === 'job') line = `正在加工 · 还要 ${Math.ceil(w.left)} 日`;
+      else if (w.state === 'ready') line = `可以加工 · 仓库土豆 ${potatoL.toLocaleString('en-US')} L · 一批 ${need.toLocaleString('en-US')} L · 皮 ${stockText(stores.peel)}`;
+      if (millEl.textContent !== line) {
+        const was = millEl.textContent;
+        millEl.textContent = line;
+        const run = document.getElementById('mill-run');
+        if (run) run.disabled = w.state !== 'ready';
+        if ((was.startsWith('正在加工') || was.startsWith('施工中')) && w.state === 'ready') paintSheet();
+      }
+    }
+  }
   const mpp = d * 2 * Math.tan(15 * DEG) / innerHeight; const [m, px] = niceScale(mpp);
   $('scalebar').style.width = px.toFixed(0) + 'px'; $('scaletxt').textContent = m >= 1000 ? (m / 1000) + ' km' : m + ' m';
   updateLabels(d);
@@ -2178,6 +2274,7 @@ window.__farm = {
   economy, stores, focus, fields, harvesters, rigs, log, CROPS, PLOT, quote, fieldAtWorld, project, pick: pickFlat,
   warehouse, buildings, sellLot, placeBuilding, removeBuilding, buySeed, buyItem, resetGame, shop: SHOP,
   cultures: CULTURES, tanks, climate: DECK_CLIMATE, startCulture, tendCulture, harvestCulture, cultureWatch,
+  devices, potatoStock, fertPlan, cultureFeedPlan, millWatch, startMill, removeMill, orderProcess, products: productById,
   deck(on) { visitDeck(on == null ? !camS.deck : !!on); },
   get onDeck() { return !!camS.deck; },
   snapshot: exportSnapshot, plant: doPlant, select: (i, j) => selectField(fieldAt(i, j)),

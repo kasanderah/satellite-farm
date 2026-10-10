@@ -2,6 +2,7 @@
 //  环穗 (Ringsheaf) · v3.1 「环带殖民卫星」（轨道制图 × 冷静工业）
 //  _shared.js —— 色板 / 作物参数 / 农场布局 / 自动化模拟（纯数据与逻辑，不含渲染）
 // =====================================================================
+import { productById, recipeById, deviceById, shopRows, utilityCost, LOOP_OFFSETS } from './products.js';
 
 // ---------- ① 色板（来自 art-ref 报告 5.4 节，只允许使用这些键名） ----------
 export const PALETTE = {
@@ -96,6 +97,8 @@ export function inPlotBlock(bi, bj) { return bi >= PLOT.bi0 && bi <= PLOT.bi1 &&
 export function quote(crop) {
   const c = CROPS[crop];
   if (!c?.plantable) return 0;
+  const listed = productById(c.id)?.sellPrice;
+  if (listed != null) return listed;
   return Math.round(FIELD_HA * c.yieldL * c.price / 1000);
 }
 // ---------- ④b 垂直分层（地表 + 地下各层）。新增一层：在这里加一项，并在 main.js 的 DECK_BUILDERS 里给它写内容 ----------
@@ -190,23 +193,20 @@ export function passWorldDays() {
 }
 export const economy = { revenue: 0, timeScale: 1 };
 // 一块田用一份种薯、一份肥料。新游戏只带这一份，之后到商店买。价格是占位，和营收同一记账单位。
-export const SEED_PER_FIELD = 1;
-export const FERT_PER_FIELD = 1;
-export const SHOP = [
-  { id: 'seed', name: '种薯', price: 1800 },
-  { id: 'fertilizer', name: '肥料', price: 900 },
-  { id: 'feed', name: '饲料', price: 800 },
-];
+const fieldRecipe = recipeById('potato-field');
+export const SEED_PER_FIELD = fieldRecipe.inputs.find(i => i.id === 'seed').qty;
+export const FERT_PER_FIELD = fieldRecipe.inputs.find(i => i.id === 'fertilizer').qty;
+export const SHOP = shopRows();
 const START_FERTILIZER = FERT_PER_FIELD;
 const START_SPRAY = 6;
 const START_FEED = 2;
-export const stores = { seed: SEED_PER_FIELD, fertilizer: START_FERTILIZER, spray: START_SPRAY, feed: START_FEED };
-// 培育层两种蛋白。天数取自发表的幼虫历期，牌价是占位，不跟行情走。
+export const stores = { seed: SEED_PER_FIELD, fertilizer: START_FERTILIZER, spray: START_SPRAY, feed: START_FEED, peel: 0, frass: 0 };
+// 培育层两种蛋白。天数取自发表的幼虫历期，牌价读产品表。
 // 蛴螬：白星花金龟 Protaetia brevitarsis 幼虫，30°C 发酵基质上幼虫期 64.8 日，这里记 65 日。
 // 黑水虻：Hermetia illucens，30°C 配方饲料上幼虫期 12.8 日，这里记 13 日。
 export const CULTURES = [
-  { id: 'grub', name: '蛴螬', days: 65, price: 2600 },
-  { id: 'bsf', name: '黑水虻', days: 13, price: 1400 },
+  { id: 'grub', name: productById('grub').nameZh, days: recipeById('grub-culture').timeDays, price: productById('grub').sellPrice },
+  { id: 'bsf', name: productById('bsf').nameZh, days: 13, price: productById('bsf').sellPrice },
 ];
 export const DECK_CLIMATE = { temp: 30, rh: 70 };
 export const TANK_COUNT = 4;
@@ -221,8 +221,10 @@ export const BUILDING_KINDS = {
 };
 export const warehouse = [];
 export const buildings = [];
+export const devices = [];
 let nextLot = 1;
 let nextBuilding = 1;
+let nextDevice = 1;
 export let paused = false;
 export function setPaused(v) { paused = !!v; }
 export let simTime = 0;
@@ -693,6 +695,117 @@ export function onHubParcel(x, z) {
 function blankTanks() {
   for (const t of tanks) { t.species = null; t.startedAt = 0; t.tended = false; }
 }
+function potatoLiters() {
+  let n = 0;
+  for (const lot of warehouse) if (lot.crop === 'potato') n += +lot.liters || 0;
+  return n;
+}
+export function potatoStock() { return potatoLiters(); }
+function takePotato(liters) {
+  let left = liters;
+  for (let i = warehouse.length - 1; i >= 0 && left > 1e-6; i--) {
+    const lot = warehouse[i];
+    if (lot.crop !== 'potato' || !(lot.liters > 0)) continue;
+    const take = Math.min(lot.liters, left);
+    const value = lot.listPrice * (take / lot.liters);
+    lot.liters -= take;
+    lot.listPrice = Math.max(0, Math.round(lot.listPrice - value));
+    left -= take;
+    if (lot.liters <= 1e-3) warehouse.splice(i, 1);
+  }
+}
+function payUtility(utilities, block) {
+  const cost = utilityCost(utilities);
+  if (!(cost > 0)) return { ok: true, cost: 0 };
+  if (!(economy.revenue >= cost)) {
+    if (block) return { ok: false, reason: 'money', cost };
+    return { ok: true, cost: 0, deferred: true, listed: cost };
+  }
+  economy.revenue -= cost;
+  log.push({ type: 'utility', pay: cost, t: worldDay });
+  return { ok: true, cost };
+}
+export function fertPlan() {
+  const offset = LOOP_OFFSETS.frassToFert;
+  const need = FERT_PER_FIELD;
+  const use = Math.min(stores.frass, offset.frassPerFullOffset);
+  const cover = offset.frassPerFullOffset > 0 ? (use / offset.frassPerFullOffset) * offset.maxFraction : 0;
+  return { fromFert: need - cover, frass: use, cover, cap: offset.maxFraction };
+}
+export function cultureFeedPlan(speciesId) {
+  if (speciesId !== 'grub') return { fromShop: 1, peel: 0, cover: 0, cap: 0, utility: 0 };
+  const offset = LOOP_OFFSETS.peelToFeed;
+  const recipe = recipeById('grub-culture');
+  const need = recipe.inputs.find(i => i.id === 'feed').qty;
+  const use = Math.min(stores.peel, offset.peelPerFullOffset);
+  const cover = offset.peelPerFullOffset > 0 ? (use / offset.peelPerFullOffset) * offset.maxFraction : 0;
+  return { fromShop: need - cover, peel: use, cover, cap: offset.maxFraction, utility: utilityCost(recipe.utilities) };
+}
+export function millWatch() {
+  const dev = deviceById('mill');
+  const recipe = recipeById(dev.recipe);
+  const mill = devices.find(d => d.kind === 'mill') || null;
+  if (!mill) return { state: 'none', cost: dev.buildCost, days: dev.buildDays, name: dev.nameZh, recipe };
+  if (mill.job) return { state: 'job', mill, left: Math.max(0, mill.job.doneAt - worldDay), cost: dev.buildCost, days: dev.buildDays, name: dev.nameZh, recipe };
+  if (worldDay + 1e-9 < mill.readyAt) return { state: 'build', mill, left: mill.readyAt - worldDay, cost: dev.buildCost, days: dev.buildDays, name: dev.nameZh, recipe };
+  return { state: 'ready', mill, left: 0, cost: dev.buildCost, days: dev.buildDays, name: dev.nameZh, recipe };
+}
+export function startMill(cell) {
+  if (devices.some(d => d.kind === 'mill')) return { ok: false, reason: 'have' };
+  if (!cell || cell.hub) return { ok: false, reason: 'hub' };
+  if (cell.bi === L.HUBX + 1 && cell.bj === L.HUBZ) return { ok: false, reason: 'grub' };
+  const dev = deviceById('mill');
+  if (!(economy.revenue >= dev.buildCost)) return { ok: false, reason: 'money', cost: dev.buildCost };
+  economy.revenue -= dev.buildCost;
+  const mill = {
+    id: nextDevice++, kind: 'mill', name: dev.nameZh,
+    x: +cell.x || 0, z: +cell.z || 0, bi: cell.bi, bj: cell.bj, fi: cell.fi, fj: cell.fj,
+    startedAt: worldDay, readyAt: worldDay + dev.buildDays, job: null,
+  };
+  devices.push(mill);
+  log.push({ type: 'build', pay: dev.buildCost, name: mill.name, t: worldDay });
+  return { ok: true, mill, cost: dev.buildCost };
+}
+export function removeMill() {
+  const i = devices.findIndex(d => d.kind === 'mill');
+  if (i < 0) return { ok: false, reason: 'none' };
+  if (devices[i].job) return { ok: false, reason: 'busy' };
+  const mill = devices.splice(i, 1)[0];
+  return { ok: true, mill };
+}
+export function orderProcess() {
+  const watch = millWatch();
+  if (watch.state === 'none') return { ok: false, reason: 'none' };
+  if (watch.state === 'build') return { ok: false, reason: 'building', left: watch.left };
+  if (watch.state === 'job') return { ok: false, reason: 'busy' };
+  const recipe = watch.recipe;
+  const need = recipe.inputs.find(i => i.id === 'potato').qty;
+  const have = potatoLiters();
+  if (have + 1e-6 < need) return { ok: false, reason: 'potato', need, have };
+  const util = payUtility(recipe.utilities, true);
+  if (!util.ok) return util;
+  takePotato(need);
+  watch.mill.job = { startedAt: worldDay, doneAt: worldDay + recipe.timeDays, potato: need };
+  return { ok: true, doneAt: watch.mill.job.doneAt, cost: util.cost };
+}
+function settleDevices() {
+  const recipe = recipeById('starch-mill');
+  const starch = productById('starch');
+  const peelOut = recipe.outputs.find(o => o.id === 'peel');
+  const starchOut = recipe.outputs.find(o => o.id === 'starch');
+  for (const mill of devices) {
+    if (mill.kind !== 'mill' || !mill.job || worldDay + 1e-9 < mill.job.doneAt) continue;
+    const lot = {
+      id: nextLot++, crop: 'starch', name: starch.nameZh, kind: 'starch',
+      liters: starchOut.qty, unit: starchOut.unit || starch.unit,
+      listPrice: starch.sellPrice, i: null, j: null, t: worldDay,
+    };
+    warehouse.push(lot);
+    stores.peel += peelOut.qty;
+    log.push({ type: 'store', pay: 0, listPrice: lot.listPrice, crop: 'starch', name: lot.name, i: null, j: null, t: worldDay });
+    mill.job = null;
+  }
+}
 function restoreStarters() {
   buildings.length = 0;
   nextBuilding = 1;
@@ -735,12 +848,17 @@ export function startCulture(tankId, speciesId) {
   const spec = CULTURES.find(c => c.id === speciesId);
   if (!tank || !spec) return { ok: false, reason: 'tank' };
   if (tank.species) return { ok: false, reason: 'busy' };
-  if (stores.feed < 1) return { ok: false, reason: 'feed' };
-  stores.feed -= 1;
+  const plan = cultureFeedPlan(spec.id);
+  if (stores.feed + 1e-9 < plan.fromShop) return { ok: false, reason: 'feed', need: plan.fromShop };
+  const recipe = spec.id === 'grub' ? recipeById('grub-culture') : null;
+  // 营收够就扣水电。不够仍可开槽，避免开局和旧存档被挡住。加工厂那一批则必须先付。
+  const util = recipe ? payUtility(recipe.utilities, false) : { ok: true, cost: 0 };
+  stores.feed -= plan.fromShop;
+  stores.peel -= plan.peel;
   tank.species = spec.id;
   tank.startedAt = worldDay;
   tank.tended = false;
-  return { ok: true, name: spec.name, day: worldDay };
+  return { ok: true, name: spec.name, day: worldDay, feed: plan.fromShop, peel: plan.peel, utility: util.cost || 0, deferred: !!util.deferred };
 }
 export function tendCulture(tankId) {
   const tank = tanks[tankId];
@@ -754,14 +872,19 @@ export function harvestCulture(tankId) {
   if (!tank?.species || !watch) return { ok: false, reason: 'empty' };
   if (!watch.ready) return { ok: false, reason: 'early' };
   const spec = CULTURES.find(c => c.id === tank.species);
+  const product = productById(spec.id);
   // TODO: 同一地块的顶灯、门灯、墙灯跟最近一次开始的单元。光照不对或弱光应减产。
   // 蛴螬培养槽会把所在地块画成弱光，但这里的公斤数仍是固定值，还没有乘光照。
   const lot = {
     id: nextLot++, crop: spec.id, name: spec.name, kind: 'protein',
-    liters: spec.id === 'bsf' ? 420 : 180, unit: 'kg',
-    listPrice: spec.price, i: null, j: null, t: worldDay,
+    liters: product.lotKg, unit: product.unit || 'kg',
+    listPrice: product.sellPrice, i: null, j: null, t: worldDay,
   };
   warehouse.push(lot);
+  if (spec.id === 'grub') {
+    const frass = recipeById('grub-culture').outputs.find(o => o.id === 'frass');
+    stores.frass += frass.qty;
+  }
   log.push({ type: 'store', pay: 0, listPrice: lot.listPrice, crop: spec.id, name: spec.name, i: null, j: null, t: worldDay });
   tank.species = null;
   tank.startedAt = 0;
@@ -789,7 +912,11 @@ export function resetGame() {
   stores.fertilizer = START_FERTILIZER;
   stores.spray = START_SPRAY;
   stores.feed = START_FEED;
+  stores.peel = 0;
+  stores.frass = 0;
+  devices.length = 0;
   nextLot = 1;
+  nextDevice = 1;
   blankTanks();
   restoreStarters();
   for (const r of rigs) parkRig(r);
@@ -827,9 +954,13 @@ export function plantField(f, cropId) {
   const crop = typeof cropId === 'number' ? cropId : CROPS.findIndex(c => c.id === cropId);
   if (crop < 0 || !CROPS[crop].plantable) return { ok: false, reason: 'crop' };
   if (stores.seed < SEED_PER_FIELD) return { ok: false, reason: 'seed' };
-  if (stores.fertilizer < FERT_PER_FIELD) return { ok: false, reason: 'fertilizer' };
+  const fert = fertPlan();
+  if (stores.fertilizer + 1e-9 < fert.fromFert) return { ok: false, reason: 'fertilizer' };
+  // 田面水费在产品表里（potato-field.utilities.water）。stub 为真时不扣，开局营收是 0 仍能播种。
+  if (!fieldRecipe.stub) payUtility(fieldRecipe.utilities, false);
   stores.seed -= SEED_PER_FIELD;
-  stores.fertilizer -= FERT_PER_FIELD;
+  stores.fertilizer -= fert.fromFert;
+  stores.frass -= fert.frass;
   f.crop = crop; f.state = 1; f.g = 0; f.s = 0; f.timer = 0;
   f.live = true; f.hold = false; f.frozen = false;
   f.plantedAt = worldDay; f.paid = false; f.sprayed = false; f.claimed = false;
@@ -847,10 +978,15 @@ export function exportSnapshot() {
     worldDay,
     revenue: economy.revenue,
     timeScale: economy.timeScale,
-    stores: { seed: stores.seed, fertilizer: stores.fertilizer, spray: stores.spray, feed: stores.feed },
+    stores: { seed: stores.seed, fertilizer: stores.fertilizer, spray: stores.spray, feed: stores.feed, peel: stores.peel, frass: stores.frass },
     warehouse: warehouse.map(lot => ({ ...lot })),
     keepBuildings: true,
     buildings: buildings.map(b => ({ id: b.id, kind: b.kind, name: b.name, x: +b.x.toFixed(2), z: +b.z.toFixed(2), ang: b.ang || 0 })),
+    devices: devices.map(d => ({
+      id: d.id, kind: d.kind, name: d.name, x: +d.x.toFixed(2), z: +d.z.toFixed(2),
+      bi: d.bi, bj: d.bj, fi: d.fi, fj: d.fj, startedAt: d.startedAt || 0, readyAt: d.readyAt || 0,
+      job: d.job ? { startedAt: d.job.startedAt, doneAt: d.job.doneAt, potato: d.job.potato } : null,
+    })),
     tanks: tanks.map(t => ({ id: t.id, species: t.species, startedAt: t.startedAt || 0, tended: !!t.tended })),
     fields: fields.filter(f => f.owned).map(f => ({
       i: f.i, j: f.j, crop: f.crop, dir: f.dir, state: f.state,
@@ -901,6 +1037,8 @@ export function applySnapshot(data) {
     stores.fertilizer = +data.stores.fertilizer || 0;
     stores.spray = +data.stores.spray || 0;
     stores.feed = Number.isFinite(+data.stores.feed) ? +data.stores.feed : START_FEED;
+    stores.peel = Number.isFinite(+data.stores.peel) ? +data.stores.peel : 0;
+    stores.frass = Number.isFinite(+data.stores.frass) ? +data.stores.frass : 0;
   }
   if (data.timeScale) setTimeScale(data.timeScale);
   warehouse.length = 0;
@@ -916,6 +1054,19 @@ export function applySnapshot(data) {
     nextBuilding = Math.max(nextBuilding, (+b.id || 0) + 1);
   }
   if (!data.keepBuildings) ensureStarters();
+  devices.length = 0;
+  nextDevice = 1;
+  for (const d of data.devices || []) {
+    if (d.kind !== 'mill') continue;
+    if (d.bi === L.HUBX && d.bj === L.HUBZ) continue;
+    devices.push({
+      id: +d.id || nextDevice++, kind: 'mill', name: d.name || deviceById('mill').nameZh,
+      x: +d.x || 0, z: +d.z || 0, bi: d.bi, bj: d.bj, fi: d.fi, fj: d.fj,
+      startedAt: +d.startedAt || 0, readyAt: +d.readyAt || 0,
+      job: d.job ? { startedAt: +d.job.startedAt || 0, doneAt: +d.job.doneAt || 0, potato: +d.job.potato || 0 } : null,
+    });
+    nextDevice = Math.max(nextDevice, (+d.id || 0) + 1);
+  }
   if (Array.isArray(data.tanks)) {
     blankTanks();
     for (const t of data.tanks) {
@@ -982,6 +1133,7 @@ export function step(dt, t, scale = 1) {
   }
   worldDay = start + days;
   simTime = worldDay;
+  settleDevices();
   stepHaulers(dt);
   stepDrones(t);
 }

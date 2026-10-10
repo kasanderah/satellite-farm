@@ -14,3 +14,4 @@ async function pack(entry, template, out) {
 }
 await pack('src/main.js', 'src/template.html', 'index.html');
 await pack('src/lab.js', 'src/lab-template.html', 'asset-lab.html');
+await pack('src/flow.js', 'src/flow-template.html', 'flow.html');

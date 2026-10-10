@@ -31,7 +31,7 @@ body.nohud .hud,body.nohud #labels{opacity:0!important}
 #tiers button b{display:block;font-weight:400;font-size:12px;letter-spacing:.2em}
 #tiers button small{display:block;font-size:9px;letter-spacing:.24em;color:var(--mut)}
 #tiers button.on{opacity:1;border-bottom-color:var(--sig)}
-#sheet{left:50%;bottom:78px;transform:translateX(-50%);width:340px;max-height:280px;overflow:auto;display:none;padding:10px 12px 12px}
+#sheet{left:50%;bottom:78px;transform:translateX(-50%);width:380px;max-height:46vh;overflow:auto;display:none;padding:10px 12px 12px}
 #sheet.on{display:block}
 #sheet .who{display:flex;flex-direction:column;gap:3px;font-size:12px;letter-spacing:.1em}
 #sheet .who b{font-weight:500}#sheet .who span,#sheet .note{color:var(--mut);letter-spacing:.06em;font-size:11px;line-height:1.5}
@@ -76,6 +76,10 @@ body.underground #legend{display:none}
 .hit{pointer-events:auto}
 #admin-toggle{top:78px;left:22px;font-family:inherit;font-size:10px;letter-spacing:.22em;color:var(--mut);background:transparent;border:0;cursor:pointer;padding:0}
 #admin-toggle:hover{color:var(--fg)}
+#flow-link{top:78px;left:62px;font-size:10px;letter-spacing:.22em;color:var(--mut);text-decoration:none}
+#flow-link:hover{color:var(--fg)}
+#admin a{font-family:inherit;color:var(--fg);background:transparent;border:1px solid var(--line);cursor:pointer;letter-spacing:.08em;padding:3px 8px;font-size:12px;text-decoration:none}
+#admin a:hover{border-color:var(--sig)}
 #admin{top:98px;left:20px;display:none;flex-direction:column;gap:8px;padding:10px 12px;min-width:228px}
 #admin.on{display:flex}
 #admin .ah{display:flex;justify-content:space-between;font-size:10px;letter-spacing:.2em;color:var(--mut)}
@@ -142,7 +146,8 @@ body.underground #legend{display:none}
 <div class="hud panel" id="rigread"></div>
 <div class="hud" id="clock"></div>
 <button type="button" class="hud hit" id="admin-toggle">管理</button>
-<div class="hud panel hit" id="admin"><div class="ah"><span>管理</span><span>F2</span></div><div id="rates"></div><div class="arow"><button type="button" id="pause">暂停</button><button type="button" id="assets-open">资产</button></div><p class="ask" id="reset-ask">清空本机存档，回到开局？仓棚和仓库都会去掉。</p><div class="arow" id="reset-go"><button type="button" id="reset-yes">清空</button><button type="button" id="reset-no">留下</button></div><div class="arow" id="reset-row"><button type="button" id="reset">重开</button></div></div>
+<a class="hud hit" id="flow-link" href="flow.html">流向</a>
+<div class="hud panel hit" id="admin"><div class="ah"><span>管理</span><span>F2</span></div><div id="rates"></div><div class="arow"><button type="button" id="pause">暂停</button><button type="button" id="assets-open">资产</button><a href="flow.html">流向</a></div><p class="ask" id="reset-ask">清空本机存档，回到开局？仓棚和仓库都会去掉。</p><div class="arow" id="reset-go"><button type="button" id="reset-yes">清空</button><button type="button" id="reset-no">留下</button></div><div class="arow" id="reset-row"><button type="button" id="reset">重开</button></div></div>
 <div class="hud" id="stores"></div>
 <div class="hud" id="fps"></div>
 <div class="hud panel" id="legend"></div>
