@@ -241,7 +241,15 @@ function buildCultPlot(scheme, opts) {
   apron.position.y = -0.04;
   apron.receiveShadow = true;
   if (!(opts && opts.game)) g.add(apron);
-  const floor = box(U.plot, 0.5, U.plot, 0, -0.25, 0, floorMat);
+  // 一整块地板只有四个角。环带一卷，角抬起来，这面灰板就盖住台上的白台。游戏里按约 48 m 切开，让它留在白台下面。
+  let floor;
+  if (opts && opts.game) {
+    const seg = Math.max(8, Math.ceil(U.plot / 48));
+    floor = new THREE.Mesh(new THREE.BoxGeometry(U.plot, 0.5, U.plot, seg, 1, seg), floorMat);
+    floor.position.set(0, -0.25, 0);
+  } else {
+    floor = box(U.plot, 0.5, U.plot, 0, -0.25, 0, floorMat);
+  }
   floor.castShadow = false;
   g.add(floor);
 
