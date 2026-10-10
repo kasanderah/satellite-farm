@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>环穗 (Ringsheaf)</title>
+<style>
+@font-face{font-family:"BarlowSC";font-weight:400;src:url(data:font/woff;base64,__FONT_R__) format("woff")}
+@font-face{font-family:"BarlowSC";font-weight:500;src:url(data:font/woff;base64,__FONT_M__) format("woff")}
+:root{--void:rgba(10,12,20,.75);--line:rgba(188,195,196,.4);--fg:#e8d8d0;--mut:#a2998a;--sig:#d8693c;--data:#85eed9;
+  --font:"BarlowSC","PingFang SC","Microsoft YaHei","Noto Sans CJK SC","Noto Sans SC","WenQuanYi Micro Hei","Droid Sans Fallback",sans-serif}
+html,body{margin:0;height:100%;overflow:hidden;background:#0a0c14;font-family:var(--font);color:var(--fg);-webkit-font-smoothing:antialiased}
+#app canvas{display:block;cursor:grab}#app canvas:active{cursor:grabbing}
+.hud{position:fixed;pointer-events:none;z-index:3;transition:opacity .4s}
+body.nohud .hud,body.nohud #labels{opacity:0!important}
+.panel{background:var(--void);border:1px solid var(--line)}
+.cap{font-size:10px;letter-spacing:.22em;text-transform:uppercase;color:var(--mut)}
+/* 左上：品牌 */
+#brand{top:18px;left:20px;display:flex;align-items:center;gap:12px;padding:9px 14px 9px 12px}
+#brand .mk{width:22px;height:22px;border:1px solid var(--fg);position:relative}
+#brand .mk:after{content:"";position:absolute;left:5px;top:5px;width:10px;height:10px;background:var(--sig)}
+#brand b{display:block;font-weight:500;font-size:14px;letter-spacing:.26em}
+#brand small{display:block;font-size:10px;letter-spacing:.2em;color:var(--mut);margin-top:2px}
+/* 右上：指标 */
+#kpi{top:18px;right:20px;display:flex;padding:8px 4px}
+#kpi div{padding:0 16px;border-left:1px solid var(--line);min-width:64px}#kpi div:first-child{border-left:0}
+#kpi small{display:block;font-size:10px;letter-spacing:.2em;color:var(--mut)}
+#kpi b{font-weight:400;font-size:19px;letter-spacing:.04em;font-variant-numeric:tabular-nums}
+#kpi b.hv{color:var(--sig)}#kpi em{font-style:normal;font-size:11px;color:var(--mut);margin-left:3px}
+#clock{top:72px;right:22px;font-size:11px;letter-spacing:.24em;color:var(--mut)}
+/* 底部中间：缩放层级 + 比例尺 */
+#tiers{bottom:22px;left:50%;transform:translateX(-50%);display:flex;gap:0;padding:7px 6px}
+#tiers button{font-family:inherit;color:var(--fg);background:transparent;border:0;border-bottom:1px solid transparent;padding:2px 8px;text-align:center;opacity:.45;cursor:pointer;transition:all .3s}
+#tiers button b{display:block;font-weight:400;font-size:12px;letter-spacing:.2em}
+#tiers button small{display:block;font-size:9px;letter-spacing:.24em;color:var(--mut)}
+#tiers button.on{opacity:1;border-bottom-color:var(--sig)}
+#sheet{left:50%;bottom:78px;transform:translateX(-50%);width:380px;max-height:52vh;overflow:auto;display:none;padding:10px 12px 12px}
+#sheet.on{display:block}
+#sheet.wide{width:640px}
+#sheet .split{display:grid;grid-template-columns:1fr 1.15fr;gap:12px;align-items:start}
+#sheet .slots{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+#sheet .slot{display:flex;flex-direction:column;justify-content:flex-end;min-height:64px;text-align:left;padding:6px}
+#sheet .slot b{font-weight:500;font-size:12px;letter-spacing:.06em}
+#sheet .slot small{color:var(--mut);font-size:10px;letter-spacing:.04em}
+#sheet .stage{display:flex;justify-content:space-between;gap:8px;margin-top:6px;font-size:12px;letter-spacing:.06em}
+#sheet .stage i{width:8px;height:8px;display:inline-block;margin-right:6px}
+#sheet input[type=range]{width:100%;accent-color:#d8693c;margin-top:8px}
+#sheet .who{display:flex;flex-direction:column;gap:3px;font-size:12px;letter-spacing:.1em}
+#sheet .who b{font-weight:500}#sheet .who span,#sheet .note{color:var(--mut);letter-spacing:.06em;font-size:11px;line-height:1.5}
+#sheet .note{margin:6px 0 0}
+#sheet .price{display:flex;justify-content:space-between;align-items:baseline;margin-top:8px;font-size:13px;letter-spacing:.12em}
+#sheet .price em{font-style:normal;color:var(--sig);font-size:12px}
+#sheet .rowbtn{display:block;width:100%;text-align:left;margin-top:6px;padding:6px 8px}
+#sheet .rowbtn b{display:block;font-weight:500;font-size:13px;letter-spacing:.12em}
+#sheet .rowbtn small{display:block;color:var(--mut);font-size:10px;letter-spacing:.04em;margin-top:2px}
+#scale{bottom:30px;right:24px;display:flex;align-items:center;gap:10px;font-size:11px;letter-spacing:.16em}
+#scalebar{height:5px;border:1px solid var(--fg);border-top:0}
+/* 左下：作物图例（明度 + 株高） */
+#legend{bottom:22px;left:20px;padding:10px 12px 8px;display:grid;grid-template-columns:1fr 1fr;gap:5px 18px}
+#legend:before{content:"中熟商品薯 · 120 日";grid-column:1/3;font-size:10px;letter-spacing:.2em;color:var(--mut);margin-bottom:3px}
+.lg{display:flex;align-items:center;gap:7px;font-size:12px;letter-spacing:.06em}
+.lg i{width:22px;height:6px;display:block}.lg em{font-style:normal;font-size:10px;color:var(--mut);margin-left:auto}
+#hint{bottom:58px;right:24px;font-size:10px;letter-spacing:.14em;color:var(--mut);text-align:right;line-height:1.7}
+#fps{top:94px;right:22px;font-size:10px;letter-spacing:.2em;color:var(--mut);opacity:.7}
+/* 地表标注 */
+#labels{position:fixed;inset:0;pointer-events:none;z-index:2;transition:opacity .4s}
+#layers{top:84px;right:20px;padding:9px 12px 7px;min-width:236px}
+#layers .lh{font-size:10px;letter-spacing:.2em;color:var(--mut);margin-bottom:5px;display:flex;justify-content:space-between}
+#layers .lh em{font-style:normal;color:var(--mut);opacity:.8}
+#layers .ly{display:grid;grid-template-columns:10px 1fr auto;column-gap:8px;align-items:center;padding:3px 0;opacity:.42;transition:opacity .3s;cursor:pointer}
+#layers .ly i{width:7px;height:7px;outline:1px solid rgba(232,216,208,.55)}
+#layers .ly span{font-size:12px;letter-spacing:.12em}#layers .ly small{grid-column:2;font-size:9px;letter-spacing:.2em;color:var(--mut)}
+#layers .ly em{grid-row:1/3;grid-column:3;font-style:normal;font-size:11px;color:var(--mut);font-variant-numeric:tabular-nums}
+#layers .ly.on{opacity:1}#layers .ly.on i{background:var(--sig)}
+body.cutaway #layers .ly-grow,body.cutaway #layers .ly-equip{opacity:1}body.cutaway #layers .ly-grow i,body.cutaway #layers .ly-equip i{background:var(--sig)}
+body.underground #legend{display:none}
+.lbl.deck{margin:-46px 0 0 16px}
+.lbl{position:absolute;left:0;top:0;white-space:nowrap;opacity:0;will-change:transform;font-size:11px;letter-spacing:.12em;text-shadow:0 1px 2px rgba(10,12,20,.8)}
+.lbl b{font-weight:500}
+.lbl.sec{transform-origin:0 0;margin:-7px 0 0 -18px;color:rgba(232,216,208,.78);font-size:10px;letter-spacing:.3em}
+.lbl.hub{margin:-40px 0 0 22px;padding-left:10px;border-left:1px solid var(--sig)}
+.lbl.hub b{display:block;font-size:13px;letter-spacing:.24em}.lbl.hub small{display:block;color:var(--mut);font-size:10px;letter-spacing:.2em}
+.lbl.fld{margin:-8px 0 0 -40px;display:flex;align-items:center;gap:6px;color:rgba(232,216,208,.9)}
+.lbl.fld i{width:7px;height:7px;display:block;outline:1px solid rgba(232,216,208,.6)}
+.lbl.fld span{color:var(--mut)}.lbl.fld.act span{color:var(--sig)}
+.lbl.veh{margin:-34px 0 0 10px;padding:2px 8px;border-left:1px solid var(--sig);background:var(--void)}
+.lbl.veh span{color:var(--sig);margin-left:8px}
+.hit{pointer-events:auto}
+#admin-toggle{top:78px;left:22px;font-family:inherit;font-size:10px;letter-spacing:.22em;color:var(--mut);background:transparent;border:0;cursor:pointer;padding:0}
+#admin-toggle:hover{color:var(--fg)}
+#flow-link{top:78px;left:62px;font-size:10px;letter-spacing:.22em;color:var(--mut);text-decoration:none}
+#flow-link:hover{color:var(--fg)}
+#admin a{font-family:inherit;color:var(--fg);background:transparent;border:1px solid var(--line);cursor:pointer;letter-spacing:.08em;padding:3px 8px;font-size:12px;text-decoration:none}
+#admin a:hover{border-color:var(--sig)}
+#admin{top:98px;left:20px;display:none;flex-direction:column;gap:8px;padding:10px 12px;min-width:228px}
+#admin.on{display:flex}
+#admin .ah{display:flex;justify-content:space-between;font-size:10px;letter-spacing:.2em;color:var(--mut)}
+#admin.on ~ #stores{top:268px}
+#admin.crop{max-height:74vh;overflow:auto;width:min(440px,92vw)}
+#admin.crop #clockpane{display:none}
+#admin #cropbook{display:none}
+#admin.crop #cropbook{display:block}
+#admin.on.crop ~ #stores{visibility:hidden}
+#cropbook .lead{margin:0;color:var(--mut);font-size:11px;letter-spacing:.04em;line-height:1.5}
+#cropbook .crop{margin-top:10px;padding-top:8px;border-top:1px solid var(--line)}
+#cropbook .crop b{font-weight:500;letter-spacing:.08em;font-size:13px}
+#cropbook .meta{color:var(--mut);font-size:11px;letter-spacing:.04em;line-height:1.5;margin-top:4px}
+#cropbook .io{display:flex;justify-content:space-between;gap:12px;font-size:11px;letter-spacing:.04em;margin-top:2px}
+#cropbook i{width:8px;height:8px;display:inline-block;margin-right:6px}
+#admin .ask{display:none;margin:0;font-size:11px;letter-spacing:.06em;color:var(--mut);line-height:1.5}
+#admin #reset-go{display:none}
+#admin.on-reset .ask,#admin.on-reset #reset-go{display:flex}
+#admin.on-reset .ask{display:block}
+#admin.on-reset #reset-row{display:none}
+#rates{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+#rates input{width:72px;font-family:inherit;font-size:12px;color:var(--fg);background:transparent;border:1px solid var(--line);padding:3px 6px;letter-spacing:.06em}
+#stores{top:100px;left:22px;font-size:11px;letter-spacing:.12em;color:var(--mut);line-height:1.6}
+#rates span{font-size:10px;letter-spacing:.22em;color:var(--mut)}
+#rates button,#dock button,#admin .arow button,#viewer .bar button,#viewer .card,#sheet .rowbtn,#sheet .sell{font-family:inherit;color:var(--fg);background:transparent;border:1px solid var(--line);cursor:pointer;letter-spacing:.08em}
+#rates button,#admin .arow button{padding:3px 8px;font-size:12px}
+#admin .arow{display:flex;gap:6px}
+#viewer{position:fixed;inset:0;z-index:8;display:none;overflow:auto;padding:28px 32px 64px;background:rgba(10,12,20,.9);color:var(--fg)}
+#viewer.on{display:block}
+#viewer .bar{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:8px}
+#viewer h2{margin:0;font-weight:500;font-size:16px;letter-spacing:.28em}
+#viewer .sub{color:var(--mut);font-size:12px;letter-spacing:.08em;margin-top:6px;line-height:1.6}
+#viewer .sec{font-size:10px;letter-spacing:.22em;color:var(--mut);margin:18px 0 8px}
+#viewer .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}
+#viewer .card{display:block;width:100%;text-align:left;padding:8px;background:rgba(10,12,20,.55)}
+#viewer .card b{display:block;font-weight:500;font-size:13px;letter-spacing:.12em;margin-bottom:6px}
+#viewer canvas{width:100%;height:132px;display:block;background:#12141c}
+#viewer .card.on{border-color:var(--sig)}
+#viewer .bar button{padding:4px 12px}
+#dock{left:20px;bottom:198px;padding:10px 12px 12px;width:300px;display:none}
+#dock.on{display:block}
+#dock .who{display:flex;flex-direction:column;gap:3px;font-size:12px;letter-spacing:.1em}
+#dock .who b{font-weight:500}#dock .who span{color:var(--mut);letter-spacing:.06em}
+#dock .row{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px}
+#dock button{padding:6px 8px 5px}
+#dock button b{display:block;font-weight:500;font-size:13px;letter-spacing:.12em}
+#dock button small{display:block;color:var(--mut);font-size:10px;letter-spacing:.04em;margin-top:2px}
+#dock button:hover,#rates button:hover,#admin .arow button:hover,#sheet .rowbtn:hover,#sheet .sell:hover{border-color:var(--sig)}
+#dock button.on,#rates button.on,#admin .arow button.on,#sheet .rowbtn.on,#sheet .sell.on{border-color:var(--sig);color:var(--sig)}
+#sheet .sell{margin-top:8px;padding:6px 10px;width:100%}
+#sheet .buyline{display:flex;gap:6px;margin-top:8px}
+#sheet .qty{width:64px;font-family:inherit;font-size:12px;color:var(--fg);background:transparent;border:1px solid var(--line);padding:6px 8px;letter-spacing:.06em}
+#sheet .buyline .sell{margin-top:0;flex:1}
+#sheet .sell:disabled{opacity:.35;cursor:default}
+#rigread{top:18px;left:50%;transform:translateX(-50%);display:none;padding:8px 14px 9px;min-width:176px}
+#rigread.on{display:block}
+#rigread b{display:block;font-weight:500;font-size:13px;letter-spacing:.16em}
+#rigread small{display:block;color:var(--mut);font-size:11px;letter-spacing:.08em;margin-top:3px}
+#rigread em{font-style:normal;color:var(--sig)}
+#rigbar{height:3px;margin-top:6px;background:rgba(232,216,208,.18)}
+#rigbar i{display:block;height:100%;width:0;background:var(--sig)}
+#dock button:disabled{opacity:.35;cursor:default}
+#bar{height:4px;margin-top:8px;background:rgba(232,216,208,.12);display:flex;gap:1px}
+#bar i{display:block;height:100%;min-width:0}
+#marquee{position:fixed;border:1px solid #d8693c;background:rgba(216,105,60,.16);z-index:6;display:none;pointer-events:none}
+#marquee.on{display:block}
+#planmenu{position:fixed;z-index:7;display:none;padding:8px 10px;min-width:196px}
+#planmenu.on{display:block}
+#picks{position:fixed;inset:0;pointer-events:none;z-index:2}
+#picks i{position:absolute;border:1px solid #d8693c;background:rgba(216,105,60,.12)}
+#toasts{position:fixed;top:78px;right:24px;z-index:5;display:flex;flex-direction:column;gap:6px;align-items:flex-end;pointer-events:none}
+.toast{background:rgba(10,12,20,.82);border:1px solid var(--line);padding:6px 10px;font-size:12px;letter-spacing:.08em}
+.toast b{color:var(--sig);font-weight:500;margin-right:8px}
+@keyframes cred{from{color:#fff}to{color:var(--sig)}}
+#kpi b.tick{animation:cred .7s ease}
+</style></head><body>
+<div id="app"></div>
+<div id="labels"></div>
+<div class="hud panel" id="brand"><div class="mk"></div><div><b>环穗</b><small>Ringsheaf</small></div></div>
+<div class="hud panel" id="kpi"></div>
+<div class="hud panel" id="rigread"></div>
+<div class="hud" id="clock"></div>
+<button type="button" class="hud hit" id="admin-toggle">管理</button>
+<a class="hud hit" id="flow-link" href="flow.html">流向</a>
+<div class="hud panel hit" id="admin"><div class="ah"><span>管理</span><span>F2</span></div><div class="arow" id="admin-tabs"><button type="button" id="tab-clock" class="on">钟</button><button type="button" id="tab-crops">作物</button></div><div id="clockpane"><div id="rates"></div><div class="arow"><button type="button" id="pause">暂停</button><button type="button" id="assets-open">资产</button><a href="flow.html">流向</a></div><p class="ask" id="reset-ask">清空本机存档，回到开局？仓棚和仓库都会去掉。</p><div class="arow" id="reset-go"><button type="button" id="reset-yes">清空</button><button type="button" id="reset-no">留下</button></div><div class="arow" id="reset-row"><button type="button" id="reset">重开</button></div></div><div id="cropbook"></div></div>
+<div class="hud" id="stores"></div>
+<div class="hud" id="fps"></div>
+<div class="hud panel" id="legend"></div>
+<div class="hud panel" id="layers"></div>
+<div class="hud panel hit" id="sheet"></div>
+<div class="hud panel hit" id="tiers"></div>
+<div class="hud panel hit" id="dock"></div>
+<div class="hud" id="toasts"></div>
+<div class="hud" id="hint">选中裸地，点种薯。底部可开作物、规划、仓库、商店、农机店<br>拖动 平移 · 规划时拖框选田、右键指定作物 · 右键 旋转 · 滚轮 缩放 · C 培育层</div>
+<div id="picks"></div>
+<div id="marquee"></div>
+<div class="hud panel hit" id="planmenu"></div>
+<div id="viewer"><div class="bar"><div><h2>资产</h2><div class="sub">当前的薯田阶段、机器和田块。每张卡片是名字加上现在的样子。点一张就能指着它改。这是查看，不能上传。</div></div><button type="button" id="viewer-close">关闭</button></div><div class="sec">商品薯阶段</div><div class="grid" id="view-stages"></div><div class="sec">机器</div><div class="grid" id="view-machines"></div><div class="sec">田块</div><div class="grid" id="view-tiles"></div></div>
+<div class="hud" id="scale"><span id="scaletxt"></span><div id="scalebar"></div></div>
+<script>__BUNDLE__</script>
+</body></html>

@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>环穗 · 产物流向</title>
+<style>
+:root{--void:#0a0c14;--line:rgba(188,195,196,.4);--fg:#e8d8d0;--mut:#a2998a;--sig:#d8693c;--data:#85eed9;
+  --font:"PingFang SC","Microsoft YaHei","Noto Sans CJK SC","Noto Sans SC","WenQuanYi Micro Hei","Droid Sans Fallback",sans-serif}
+html,body{margin:0;background:var(--void);color:var(--fg);font-family:var(--font)}
+body{padding:28px 32px 64px}
+a{color:var(--data);text-decoration:none}
+header{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;margin-bottom:8px}
+h1{margin:0;font-weight:500;font-size:22px;letter-spacing:.28em}
+.sub{color:var(--mut);font-size:13px;letter-spacing:.06em;line-height:1.6;max-width:640px}
+#board{margin-top:22px;display:flex;flex-direction:column;gap:14px}
+.stage{display:grid;grid-template-columns:minmax(180px,1.1fr) 36px minmax(200px,1.2fr) 36px minmax(180px,1.1fr);gap:8px 6px;align-items:center;border:1px solid var(--line);padding:14px 16px;background:rgba(23,24,28,.65)}
+.col{display:flex;flex-direction:column;gap:8px}
+.arr{text-align:center;color:var(--sig);font-size:22px;letter-spacing:0}
+.chip,.proc{border:1px solid var(--line);padding:8px 10px}
+.chip b,.proc b{display:block;font-weight:500;letter-spacing:.12em;font-size:14px}
+.chip small,.proc small,.chip em,.proc em{display:block;font-style:normal;color:var(--mut);font-size:12px;letter-spacing:.04em;margin-top:3px}
+.chip.out em{color:var(--sig)}
+.chip.in em{color:var(--data)}
+.dev,.off,.note{grid-column:1 / -1;margin:0;color:var(--mut);font-size:12px;letter-spacing:.04em;line-height:1.5}
+.caps{border:1px solid var(--line);padding:14px 16px}
+.caps h2{margin:0 0 8px;font-weight:500;font-size:13px;letter-spacing:.2em}
+.caps ul{margin:0;padding-left:18px}
+.caps li{margin:4px 0;font-size:13px;letter-spacing:.04em}
+@media (max-width:800px){
+  .stage{grid-template-columns:1fr}
+  .arr{transform:rotate(90deg);padding:4px 0}
+}
+</style></head><body>
+<header>
+  <div><h1>环穗 · 产物流向</h1><p class="sub">土豆 → 加工 → 蛴螬。节点和箭头来自同一张产品表。后来加品种，改表即可。</p></div>
+  <a href="index.html">回到环穗</a>
+</header>
+<div id="board"></div>
+<script>__BUNDLE__</script>
+</body></html>
