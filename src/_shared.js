@@ -471,11 +471,18 @@ function fieldRank(f) {
   if (f.plantedAt == null) return [1, seq, f.idx];
   return [0, f.plantedAt, f.idx];
 }
-function pickField(kind) {
+function fieldClaimed(f, kind, self) {
+  for (const r of rigs) {
+    if (r === self || r.kind !== kind || r.f !== f) continue;
+    if (r.mode === 'work' || r.mode === 'turn' || r.mode === 'travel') return true;
+  }
+  return false;
+}
+function pickField(kind, self) {
   if (!JOBS[kind]) return null;
   let best = null;
   for (const f of potatoLive) {
-    if (!jobReady(f, kind)) continue;
+    if (!jobReady(f, kind) || fieldClaimed(f, kind, self)) continue;
     if (!best) { best = f; continue; }
     const ra = fieldRank(f), rb = fieldRank(best);
     if (ra[0] < rb[0] || (ra[0] === rb[0] && (ra[1] < rb[1] || (ra[1] === rb[1] && ra[2] < rb[2])))) best = f;
@@ -534,6 +541,20 @@ function roadRoute(x, z, ex, ez) {
   if (!out.length) out.push([ex, ez]);
   return out;
 }
+function shiftRoute(r, pts) {
+  // 6 m 路面内错开，终点仍落在作业点或车位上。
+  const bias = ((r.id % 5) - 2) * 1.15;
+  if (!pts || pts.length < 2 || Math.abs(bias) < 0.1) return pts;
+  const out = [];
+  for (let i = 0; i < pts.length; i++) {
+    if (i === pts.length - 1) { out.push(pts[i]); continue; }
+    const nxt = pts[Math.min(i + 1, pts.length - 1)];
+    const dx = nxt[0] - pts[i][0], dz = nxt[1] - pts[i][1];
+    const len = Math.hypot(dx, dz) || 1;
+    out.push([pts[i][0] + (-dz / len) * bias, pts[i][1] + (dx / len) * bias]);
+  }
+  return out;
+}
 function routeTo(r, ex, ez, intent, f) {
   r.intent = intent;
   r.f = f || null;
@@ -541,7 +562,9 @@ function routeTo(r, ex, ez, intent, f) {
   r.mode = 'travel';
   const dist = Math.hypot(r.x - ex, r.z - ez);
   // 已经在作业点旁边就直接开过去。从机库或另一块田过来才绕地表道路。
-  r.route = dist < 36 ? [[ex, ez]] : roadRoute(r.x, r.z, ex, ez);
+  // 路点按车号横移，终点仍是作业点或车位，两台车不会叠在同一条线的同一个点上。
+  const route = dist < 36 ? [[ex, ez]] : roadRoute(r.x, r.z, ex, ez);
+  r.route = shiftRoute(r, route);
   r.ri = 0;
 }
 function routeToJob(r, f) {
@@ -569,7 +592,7 @@ function assignIdleRigs() {
       r.mode = 'charge'; r.busy = false; r.f = null; r.intent = null;
       continue;
     }
-    const f = pickField(r.kind);
+    const f = pickField(r.kind, r);
     if (!f) {
       if (!home) goHome(r);
       else r.mode = (r.charge ?? 1) < 1 ? 'charge' : 'park';
@@ -582,7 +605,7 @@ function finishPass(r) {
   const f = r.f;
   if (f?.jobS) f.jobS[r.kind] = L.LANES;
   if ((r.charge ?? 1) <= 0) { goHome(r); return; }
-  const nxt = pickField(r.kind);
+  const nxt = pickField(r.kind, r);
   if (!nxt) { goHome(r); return; }
   routeToJob(r, nxt);
 }
@@ -648,10 +671,19 @@ function stepTurn(r, dt) {
   r.x = pose.x; r.z = pose.z; r.ang = pose.ang;
   if (rem > 0) stepWork(r, rem / MACHINE_MPS);
 }
+function crowded(r) {
+  for (const o of rigs) {
+    if (o === r || o.id > r.id) continue;
+    if (o.mode !== 'travel' && o.mode !== 'turn' && o.mode !== 'work') continue;
+    if (Math.hypot(o.x - r.x, o.z - r.z) < 1.6) return true;
+  }
+  return false;
+}
 function stepTravel(r, dt) {
+  if (crowded(r)) return;
   if (r.intent === 'job') {
     if (!r.f || !jobReady(r.f, r.kind)) {
-      const nxt = (r.charge ?? 1) > 0 ? pickField(r.kind) : null;
+      const nxt = (r.charge ?? 1) > 0 ? pickField(r.kind, r) : null;
       if (!nxt) { goHome(r); return; }
       if (nxt !== r.f) routeToJob(r, nxt);
     }

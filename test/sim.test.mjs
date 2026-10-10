@@ -807,3 +807,37 @@ test('the machine shop spends revenue and a reload keeps the extra rigs', () => 
   assert.deepEqual(starters.map(r => r.kind), ['planter', 'hiller', 'topper', 'lifter']);
   resetGame();
 });
+
+test('two planters take different fields and a spare stays home', () => {
+  resetGame();
+  setPaused(false);
+  setTimeScale(1);
+  stores.seed = 4;
+  stores.fertilizer = 4;
+  economy.revenue = 9000;
+  assert.equal(buyMachine('planter').ok, true);
+  const planters = rigs.filter(r => r.kind === 'planter');
+  assert.equal(planters.length, 2);
+  const a = fieldAt(focus.i, focus.j);
+  assert.equal(plantField(a, 'potato').ok, true);
+  const claimed = planters.filter(p => p.f === a);
+  assert.equal(claimed.length, 1);
+  assert.ok(claimed[0].mode === 'travel' || claimed[0].mode === 'work');
+  const spare = planters.find(p => p !== claimed[0]);
+  assert.ok(spare.mode === 'park' || spare.mode === 'charge');
+  assert.equal(spare.f, null);
+  const b = fields.find(f => f.owned && f !== a && !f.live && f.state !== 3);
+  assert.ok(b);
+  assert.equal(plantField(b, 'potato').ok, true);
+  assert.equal(new Set(planters.map(p => p.f)).size, 2);
+  assert.ok(planters.every(p => p.mode === 'travel' || p.mode === 'work'));
+  const x0 = planters.map(p => p.x);
+  const z0 = planters.map(p => p.z);
+  step(1, 0, 1);
+  assert.equal(planters[0].f === planters[1].f, false);
+  const d = Math.hypot(planters[0].x - planters[1].x, planters[0].z - planters[1].z);
+  assert.ok(d > 3, d);
+  const moved = planters.some((p, i) => Math.hypot(p.x - x0[i], p.z - z0[i]) > 1);
+  assert.equal(moved, true);
+  resetGame();
+});

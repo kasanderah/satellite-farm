@@ -507,8 +507,8 @@ vec3 farmAlbedo(vec2 p){
  vec3 albedo = farmAlbedo(vWP.xz);
  if (uSelOn > 0.5 && vWP.x >= uSel.x && vWP.x <= uSel.y && vWP.z >= uSel.z && vWP.z <= uSel.w) {
    float b = min(min(vWP.x - uSel.x, uSel.y - vWP.x), min(vWP.z - uSel.z, uSel.w - vWP.z));
-   float px = max(fwidth(b) * 1.4, 1.2);
-   albedo = mix(albedo, g_zone, (1.0 - smoothstep(px * 0.15, px * 1.8, b)) * 0.92);
+   float px = max(fwidth(b) * 1.1, 0.45);
+   albedo = mix(albedo, g_zone, (1.0 - smoothstep(0.0, px, b)) * 0.92);
  }
  float ex = min(abs(vWP.x - uPlot.x), abs(vWP.x - uPlot.y));
  float ez = min(abs(vWP.z - uPlot.z), abs(vWP.z - uPlot.w));
@@ -1997,7 +1997,7 @@ function paintPickEdges() {
   const sig = [...pickedFields].join(',');
   if (sig === pickSig) return;
   pickSig = sig;
-  const w = 6, y = 1.1, h = 1.2, inset = 8;
+  const w = 1.15, y = 0.38, h = 0.28, inset = 2.2;
   let n = 0;
   for (const idx of pickedFields) {
     const f = fields[idx];
