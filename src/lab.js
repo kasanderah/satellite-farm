@@ -106,6 +106,113 @@ function salmonRing(w, d, y = 0.28) {
   return g;
 }
 
+// 软光晕：灯心上的加法贴片，不产生点光或聚光。贴图整场共用。
+const glowMap = (() => {
+  const s = 128;
+  const c = document.createElement('canvas');
+  c.width = c.height = s;
+  const g = c.getContext('2d');
+  const r = s / 2;
+  const grd = g.createRadialGradient(r, r, 0, r, r, r);
+  grd.addColorStop(0, 'rgba(255,255,255,1)');
+  grd.addColorStop(0.14, 'rgba(255,255,255,0.82)');
+  grd.addColorStop(0.32, 'rgba(255,255,255,0.34)');
+  grd.addColorStop(0.55, 'rgba(255,255,255,0.1)');
+  grd.addColorStop(0.78, 'rgba(255,255,255,0.02)');
+  grd.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = grd;
+  g.fillRect(0, 0, s, s);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.magFilter = THREE.LinearFilter;
+  tex.minFilter = THREE.LinearFilter;
+  tex.userData.shared = true;
+  return tex;
+})();
+
+function haloMaterial(color, opacity) {
+  const m = new THREE.SpriteMaterial({
+    map: glowMap,
+    color,
+    opacity,
+    transparent: true,
+    depthWrite: false,
+    depthTest: false,
+    blending: THREE.AdditiveBlending,
+    toneMapped: false,
+  });
+  m.userData.dispose = true;
+  m.userData.base = opacity;
+  return m;
+}
+
+// 两层光斑：内层是灯心，外层是淡晕。list 收到灯组里，关掉灯组时一起隐藏。
+function addHalo(parent, list, color, size, x, y, z) {
+  const made = [];
+  for (const [k, o] of [[1, 0.72], [1.7, 0.2]]) {
+    const sprite = new THREE.Sprite(haloMaterial(color, o));
+    sprite.geometry.userData.shared = true;
+    sprite.position.set(x, y, z);
+    sprite.scale.set(size * k, size * k, 1);
+    sprite.renderOrder = 8;
+    sprite.userData.halo = true;
+    sprite.userData.haloBase = o;
+    parent.add(sprite);
+    if (list) list.push(sprite);
+    made.push(sprite);
+  }
+  return made;
+}
+
+function fadeHalos(list, mul) {
+  if (!list) return;
+  for (const m of list) {
+    if (!m.userData.halo) continue;
+    m.material.opacity = m.userData.haloBase * mul;
+  }
+}
+
+// 同一盏长灯或一排小灯共用一个点云，面向镜头，仍然不照亮周围。
+function addHaloPoints(parent, list, positions, color, worldSize, opacity = 0.5) {
+  if (!positions.length) return null;
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  const m = new THREE.PointsMaterial({
+    map: glowMap,
+    color,
+    size: worldSize * 3.5,
+    sizeAttenuation: true,
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    toneMapped: false,
+    alphaTest: 0.02,
+    opacity,
+  });
+  m.userData.dispose = true;
+  m.userData.base = opacity;
+  const pts = new THREE.Points(geo, m);
+  pts.userData.halo = true;
+  pts.userData.haloBase = opacity;
+  pts.renderOrder = 4;
+  parent.add(pts);
+  if (list) list.push(pts);
+  return pts;
+}
+
+function fadeHaloMat(mat, mul) {
+  if (mat) mat.opacity = mat.userData.base * mul;
+}
+
+function pushGlowLine(arr, x, y, z, len, alongZ, step) {
+  const n = Math.max(1, Math.round(Math.abs(len) / step));
+  for (let i = 0; i < n; i++) {
+    const t = ((i + 0.5) / n - 0.5) * len;
+    if (alongZ) arr.push(x, y, z + t);
+    else arr.push(x + t, y, z);
+  }
+}
+
 const boxCache = new Map();
 function box(w, h, d, x, y, z, mat) {
   const key = w.toFixed(3) + '|' + h.toFixed(3) + '|' + d.toFixed(3);
@@ -351,7 +458,14 @@ function buildCultPlot(scheme, opts) {
     door: { id: 'door', label: '门灯', on: true, lights: [], meshes: [] },
     wall: { id: 'wall', label: '墙灯', on: true, lights: [], meshes: [] },
   };
-  if (marathon) groups.accent = { id: 'accent', label: '紫灯', on: true, lights: [], meshes: [] };
+  if (marathon) {
+    groups.accent = { id: 'accent', label: '紫灯', on: true, lights: [], meshes: [] };
+    groups.accent.haloPos = [];
+  }
+  const stripHaloPos = [];
+  const doorHaloPos = [];
+  const wallHaloPos = [];
+  const rimHaloPos = [];
   const floorMat = marathon
     ? gloss({ color: '#063318', roughness: 0.22, metalness: 0.08, clearcoat: 0.6, clearcoatRoughness: 0.25 })
     : mat({ color: '#5a6164', roughness: 0.94, metalness: 0.04 });
@@ -459,6 +573,10 @@ function buildCultPlot(scheme, opts) {
         addStrip(glowW, 0.02, glowLen, p.x - e, y, p.z, glowMat),
         addStrip(glowW, 0.02, glowLen, p.x + e, y, p.z, glowMat),
       ]) groups.rim.meshes.push(mesh);
+      pushGlowLine(rimHaloPos, p.x, y + 0.08, p.z - e, glowLen, false, 12);
+      pushGlowLine(rimHaloPos, p.x, y + 0.08, p.z + e, glowLen, false, 12);
+      pushGlowLine(rimHaloPos, p.x - e, y + 0.08, p.z, glowLen, true, 12);
+      pushGlowLine(rimHaloPos, p.x + e, y + 0.08, p.z, glowLen, true, 12);
       const band = addStrip(U.unit - corner * 2 - 8, 0.03, 0.7, p.x, y + 0.012, p.z, redMat);
       if (p.n % 2) band.rotation.y = Math.PI / 2;
     }
@@ -502,6 +620,7 @@ function buildCultPlot(scheme, opts) {
     base.castShadow = post.castShadow = markerMesh.castShadow = false;
     g.add(base, post, markerMesh);
     groups.rim.meshes.push(base, post, markerMesh);
+    for (const [x, z] of markers) rimHaloPos.push(x, padTop + 0.72, z);
   }
 
   const labels = [];
@@ -600,6 +719,7 @@ function buildCultPlot(scheme, opts) {
       slit.castShadow = false;
       g.add(slit);
       groups.door.meshes.push(slit);
+      doorHaloPos.push(slit.position.x, slit.position.y, slit.position.z);
       if (marathon) {
         const stripe = horizontal
           ? box(leafW * 0.92, 0.16, 0.03, x + off, y - leafH * 0.22, z - sign * 0.07, redMat)
@@ -645,6 +765,15 @@ function buildCultPlot(scheme, opts) {
       addStrip(1.35, 0.28, stripLen, c, stripY + 0.18, 0, housingMat),
       addStrip(0.55, 0.07, stripLen, c, stripY - 0.02, 0, stripMat),
     ]) groups.strip.meshes.push(mesh);
+    pushGlowLine(stripHaloPos, 0, stripY - 0.2, c, stripLen, false, 14);
+    pushGlowLine(stripHaloPos, c, stripY - 0.14, 0, stripLen, true, 14);
+  }
+  const stripHalo = addHaloPoints(g, groups.strip.meshes, stripHaloPos, weak ? '#ff2b30' : marathon ? '#d7ffd8' : '#e7fff8', weak ? 3.4 : 2.8, weak ? 0.42 : 0.34);
+  const rimHalo = addHaloPoints(g, groups.rim.meshes, rimHaloPos, marathon ? '#e4b6ff' : '#f4fffc', marathon ? 2.4 : 1.45, marathon ? 0.4 : 0.62);
+  const doorHalo = addHaloPoints(g, groups.door.meshes, doorHaloPos, weak ? '#ffcc66' : marathon ? '#e2a8ff' : '#d2fff6', 1.5, 0.5);
+  const wallHalo = addHaloPoints(g, groups.wall.meshes, wallHaloPos, marathon ? '#d8ffd4' : '#e7fff8', 2.2, 0.38);
+  if (groups.accent && groups.accent.haloPos.length) {
+    groups.accent.haloPts = addHaloPoints(g, groups.accent.meshes, groups.accent.haloPos, '#e7b6ff', 2.6, 0.48);
   }
   stripMat.side = THREE.DoubleSide;
   glowMat.side = THREE.DoubleSide;
@@ -669,6 +798,7 @@ function buildCultPlot(scheme, opts) {
         plate.castShadow = false;
         g.add(plate);
         groups.wall.meshes.push(plate);
+        wallHaloPos.push(plate.position.x, plate.position.y, plate.position.z);
       }
     }
   }
@@ -731,6 +861,10 @@ function buildCultPlot(scheme, opts) {
         stripMat.emissiveIntensity = 2.2;
         wallGlowMat.emissiveIntensity = 0;
         slitMat.emissiveIntensity = 0.9;
+        fadeHaloMat(stripHalo && stripHalo.material, 1);
+        fadeHaloMat(rimHalo && rimHalo.material, 0.22);
+        fadeHaloMat(doorHalo && doorHalo.material, 0.85);
+        fadeHaloMat(wallHalo && wallHalo.material, 0);
         gridMat.color.set('#9aa09c');
         padMat.color.set('#ffffff');
         for (const light of padLights) light.intensity = 2600;
@@ -744,6 +878,10 @@ function buildCultPlot(scheme, opts) {
       sun.intensity = L.sun;
       glowMat.emissiveIntensity = L.glowI;
       markerMat.emissiveIntensity = L.glowI;
+      fadeHaloMat(stripHalo && stripHalo.material, Math.min(1, L.stripI / 2.2));
+      fadeHaloMat(rimHalo && rimHalo.material, Math.min(1, L.glowI / 3.4));
+      fadeHaloMat(doorHalo && doorHalo.material, Math.min(1, (marathon ? L.stripI * 0.95 : L.stripI * 0.55) / 1.3));
+      fadeHaloMat(wallHalo && wallHalo.material, Math.min(1, L.stripI / 2.2));
       if (markerMesh && markerMesh.userData.breakOn !== (st === 'break')) {
         const off = new THREE.Color('#4a433c');
         const on = new THREE.Color('#e9fff8');
@@ -763,6 +901,7 @@ function buildCultPlot(scheme, opts) {
       if (groups.accent) {
         accentMat.emissiveIntensity = st === 'sel' ? 5.6 : st === 'break' ? 0.18 : st === 'job' ? 3.8 : 2.7;
         for (const light of groups.accent.lights) light.intensity = L.accentL;
+        fadeHaloMat(groups.accent.haloPts && groups.accent.haloPts.material, st === 'sel' ? 1 : st === 'break' ? 0.12 : st === 'job' ? 0.8 : 0.55);
       }
       wear.visible = L.wear;
     },
@@ -800,6 +939,7 @@ function addCornerFillets(g, U, wallMat, redMat, accentMat, groups) {
     orb.castShadow = false;
     g.add(orb);
     groups.accent.meshes.push(orb);
+    groups.accent.haloPos.push(orb.position.x, orb.position.y, orb.position.z);
     const lamp = new THREE.PointLight('#c070ff', 1, 22, 2);
     lamp.position.copy(orb.position);
     g.add(lamp);
@@ -851,6 +991,7 @@ function dressCultWall(g, horizontal, sign, U, centers, kit) {
     mesh.castShadow = false;
     g.add(mesh);
     groups.accent.meshes.push(mesh);
+    groups.accent.haloPos.push(mesh.position.x, mesh.position.y, mesh.position.z);
     if (!withLamp) return;
     const lamp = new THREE.PointLight('#c070ff', 1, 26, 2);
     lamp.position.copy(mesh.position);
@@ -1206,6 +1347,11 @@ function buildGrubTrough() {
   vatMesh.castShadow = false;
   g.add(vatMesh);
   groups.vat.meshes.push(vatMesh);
+  const vatHaloPos = [];
+  for (const s of slots) {
+    pushGlowLine(vatHaloPos, s.x, y0 + 0.98, s.z + troughW / 2 - 0.16, troughL - 1.6, false, 4.6);
+  }
+  const vatHalo = addHaloPoints(g, groups.vat.meshes, vatHaloPos, '#ff2b30', 2.7, 0.55);
 
   for (let r = 0; r < nRows - 1; r++) {
     const z = z0 + r * pitch + troughW / 2 + aisle / 2;
@@ -1247,6 +1393,7 @@ function buildGrubTrough() {
     label.position.set(door.x, y0 + 0.08, door.z);
     label.rotation.x = -Math.PI / 2;
     g.add(label);
+    addHalo(g, null, rimHex, 4.2, door.x, y0 + 0.4, door.z);
   };
   addDoor(doorA, 'A 出', '#ffb25a');
   addDoor(doorB, 'B 进', '#8fd0ff');
@@ -1316,22 +1463,26 @@ function buildGrubTrough() {
     carried.visible = false;
     head.position.y = 3.35;
     const lamp = addG(0.7, 0.1, 0.18, 1.05, legH - 0.32, 0, rigMat);
-    // 巡灯只发光，不往场景里打光。
+    // 巡灯只在灯心上加软光晕，不往场景里打光。
+    const lampHalo = addHalo(gantry, groups.rig.meshes, '#ff2b30', 2.15, 1.05, legH - 0.32, 0);
+    const tipHalo = addHalo(head, groups.rig.meshes, '#ff2b30', 1.45, 0, -0.98, 0);
     const statusMat = mat({ color: '#2a2418', emissive: statusColor.rest, emissiveIntensity: 3.4, roughness: 0.3, metalness: 0 });
     const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.22, 12, 8), statusMat);
     beacon.position.set(0, legH + 1.02, 0);
     beacon.castShadow = false;
     gantry.add(beacon);
-    // 状态灯同样只靠自发光。
+    // 状态灯同样只靠光晕，颜色跟相位走。
+    const statusHalo = addHalo(gantry, groups.status.meshes, statusColor.rest, 2.7, 0, legH + 1.02, 0);
     const labelMat = new THREE.MeshBasicMaterial({ map: phaseTex('停靠'), transparent: true, depthWrite: false });
     labelMat.userData.dispose = true;
     const label = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 0.85), labelMat);
-    label.position.set(0, legH + 1.62, 0);
+    label.position.set(0, legH + 1.85, 0);
+    label.renderOrder = 10;
     gantry.add(label);
     groups.rig.meshes.push(lamp, tip);
     groups.status.meshes.push(beacon, label);
     g.add(gantry);
-    return { gantry, head, carried, fill, statusMat, label, labelMat, labelText: '停靠' };
+    return { gantry, head, carried, fill, statusMat, label, labelMat, labelText: '停靠', lampHalo, tipHalo, statusHalo };
   };
 
   const westOf = (row) => (row < 2 ? x0 + pitchX - troughL / 2 + 1.4 : xStart);
@@ -1463,7 +1614,9 @@ function buildGrubTrough() {
     vatColor: '#ff2b30',
     rigColor: '#ff2b30',
     plotDim: { strip: '#8a1824', door: '#ffcc66', wall: 'off' },
-    lamp: { type: 'emissive', distance: 0 },
+    lamp: { type: 'emissive', distance: 0, halo: 'sprite' },
+    castLights: groups.rig.lights.length + groups.status.lights.length,
+    beacon: { x: pad.x + parkX, y: y0 + legH + 1.02, z: pad.z + rigs[0].script.parkZ },
     diagonals: rigs.reduce((n, rig) => n + rig.script.segs.filter(s => Math.abs(s.x1 - s.x0) > 0.08 && Math.abs(s.z1 - s.z0) > 0.08).length, 0),
     doorCuts: rigs.reduce((n, rig) => n + rig.script.segs.filter(s => Math.abs(s.x0 - doorA.x) < 0.4 && Math.abs(s.x1 - doorA.x) < 0.4 && Math.abs(s.z1 - s.z0) > 1).length, 0),
   };
@@ -1516,6 +1669,10 @@ function buildGrubTrough() {
         const key = st === 'break' ? 'break' : st !== 'job' ? 'rest' : (mode === 'empty' ? 'empty' : 'work');
         statusMat.emissive.set(statusColor[key]);
         statusMat.emissiveIntensity = key === 'break' ? 1.4 : key === 'rest' ? 2.6 : 4.6;
+        for (const s of rig.statusHalo) s.material.color.set(statusColor[key]);
+        fadeHalos(rig.statusHalo, key === 'break' ? 0.4 : key === 'rest' ? 0.72 : 1);
+        fadeHalos(rig.lampHalo, st === 'break' ? 0.16 : 1);
+        fadeHalos(rig.tipHalo, st === 'break' ? 0.16 : 1);
         const caption = PHASE[kind] || (mode === 'empty' ? '空驶' : '作业');
         setLabel(rig, caption);
         rig.label.lookAt(cam.position);
@@ -1523,8 +1680,15 @@ function buildGrubTrough() {
       }
       host.userData.grub.phases = phases;
       host.userData.grub.t0 = t0;
+      host.userData.grub.live = rigs.map((rig, i) => ({
+        x: pad.x + rig.gantry.position.x,
+        y: y0 + legH + 1.02,
+        z: pad.z + rig.gantry.position.z,
+        phase: phases[i],
+      }));
       vatMat.emissiveIntensity = st === 'break' ? 0.35 : 2.5;
       rigMat.emissiveIntensity = st === 'job' ? 4.4 : st === 'sel' ? 3.2 : st === 'break' ? 0.25 : 2.2;
+      fadeHaloMat(vatHalo && vatHalo.material, st === 'break' ? 0.22 : 1);
       ring.visible = st === 'sel' || st === 'break';
       for (const m of ring.children) m.material = st === 'break' ? alertMat : zoneMat;
       const sig = st + ':' + [...hidden].join(',');
@@ -1584,7 +1748,7 @@ function disposeStage() {
       if (m.geometry && !m.geometry.userData.shared) m.geometry.dispose();
       const mats = m.material ? (Array.isArray(m.material) ? m.material : [m.material]) : [];
       for (const mat of mats) {
-        if (mat.map && mat.userData && mat.userData.dispose) mat.map.dispose();
+        if (mat.map && mat.userData && mat.userData.dispose && !(mat.map.userData && mat.map.userData.shared)) mat.map.dispose();
         if (mat.userData && mat.userData.dispose) mat.dispose();
       }
     });
@@ -1749,7 +1913,7 @@ function classLabel(id) {
 }
 function fillBrief(entry) {
   const all = loadBriefs();
-  const marker = entry.id === 'cult-b' ? '漆面' : entry.id === 'cult-a' ? '后开始' : entry.id === 'grub-trough' ? '弱光' : '';
+  const marker = entry.id === 'cult-b' ? '漆面' : entry.id === 'cult-a' ? '后开始' : entry.id === 'grub-trough' ? '光晕' : '';
   if (marker && (!all[entry.id] || !String(all[entry.id].notes || '').includes(marker))) {
     all[entry.id] = {
       name: entry.name,
