@@ -14,6 +14,9 @@ import { VerticalTiltShiftShader } from 'three/addons/shaders/VerticalTiltShiftS
 import { PALETTE, CROPS, TEX_ID, L, fields, harvesters, haulers, drones, step, TRUNKS_X, TRUNKS_Z, depots, inCrater, ROADS, RING, LAYERS, CUT, wrapX, PLOT, economy, focus, signals, log, plantField, quote, setTimeScale, setPaused, paused, exportSnapshot, applySnapshot, fieldAtWorld, fieldAt, fieldOrigin, simTime, worldDay, stores, rigs, fieldVisual, cropWatch, POTATO_DAYS, warehouse, buildings, sellLot, placeBuilding, removeBuilding, rigReadout, SHOP, buySeed, buyItem, SEED_PER_FIELD, FERT_PER_FIELD, resetGame, CULTURES, DECK_CLIMATE, tanks, cultureWatch, startCulture, tendCulture, harvestCulture, BUILDING_KINDS, CULTURE_CELLS } from './_shared.js';
 import { NOISE, FARM, CURVE_DECL, CURVE_PROJECT } from './glsl.js';
 import { harvesterKit, haulerKit, droneKit, personKit, conveyorKit, depotKit, hubKit, plantGeometry, mastKit, irrigatorKit, growRackKit, tankKit, pumpKit, pipeRackKit, tractorKit, planterKit, hillerKit, topperKit, potatoLifterKit, shedKit, warehouseKit, garageKit, processKit, cultureTankKit, armKit, deckLightKit } from './prefabs.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { CULT_EMPTY } from './lab-catalog.js';
+import { makeColony } from './colony-art.js';
 
 const Q = new URLSearchParams(location.search);
 const VIEW = Q.get('view') || '', PREWARM = +Q.get('t') || 0, NOPOST = Q.has('nopost'), SHOWFPS = Q.has('fps');
@@ -719,8 +722,125 @@ const droneSet = instanced(droneKit(), drones.length, false);
 // 小人：在中枢场地上散步
 const people = Array.from({ length: 46 }, (_, n) => ({ x: HUBC - 120 + hr() * 260, z: HUBC - 60 + hr() * 200, a: hr() * 6.28, sp: 0.6 + hr() * 0.8 }));
 const peopleSet = instanced(personKit(), people.length);
-// 中枢
+// 中枢雕塑换成工坊定稿的中枢地块。旧网格留在场景里但不再显示，仓棚仍是另一套实例。
 const hubMeshes = (() => { const hk = hubKit(hr); for (const k in hk) if (hk[k]) hk[k].translate(HUBC, 0, HUBC); return staticMesh(hk); })();
+for (const m of hubMeshes) m.visible = false;
+
+const colony = makeColony({
+  hemi, sun, scene, renderer: R, cam,
+  zoneMat: new THREE.MeshBasicMaterial({ color: PALETTE.zone }),
+  alertMat: new THREE.MeshBasicMaterial({ color: PALETTE.alert }),
+  frozen: null,
+  play: true,
+});
+const cultScale = L.BP / CULT_EMPTY.plot;
+function blockCenter(bi, bj) {
+  return { x: L.X0 + bi * L.BP + L.BLOCK / 2, z: L.Z0 + bj * L.BP + L.BLOCK / 2 };
+}
+function curveObject(root) {
+  root.traverse(obj => {
+    const list = obj.material ? (Array.isArray(obj.material) ? obj.material : [obj.material]) : [];
+    for (const m of list) {
+      if (!m || m.userData.colonyCurve || m.isSpriteMaterial || m.isPointsMaterial) continue;
+      m.userData.colonyCurve = true;
+      curved(m);
+    }
+    if (obj.isMesh) obj.castShadow = obj.receiveShadow = false;
+  });
+}
+function shareLabelMaterials(group) {
+  const by = new Map();
+  group.traverse(obj => {
+    if (!obj.isMesh || obj.isInstancedMesh || !obj.material || Array.isArray(obj.material) || !obj.material.map) return;
+    if (obj.material.type !== 'MeshBasicMaterial') return;
+    const hit = by.get(obj.material.map.uuid);
+    if (!hit) by.set(obj.material.map.uuid, obj.material);
+    else obj.material = hit;
+  });
+}
+function hiddenInTree(obj) {
+  for (let p = obj; p; p = p.parent) if (!p.visible) return true;
+  return false;
+}
+// 一个空单元有几百个网格。合成后再复制到其余地块，远处的地块可以整块剔除。
+function packStatic(group) {
+  shareLabelMaterials(group);
+  group.updateMatrixWorld(true);
+  const inv = new THREE.Matrix4().copy(group.matrixWorld).invert();
+  const buckets = new Map();
+  group.traverse(obj => {
+    if (!obj.isMesh || obj.isInstancedMesh || hiddenInTree(obj)) return;
+    const mat = obj.material;
+    if (!mat || Array.isArray(mat) || !obj.geometry) return;
+    const geo = obj.geometry.clone();
+    obj.updateWorldMatrix(true, false);
+    geo.applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv, obj.matrixWorld));
+    if (!buckets.has(mat)) buckets.set(mat, []);
+    buckets.get(mat).push({ geo, obj });
+  });
+  for (const [mat, items] of buckets) {
+    const merged = mergeGeometries(items.map(i => i.geo), false);
+    for (const i of items) i.geo.dispose();
+    if (!merged) continue;
+    for (const i of items) if (i.obj.parent) i.obj.parent.remove(i.obj);
+    const mesh = new THREE.Mesh(merged, mat);
+    mesh.castShadow = mesh.receiveShadow = false;
+    group.add(mesh);
+  }
+}
+function seatPlot(group, bi, bj, y) {
+  group.scale.set(cultScale, 1, cultScale);
+  const at = blockCenter(bi, bj);
+  group.position.set(at.x, y, at.z);
+  curveObject(group);
+  return at;
+}
+
+const hubArt = colony.buildHubPlot();
+hubArt.group.scale.set(cultScale, 1, cultScale);
+hubArt.group.position.set(0, 0.15, 0);
+hubArt.group.traverse(obj => { obj.frustumCulled = false; });
+curveObject(hubArt.group);
+scene.add(hubArt.group);
+function syncHubSection() {
+  const sec = hubArt.sections.find(s => s.id === viewLayer) || hubArt.sections[0];
+  hubArt.applySection(sec);
+}
+
+const cultRoot = new THREE.Group();
+cultRoot.name = 'cult-deck';
+cultRoot.visible = false;
+scene.add(cultRoot);
+const emptyArt = colony.buildCultPlot('a', { game: true });
+packStatic(emptyArt.group);
+const grubArt = colony.buildGrubTrough({ game: true });
+const grubBi = L.HUBX + 1, grubBj = L.HUBZ;
+const grubAt = seatPlot(grubArt.group, grubBi, grubBj, LAYERS[1].floor);
+cultRoot.add(grubArt.group);
+const grubOcc = grubArt.group.userData.cult.occupied;
+const deckArtInfo = {
+  grub: {
+    ...grubAt, bi: grubBi, bj: grubBj,
+    pad: { n: grubOcc.n, x: grubAt.x + grubOcc.x * cultScale, z: grubAt.z + grubOcc.z * cultScale },
+    gantries: grubArt.group.userData.grub.gantries,
+    troughs: grubArt.group.userData.grub.n,
+  },
+  empty: null,
+};
+let seatedEmpty = false;
+for (let bj = PLOT.bj0; bj <= PLOT.bj1; bj++) {
+  for (let bi = PLOT.bi0; bi <= PLOT.bi1; bi++) {
+    if (bi === L.HUBX && bj === L.HUBZ) continue;
+    if (bi === grubBi && bj === grubBj) continue;
+    const group = seatedEmpty ? emptyArt.group.clone(true) : emptyArt.group;
+    seatedEmpty = true;
+    const at = seatPlot(group, bi, bj, LAYERS[1].floor);
+    cultRoot.add(group);
+    if (!deckArtInfo.empty) deckArtInfo.empty = { ...at, bi, bj };
+  }
+}
+// TODO: 门框照料机（龙门）台数是升级项。现在固定沙盒默认的 2 台。商店不卖 4 台这一档。
+// TODO: 地块级照明跟最近一次开始的单元；弱光减产。见 harvestCulture。这里只把蛴螬地块画成弱光。
 // 区站：每 3×3 区一座，位于主干走廊交叉口
 let depotSet;
 { depotSet = instanced(depotKit(), depots.length); depots.forEach((d, i) => setInst(depotSet, i, d.x, 0, d.z, 0)); setCount(depotSet, depots.length); }
@@ -1073,12 +1193,23 @@ function pitchOf(d) {
 }
 const camS = { x: HUBC, z: HUBC, y: 0, d: 4200, yaw: 0, pOff: 0, lookUp: 0, fovAdd: 0, deck: false }, camT = { ...camS };
 let viewLayer = 'surface';
+let poseLock = null;
 let followLock = null;
 buildPlotSection();
 function layerNow() { return LAYERS.find(l => l.id === viewLayer) || LAYERS[0]; }
 function layerFloor() { return layerNow().floor; }
 // 环带：拉远时镜头逐渐抬头、视角变宽 → 看到环带在前方升起、在天空中拱起，两侧是环壁，环壁外是太空与母星
 function placeCamera() {
+  if (poseLock) {
+    cam.up.set(0, 1, 0);
+    cam.position.set(poseLock.x, poseLock.y, poseLock.z);
+    cam.lookAt(poseLock.lx, poseLock.ly, poseLock.lz);
+    cam.fov = poseLock.fov ?? 32;
+    cam.near = poseLock.near ?? 0.5;
+    cam.far = poseLock.far ?? (2.6 * RING.R + 6000);
+    cam.updateProjectionMatrix();
+    return;
+  }
   const baseY = layerFloor();
   const p = pitchOf(camS.d) + camS.pOff;
   cam.position.set(camS.x + Math.sin(camS.yaw) * Math.cos(p) * camS.d, baseY + Math.sin(p) * camS.d, camS.z + Math.cos(camS.yaw) * Math.cos(p) * camS.d);
@@ -1100,11 +1231,11 @@ function applyDeckView() {
   ground.visible = true;
   U.uOpen.value = on ? 1 : 0;
   plotSection.visible = on;
-  deckFloor.visible = on;
+  deckFloor.visible = on && viewLayer !== 'grow';
   deckFloor.position.y = layerFloor();
   railMesh.visible = grow && tankPos.length > 1;
   cableMesh.visible = grow && tankPos.length > 1;
-  for (const m of hubMeshes) m.visible = !on;
+  for (const m of hubMeshes) m.visible = false;
   setShown(peopleSet, !on);
   for (const k in buildingSets) setShown(buildingSets[k], !on);
   for (const k in rigMesh) setShown(rigMesh[k], !on);
@@ -1112,9 +1243,11 @@ function applyDeckView() {
   icons.visible = !on;
   deckSlabs.visible = !on && !!cut.on;
   const lab = grow || !!cut.on;
-  setShown(cultureSet, lab);
+  setShown(cultureSet, false);
   setShown(armSet, lab);
-  setShown(deckLightSet, lab);
+  setShown(deckLightSet, false);
+  cultRoot.visible = grow;
+  syncHubSection();
   document.body.classList.toggle('underground', on);
 }
 // 交互：左键平移 / 右键旋转 / 滚轮缩放 / WASD / QE / N 昼夜 / M 地图模式 / H 隐藏界面
@@ -2006,6 +2139,10 @@ function frame(now) {
     }
     if (cultureSet.light?.instanceColor) cultureSet.light.instanceColor.needsUpdate = true;
   }
+  if (viewLayer === 'grow') {
+    const running = tanks.some(t => t.species);
+    grubArt.motion(0, running ? 'job' : 'idle');
+  }
   applyDeckView();
   composer.render();
   // HUD
@@ -2067,6 +2204,12 @@ window.__farm = {
     if (dist != null) camT.d = camS.d = dist;
     if (pitch != null) camT.pOff = camS.pOff = pitch * DEG;
   },
+  pose(p) { poseLock = p || null; },
+  get hubShaft() {
+    const h = hubArt.group.userData.hub;
+    return { top: h.top, y: hubArt.group.position.y, worldTop: hubArt.group.position.y + h.top, section: h.section, axis: RING.R };
+  },
+  get deckArt() { return deckArtInfo; },
   look(x, z) {
     if (Number.isFinite(x)) camT.x = camS.x = x;
     if (Number.isFinite(z)) camT.z = camS.z = z;

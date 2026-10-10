@@ -1,8 +1,9 @@
-// 环穗 · 资产工坊。设计沙盒，不接主进度。网格和预制件跟游戏同一套。
+// 环穗 · 资产工坊。设计沙盒。网格和预制件跟游戏同一套；培育层和中枢由 colony-art.js 提供，主进度也用这一套。
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { PALETTE } from './_shared.js';
-import { LAB_CLASSES, LAB_ENTRIES } from './lab-catalog.js';
+import { PALETTE, RING } from './_shared.js';
+import { LAB_CLASSES, LAB_ENTRIES, CULT_EMPTY } from './lab-catalog.js';
+import { makeColony } from './colony-art.js';
 import {
   tractorKit, planterKit, hillerKit, topperKit, potatoLifterKit,
   cultureTankKit, warehouseKit, garageKit, processKit, armKit, irrigatorKit,
@@ -40,7 +41,18 @@ sc.right = sc.top = 90;
 sc.near = 1;
 sc.far = 280;
 scene.add(sun, sun.target);
-scene.add(new THREE.HemisphereLight('#5f7480', '#2a2622', 0.55));
+const hemi = new THREE.HemisphereLight('#5f7480', '#2a2622', 0.55);
+scene.add(hemi);
+const LIGHT0 = {
+  sun: sun.intensity,
+  sunColor: sun.color.clone(),
+  env: scene.environmentIntensity,
+  hemi: hemi.intensity,
+  hemiColor: hemi.color.clone(),
+  hemiGround: hemi.groundColor.clone(),
+  exp: renderer.toneMappingExposure,
+  bias: sun.shadow.bias,
+};
 
 const MAT = {
   light: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.52, metalness: 0.35 }),
@@ -95,8 +107,17 @@ function salmonRing(w, d, y = 0.28) {
   return g;
 }
 
+
+const boxCache = new Map();
 function box(w, h, d, x, y, z, mat) {
-  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+  const key = w.toFixed(3) + '|' + h.toFixed(3) + '|' + d.toFixed(3);
+  let geo = boxCache.get(key);
+  if (!geo) {
+    geo = new THREE.BoxGeometry(w, h, d);
+    geo.userData.shared = true;
+    boxCache.set(key, geo);
+  }
+  const m = new THREE.Mesh(geo, mat);
   m.position.set(x, y, z);
   m.castShadow = m.receiveShadow = true;
   return m;
@@ -309,10 +330,50 @@ function buildIrrigator() {
   };
 }
 
+
+function applyStageLight(entry) {
+  const id = entry && entry.id;
+  const interior = id === 'cult-a' || id === 'cult-b';
+  const marathon = id === 'cult-b';
+  sun.intensity = interior ? 0.08 : LIGHT0.sun;
+  sun.color.copy(interior ? C(marathon ? '#e7ffe4' : '#d5e6e8') : LIGHT0.sunColor);
+  sun.shadow.bias = interior ? -0.0012 : LIGHT0.bias;
+  sun.shadow.normalBias = interior ? 0.12 : 0;
+  hemi.intensity = interior ? 0.16 : LIGHT0.hemi;
+  hemi.color.copy(interior ? C(marathon ? '#c6efd0' : '#c9ddd8') : LIGHT0.hemiColor);
+  hemi.groundColor.copy(interior ? C(marathon ? '#0c2414' : '#1c2224') : LIGHT0.hemiGround);
+  scene.environmentIntensity = interior ? (marathon ? 0.72 : 0.08) : LIGHT0.env;
+  renderer.toneMappingExposure = interior ? (marathon ? 1.05 : 1.02) : LIGHT0.exp;
+  sun.castShadow = !(interior || id === 'grub-trough' || id === 'hub');
+  renderer.shadowMap.enabled = sun.castShadow;
+  if (id === 'grub-trough') {
+    sun.intensity = 0;
+    sun.color.copy(C('#4a2024'));
+    hemi.intensity = 0.02;
+    hemi.color.copy(C('#241014'));
+    hemi.groundColor.copy(C('#0a0909'));
+    scene.environmentIntensity = 0.03;
+    renderer.toneMappingExposure = 0.96;
+  }
+}
+
+
+const colony = makeColony({
+  hemi, sun, scene, renderer, zoneMat, alertMat,
+  get frozen() { return frozen; },
+  get cam() { return cam; },
+});
+const buildCultPlot = colony.buildCultPlot;
+const buildGrubTrough = colony.buildGrubTrough;
+const buildHubPlot = colony.buildHubPlot;
+
 const BUILD = {
+  'cult-a': () => buildCultPlot('a'),
+  'cult-b': () => buildCultPlot('b'),
+  'grub-trough': buildGrubTrough,
   field: () => buildUnit('field', 128),
   deck: () => buildUnit('deck', 128),
-  hub: () => buildUnit('hub', 530),
+  hub: buildHubPlot,
   tractor: () => machine(tractorKit, 5),
   planter: () => machine(planterKit, 5.5),
   hiller: () => machine(hillerKit, 5.5),
@@ -327,12 +388,18 @@ const BUILD = {
 };
 
 function disposeStage() {
+  renderer.localClippingEnabled = false;
   while (stage.children.length) {
     const o = stage.children.pop();
+    o.userData.alive = false;
     stage.remove(o);
     o.traverse(m => {
-      if (m.geometry) m.geometry.dispose();
-      if (m.material && m.material.userData && m.material.userData.dispose) m.material.dispose();
+      if (m.geometry && !m.geometry.userData.shared) m.geometry.dispose();
+      const mats = m.material ? (Array.isArray(m.material) ? m.material : [m.material]) : [];
+      for (const mat of mats) {
+        if (mat.map && mat.userData && mat.userData.dispose && !(mat.map.userData && mat.map.userData.shared)) mat.map.dispose();
+        if (mat.userData && mat.userData.dispose) mat.dispose();
+      }
     });
   }
 }
@@ -347,6 +414,36 @@ function frameSpan(entry) {
   eye.tz = 0;
   eye.yaw = entry.cls === 'rail' ? 0.7 : 0.85;
   eye.pitch = entry.cls === 'unit' ? 0.95 : entry.cls === 'rail' ? 0.42 : 0.46;
+  if (entry.id === 'grub-trough') {
+    const occ = shown && shown.group.userData.cult && shown.group.userData.cult.occupied;
+    if (occ) {
+      eye.tx = occ.x;
+      eye.tz = occ.z;
+    }
+    eye.yaw = 0.78;
+    eye.pitch = 0.04;
+    eye.ty = 5.5;
+    eye.dist = 72;
+  }
+  if (entry.id === 'hub') {
+    const y0 = -RING.HULL;
+    const y1 = RING.R;
+    const mid = (y0 + y1) / 2;
+    const half = (y1 - y0) / 2;
+    const vfov = cam.fov * Math.PI / 180;
+    eye.pitch = 0.18;
+    eye.yaw = 0.9;
+    eye.tx = 0;
+    eye.ty = mid;
+    eye.tz = 0;
+    eye.dist = ((half / Math.cos(eye.pitch)) / Math.tan(vfov / 2)) * 1.35;
+  }
+  if (entry.id === 'cult-a' || entry.id === 'cult-b') {
+    eye.yaw = entry.id === 'cult-b' ? 0.58 : 0.46;
+    eye.pitch = entry.id === 'cult-b' ? 0.58 : 0.72;
+    eye.ty = 0.6;
+    eye.dist *= entry.id === 'cult-b' ? 0.82 : 0.94;
+  }
 }
 
 function show(id) {
@@ -359,13 +456,105 @@ function show(id) {
   motion = built.motion;
   resize();
   frameSpan(entry);
+  applyStageLight(entry);
   applyPose(frozen == null ? 0 : frozen);
   document.querySelectorAll('#catalog .ent').forEach(b => b.classList.toggle('on', b.dataset.id === entry.id));
   fillBrief(entry);
+  paintLights();
+  paintSection();
+}
+
+// 资产声明 lightGroups: [{ id, label, on, lights, meshes }]。没有灯组的资产不显示开关。
+function applyLightGroups() {
+  const groups = shown && shown.lightGroups;
+  if (!groups) return;
+  for (const g of groups) {
+    if (!g.on) for (const L of g.lights) L.intensity = 0;
+    for (const m of g.meshes) m.visible = !!g.on;
+  }
+}
+
+function paintLights() {
+  const bar = $('lights');
+  if (!bar) return;
+  bar.replaceChildren();
+  const groups = shown && shown.lightGroups;
+  if (!groups || !groups.length) {
+    bar.style.display = 'none';
+    return;
+  }
+  bar.style.display = 'flex';
+  const tag = document.createElement('i');
+  tag.textContent = '灯组';
+  bar.appendChild(tag);
+  for (const g of groups) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.dataset.light = g.id;
+    b.textContent = g.label;
+    b.className = g.on ? 'on' : 'off';
+    b.addEventListener('click', () => toggleLight(g.id));
+    bar.appendChild(b);
+  }
+}
+
+function paintSection() {
+  const bar = $('section');
+  if (!bar) return;
+  bar.replaceChildren();
+  const sections = shown && shown.sections;
+  if (!sections || !sections.length) {
+    bar.style.display = 'none';
+    return;
+  }
+  bar.style.display = 'flex';
+  const tag = document.createElement('i');
+  tag.textContent = '剖面';
+  bar.appendChild(tag);
+  const cur = shown.section || sections[0].id;
+  for (const s of sections) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.dataset.section = s.id;
+    b.textContent = s.label;
+    b.className = s.id === cur ? 'on' : '';
+    b.addEventListener('click', () => setHubSection(s.id));
+    bar.appendChild(b);
+  }
+}
+
+function setHubSection(id) {
+  const sections = shown && shown.sections;
+  if (!sections) return;
+  const sec = sections.find(s => s.id === id) || sections[0];
+  shown.section = sec.id;
+  if (shown.applySection) shown.applySection(sec);
+  eye.yaw = 0.72;
+  eye.pitch = 0.58;
+  eye.tx = -24;
+  eye.tz = -36;
+  eye.ty = sec.id === 'surface' ? -12 : sec.floor + 6;
+  eye.dist = 430;
+  paintSection();
+}
+
+function toggleLight(id, force) {
+  const groups = shown && shown.lightGroups;
+  if (!groups) return;
+  const g = groups.find(x => x.id === id);
+  if (!g) return;
+  g.on = force == null ? !g.on : !!force;
+  applyPose(frozen == null ? ((performance.now() % 4200) / 4200) : frozen);
+  paintLights();
 }
 
 function applyPose(p) {
   if (!shown) return;
+  if (shown.ownState) {
+    if (motion) motion(p, state);
+    applyLightGroups();
+    return;
+  }
   shown.ring.visible = state === 'sel';
   for (const m of shown.ring.children) m.material = zoneMat;
   shown.group.rotation.z = state === 'break' ? 0.045 : 0;
@@ -374,6 +563,7 @@ function applyPose(p) {
     for (const m of shown.ring.children) m.material = alertMat;
   }
   if (motion) motion(p, state);
+  applyLightGroups();
 }
 
 function resize() {
@@ -392,7 +582,29 @@ function placeCam() {
     eye.tz + eye.dist * Math.cos(eye.yaw) * cp,
   );
   cam.lookAt(eye.tx, eye.ty, eye.tz);
-  sun.position.set(eye.tx + 48, 90, eye.tz + 36);
+  const near = Math.max(0.06, eye.dist / 500);
+  const far = Math.max(8000, eye.dist * 8);
+  if (Math.abs(cam.near - near) > near * 0.05 || Math.abs(cam.far - far) > 1) {
+    cam.near = near;
+    cam.far = far;
+    cam.updateProjectionMatrix();
+  }
+  const interior = shown && shown.ownState;
+  if (interior) {
+    const r = CULT_EMPTY.plot;
+    sun.position.set(eye.tx + r * 0.42, r * 0.72, eye.tz + r * 0.28);
+    sc.left = sc.bottom = -r * 0.78;
+    sc.right = sc.top = r * 0.78;
+    sc.near = 8;
+    sc.far = r * 3.2;
+  } else {
+    sun.position.set(eye.tx + 48, 90, eye.tz + 36);
+    sc.left = sc.bottom = -90;
+    sc.right = sc.top = 90;
+    sc.near = 1;
+    sc.far = 280;
+  }
+  sc.updateProjectionMatrix();
   sun.target.position.set(eye.tx, eye.ty, eye.tz);
 }
 
@@ -403,7 +615,18 @@ function classLabel(id) {
   return (LAB_CLASSES.find(c => c.id === id) || {}).label || id;
 }
 function fillBrief(entry) {
-  const saved = loadBriefs()[entry.id] || {};
+  const all = loadBriefs();
+  const marker = entry.id === 'cult-b' ? '漆面' : entry.id === 'cult-a' ? '后开始' : entry.id === 'grub-trough' ? '光晕' : entry.id === 'hub' ? '环心' : '';
+  if (marker && (!all[entry.id] || !String(all[entry.id].notes || '').includes(marker))) {
+    all[entry.id] = {
+      name: entry.name,
+      cls: classLabel(entry.cls),
+      size: entry.size,
+      notes: entry.notes,
+    };
+    localStorage.setItem(STORE, JSON.stringify(all));
+  }
+  const saved = all[entry.id] || {};
   $('b-name').value = saved.name || entry.name;
   $('b-cls').value = saved.cls || classLabel(entry.cls);
   $('b-size').value = saved.size || entry.size;
@@ -486,7 +709,8 @@ canvas.addEventListener('pointercancel', () => { drag = null; });
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
-  eye.dist = Math.min(6000, Math.max(2.5, eye.dist * (e.deltaY > 0 ? 1.08 : 0.92)));
+  const distCap = curId === 'hub' ? 90000 : 6000;
+  eye.dist = Math.min(distCap, Math.max(2.5, eye.dist * (e.deltaY > 0 ? 1.08 : 0.92)));
 }, { passive: false });
 
 for (const e of LAB_ENTRIES) {
@@ -522,9 +746,21 @@ window.__lab = {
   entries: LAB_ENTRIES.map(e => e.id),
   get id() { return curId; },
   get state() { return state; },
-  get view() { return { yaw: eye.yaw, pitch: eye.pitch, dist: eye.dist }; },
+  get view() { return { yaw: eye.yaw, pitch: eye.pitch, dist: eye.dist, tx: eye.tx, ty: eye.ty, tz: eye.tz }; },
+  get section() { return (shown && shown.section) || null; },
+  setSection(id) { setHubSection(id); },
+  get hub() { return (shown && shown.group && shown.group.userData.hub) || null; },
   select(id) { show(id); },
   reframe() { frameSpan(LAB_ENTRIES.find(e => e.id === curId)); },
   setState,
-  pose(p) { frozen = p; },
+  pose(p) { frozen = p; applyPose(p); },
+  look(part) { if (part) Object.assign(eye, part); },
+  get cult() { return (shown && shown.group && shown.group.userData.cult) || null; },
+  get grub() { return (shown && shown.group && shown.group.userData.grub) || null; },
+  get brief() { return loadBriefs()[curId] || null; },
+  get lights() {
+    return ((shown && shown.lightGroups) || []).map(g => ({ id: g.id, label: g.label, on: g.on }));
+  },
+  toggleLight(id) { toggleLight(id); },
+  setLight(id, on) { toggleLight(id, on); },
 };

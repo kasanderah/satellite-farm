@@ -754,6 +754,8 @@ export function harvestCulture(tankId) {
   if (!tank?.species || !watch) return { ok: false, reason: 'empty' };
   if (!watch.ready) return { ok: false, reason: 'early' };
   const spec = CULTURES.find(c => c.id === tank.species);
+  // TODO: 同一地块的顶灯、门灯、墙灯跟最近一次开始的单元。光照不对或弱光应减产。
+  // 蛴螬培养槽会把所在地块画成弱光，但这里的公斤数仍是固定值，还没有乘光照。
   const lot = {
     id: nextLot++, crop: spec.id, name: spec.name, kind: 'protein',
     liters: spec.id === 'bsf' ? 420 : 180, unit: 'kg',
