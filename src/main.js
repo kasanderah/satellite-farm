@@ -743,7 +743,9 @@ function curveObject(root) {
   root.traverse(obj => {
     const list = obj.material ? (Array.isArray(obj.material) ? obj.material : [obj.material]) : [];
     for (const m of list) {
-      if (!m || m.userData.colonyCurve || m.isSpriteMaterial || m.isPointsMaterial) continue;
+      // 光晕点云以前不卷。镜头拉远、环带拱起来之后，点还停在平面坐标里，空地上会浮出一簇亮点。
+      // 精灵没有这份 project_vertex，不能用同一套弯曲。
+      if (!m || m.userData.colonyCurve || m.isSpriteMaterial) continue;
       m.userData.colonyCurve = true;
       curved(m);
     }
