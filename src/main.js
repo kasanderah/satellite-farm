@@ -11,7 +11,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { HorizontalTiltShiftShader } from 'three/addons/shaders/HorizontalTiltShiftShader.js';
 import { VerticalTiltShiftShader } from 'three/addons/shaders/VerticalTiltShiftShader.js';
-import { PALETTE, CROPS, TEX_ID, L, fields, harvesters, haulers, drones, step, TRUNKS_X, TRUNKS_Z, depots, inCrater, ROADS, RING, LAYERS, CUT, wrapX, PLOT, economy, focus, signals, log, plantField, quote, setTimeScale, setPaused, paused, exportSnapshot, applySnapshot, fieldAtWorld, fieldAt, fieldOrigin, simTime, worldDay, stores, rigs, fieldVisual, cropWatch, POTATO_DAYS, warehouse, buildings, sellLot, placeBuilding, removeBuilding, rigReadout, SHOP, buySeed, buyItem, SEED_PER_FIELD, FERT_PER_FIELD, resetGame, CULTURES, DECK_CLIMATE, tanks, cultureWatch, startCulture, tendCulture, harvestCulture, BUILDING_KINDS, CULTURE_CELLS, tankSite, devices, potatoStock, fertPlan, cultureFeedPlan, millWatch, startMill, removeMill, orderProcess } from './_shared.js';
+import { PALETTE, CROPS, TEX_ID, L, fields, harvesters, haulers, drones, step, TRUNKS_X, TRUNKS_Z, depots, inCrater, ROADS, RING, LAYERS, CUT, wrapX, PLOT, economy, focus, signals, log, plantField, quote, setTimeScale, setPaused, paused, exportSnapshot, applySnapshot, fieldAtWorld, fieldAt, fieldOrigin, simTime, worldDay, stores, rigs, fieldVisual, cropWatch, POTATO_DAYS, POTATO_STAGES, warehouse, buildings, sellLot, sellStack, warehouseStacks, warehouseCapacity, placeBuilding, removeBuilding, rigReadout, SHOP, buySeed, buyItem, SEED_PER_FIELD, FERT_PER_FIELD, resetGame, CULTURES, DECK_CLIMATE, tanks, cultureWatch, startCulture, tendCulture, harvestCulture, BUILDING_KINDS, CULTURE_CELLS, tankSite, devices, potatoStock, fertPlan, cultureFeedPlan, millWatch, startMill, removeMill, orderProcess, HUB_SITES, cropDossier } from './_shared.js';
 import { productById } from './products.js';
 import { NOISE, FARM, CURVE_DECL, CURVE_PROJECT } from './glsl.js';
 import { harvesterKit, haulerKit, droneKit, personKit, conveyorKit, depotKit, hubKit, plantGeometry, mastKit, irrigatorKit, growRackKit, tankKit, pumpKit, pipeRackKit, tractorKit, planterKit, hillerKit, topperKit, potatoLifterKit, shedKit, warehouseKit, garageKit, processKit, cultureTankKit, armKit, deckLightKit } from './prefabs.js';
@@ -85,7 +85,19 @@ function writeFields() {
 function curved(mat, extra) {
   mat.onBeforeCompile = (s) => {
     s.uniforms.uCurve = U.uCurve;
-    s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\n' + CURVE_DECL).replace('#include <project_vertex>', CURVE_PROJECT);
+    s.vertexShader = s.vertexShader
+      .replace('#include <common>', '#include <common>\n' + CURVE_DECL)
+      .replace('#include <project_vertex>', CURVE_PROJECT)
+      // 剖面按平面高度切。卷曲后的视空间已经抬过刀面，中枢地板和井筒会被整段切掉。
+      .replace('#include <clipping_planes_vertex>', `#include <clipping_planes_vertex>
+#if NUM_CLIPPING_PLANES > 0
+  vec4 flatClip = vec4( transformed, 1.0 );
+  #ifdef USE_INSTANCING
+    flatClip = instanceMatrix * flatClip;
+  #endif
+  flatClip = modelViewMatrix * flatClip;
+  vClipPosition = - flatClip.xyz;
+#endif`);
     if (extra) extra(s);
   };
   return mat;
@@ -806,6 +818,16 @@ hubArt.group.position.set(0, 0.15, 0);
 hubArt.group.traverse(obj => { obj.frustumCulled = false; });
 curveObject(hubArt.group);
 scene.add(hubArt.group);
+const elevatorProto = colony.buildTransferElevator();
+const neighborShafts = [];
+for (const site of HUB_SITES) {
+  if (site.local) continue;
+  const g = elevatorProto.clone(true);
+  const at = seatPlot(g, site.bi, site.bj, 0.15);
+  g.traverse(obj => { obj.frustumCulled = false; });
+  scene.add(g);
+  neighborShafts.push({ g, ...site, ...at });
+}
 function syncHubSection() {
   const sec = hubArt.sections.find(s => s.id === viewLayer) || hubArt.sections[0];
   hubArt.applySection(sec);
@@ -1283,7 +1305,8 @@ function applyDeckView() {
 }
 // 交互：左键平移 / 右键旋转 / 滚轮缩放 / WASD / QE / N 昼夜 / M 地图模式 / H 隐藏界面
 let drag = null, ptr = null, selected = null, selNote = '';
-let mode = 'plan', watchRig = null, pickedLot = null, shopPick = 'seed', deckTank = 0, deckBlock = null, deckHub = false, buildAct = 'place', buildKind = 'warehouse', buildPick = null, millPlace = false;
+let mode = 'plan', watchRig = null, pickedLot = null, pickedStack = null, shopPick = 'seed', cropPick = 'potato', deckTank = 0, deckBlock = null, deckHub = false, buildAct = 'place', buildKind = 'warehouse', buildPick = null, millPlace = false;
+const pickedFields = new Set();
 const raycaster = new THREE.Raycaster();
 function pickFlat(cx, cy) {
   const ndc = new THREE.Vector2((cx / innerWidth) * 2 - 1, -(cy / innerHeight) * 2 + 1);
@@ -1370,20 +1393,123 @@ function doPlant(id) {
   saveSoon();
   return r;
 }
+function closePlanMenu() {
+  const menu = $('planmenu');
+  if (!menu) return;
+  menu.classList.remove('on');
+  menu.innerHTML = '';
+}
+function applyFieldPick(list, shift) {
+  if (!shift) pickedFields.clear();
+  for (const f of list) if (f?.owned) pickedFields.add(f.idx);
+  const last = list.filter(f => f?.owned).pop();
+  if (last) selectField(last, '');
+  else if (!pickedFields.size) selectField(null);
+  if (mode === 'scheme') paintSheet();
+}
+function planSelected(cropId) {
+  closePlanMenu();
+  let n = 0;
+  let why = '';
+  for (const idx of pickedFields) {
+    const f = fields[idx];
+    if (!f?.owned) continue;
+    const r = plantField(f, cropId);
+    if (r.ok) n++;
+    else if (!why) why = r.reason === 'seed' ? '种薯不足' : r.reason === 'fertilizer' ? '肥料不足' : r.reason === 'busy' ? '有的田正在长' : '有的田不能种';
+  }
+  if (n) toast(`已规划 ${n} 块。生长等播种机开工`);
+  else toast(why || '没有种上');
+  paintSheet();
+  saveSoon();
+}
+function openPlanMenu(x, y) {
+  const menu = $('planmenu');
+  if (!menu || !pickedFields.size) { closePlanMenu(); return; }
+  menu.classList.add('on');
+  menu.style.left = Math.min(x, innerWidth - 220) + 'px';
+  menu.style.top = Math.min(y, innerHeight - 140) + 'px';
+  menu.innerHTML = `<div class="who"><b>规划 ${pickedFields.size} 块</b><span>钟从播种机开工起算</span></div><button type="button" class="sell" id="plan-potato-menu">种中熟商品薯</button>`;
+}
+document.getElementById('planmenu').addEventListener('click', e => {
+  if (e.target.id === 'plan-potato-menu') planSelected('potato');
+});
 R.domElement.addEventListener('contextmenu', e => e.preventDefault());
 R.domElement.addEventListener('pointerdown', e => {
-  ptr = { x: e.clientX, y: e.clientY, b: e.button };
+  ptr = { x: e.clientX, y: e.clientY, b: e.button, shift: e.shiftKey };
+  if (mode === 'scheme' && viewLayer === 'surface' && e.button === 0) {
+    drag = { b: 'box', x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, shift: e.shiftKey };
+    closePlanMenu();
+    R.domElement.setPointerCapture(e.pointerId);
+    return;
+  }
+  if (mode === 'scheme' && viewLayer === 'surface' && e.button === 2) {
+    drag = { b: 'rmb', x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY };
+    R.domElement.setPointerCapture(e.pointerId);
+    return;
+  }
   drag = { b: e.button === 2 || e.shiftKey ? 'rot' : 'pan', x: e.clientX, y: e.clientY };
   R.domElement.setPointerCapture(e.pointerId);
 });
 addEventListener('pointerup', e => {
+  if (drag && drag.b === 'box') {
+    const moved = Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) >= 6;
+    $('marquee').classList.remove('on');
+    if (!moved) {
+      const p = pickFlat(drag.x0, drag.y0);
+      const f = p ? fieldAtWorld(p.x, p.z) : null;
+      if (f?.owned && drag.shift) {
+        if (pickedFields.has(f.idx)) pickedFields.delete(f.idx);
+        else pickedFields.add(f.idx);
+        selectField(f, '');
+        paintSheet();
+      } else if (f?.owned) applyFieldPick([f], false);
+      else if (!drag.shift) { pickedFields.clear(); selectField(null); paintSheet(); }
+    } else {
+      const left = Math.min(drag.x0, e.clientX), right = Math.max(drag.x0, e.clientX);
+      const top = Math.min(drag.y0, e.clientY), bot = Math.max(drag.y0, e.clientY);
+      const hit = [];
+      for (const f of fields) {
+        if (!f.owned || !f.inPlot) continue;
+        const s = project(f.x0 + L.FIELD / 2, 0, f.z0 + L.FIELD / 2);
+        if (!s || s[0] < left || s[0] > right || s[1] < top || s[1] > bot) continue;
+        hit.push(f);
+      }
+      applyFieldPick(hit, drag.shift);
+    }
+    drag = null; ptr = null;
+    return;
+  }
+  if (drag && drag.b === 'rmb') {
+    if (Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) < 6) {
+      const p = pickFlat(e.clientX, e.clientY);
+      const f = p ? fieldAtWorld(p.x, p.z) : null;
+      if (f?.owned && !pickedFields.has(f.idx)) pickedFields.add(f.idx);
+      if (f?.owned) selectField(f, '');
+      openPlanMenu(e.clientX, e.clientY);
+      if (mode === 'scheme') paintSheet();
+    }
+    drag = null; ptr = null;
+    return;
+  }
   if (ptr && ptr.b === 0 && Math.hypot(e.clientX - ptr.x, e.clientY - ptr.y) < 6) onMapClick(ptr.x, ptr.y);
   drag = null; ptr = null;
 });
 let hoverPtr = null, deckHover = null;
 addEventListener('pointermove', e => {
   hoverPtr = { x: e.clientX, y: e.clientY };
-  if (!drag) return; const dx = e.clientX - drag.x, dy = e.clientY - drag.y; drag.x = e.clientX; drag.y = e.clientY;
+  if (!drag) return;
+  if (drag.b === 'box') {
+    const m = $('marquee');
+    m.style.left = Math.min(drag.x0, e.clientX) + 'px';
+    m.style.top = Math.min(drag.y0, e.clientY) + 'px';
+    m.style.width = Math.abs(e.clientX - drag.x0) + 'px';
+    m.style.height = Math.abs(e.clientY - drag.y0) + 'px';
+    m.classList.add('on');
+    return;
+  }
+  if (drag.b === 'rmb') return;
+  const dx = e.clientX - drag.x, dy = e.clientY - drag.y; drag.x = e.clientX; drag.y = e.clientY;
   if (drag.b === 'pan') {
     const k = camT.d * 2 * Math.tan(15 * DEG) / innerHeight, s = Math.sin(camT.yaw), c = Math.cos(camT.yaw);
     camT.x -= (dx * c + dy * s / Math.sin(pitchOf(camT.d))) * k; camT.z -= (-dx * s + dy * c / Math.sin(pitchOf(camT.d))) * k;
@@ -1456,14 +1582,16 @@ legend.innerHTML = [
   ['碎秧', PALETTE.ochre, PALETTE.rust],
   ['起薯', PALETTE.straw, PALETTE.regoLt],
 ].map(([name, a, b]) => `<div class="lg"><i style="background:linear-gradient(90deg,${a},${b})"></i><span>${name}</span></div>`).join('');
-const MODES = [['machines', '农机', 'FLEET'], ['plan', '区域', 'PLAN'], ['store', '仓库', 'STORE'], ['build', '建设', 'BUILD'], ['shop', '商店', 'SHOP']];
+const MODES = [['machines', '农机', 'FLEET'], ['plan', '区域', 'PLAN'], ['crops', '作物', 'CROP'], ['scheme', '规划', 'ASSIGN'], ['store', '仓库', 'STORE'], ['build', '建设', 'BUILD'], ['shop', '商店', 'SHOP']];
 $('tiers').innerHTML = MODES.map(([id, zh, en]) => `<button type="button" data-mode="${id}"><b>${zh}</b><small>${en}</small></button>`).join('');
 function gotoTier(n) { camT.d = [4800, 900, 160, 34][n - 1]; camT.pOff = 0; camT.lookUp = 0; camT.fovAdd = 0; }
 function fieldCode(f) { return `F-${String(f.i).padStart(3, '0')}${String(f.j).padStart(2, '0')}`; }
 function rigLine(r) {
   const info = rigReadout(r);
-  if (!r.busy || !r.f) return '停在机库';
-  return `${info.doing} · ${fieldCode(r.f)} · ${Math.round(info.frac * 100)}%`;
+  const pct = Math.round((info.charge ?? 1) * 100);
+  if (!r.busy && r.mode !== 'charge') return `停在机库 · 电 ${pct}%`;
+  const where = r.f ? ' · ' + fieldCode(r.f) : '';
+  return `${info.doing}${where} · 电 ${pct}%`;
 }
 function paintLock() {
   const el = $('rigread');
@@ -1474,7 +1602,8 @@ function paintLock() {
   const pct = Math.round(info.frac * 100);
   const where = r.f ? fieldCode(r.f) : '';
   el.classList.add('on');
-  el.innerHTML = `<b>${r.label}</b><small><em>${info.speed.toFixed(1)}</em> m/s</small><small>${info.doing}${where ? ' · ' + where : ''}</small><div id="rigbar"><i style="width:${pct}%"></i></div><small>本趟 ${pct}%</small>`;
+  const batt = Math.round((info.charge ?? 1) * 100);
+  el.innerHTML = `<b>${r.label}</b><small><em>${info.speed.toFixed(1)}</em> m/s · 电 ${batt}%</small><small>${info.doing}${where ? ' · ' + where : ''}</small><div id="rigbar"><i style="width:${pct}%"></i></div><small>本趟 ${pct}%</small>`;
 }
 function refreshLayerProps() {
   buildPlotSection();
@@ -1546,27 +1675,49 @@ function lockRig(id) {
 function paintModes() {
   document.querySelectorAll('#tiers button').forEach(b => b.classList.toggle('on', b.dataset.mode === mode));
 }
+function stackSlots(list, pick, attr) {
+  if (!list.length) return '<p class="note">这里还是空的。</p>';
+  return `<div class="slots">${list.map(item => `<button type="button" class="slot${pick === item.key ? ' on' : ''}" ${attr}="${item.key}"><b>${item.name}</b><small>${item.sub}</small></button>`).join('')}</div>`;
+}
 function paintSheet() {
   const el = $('sheet');
+  el.classList.toggle('wide', mode === 'crops' || mode === 'store' || mode === 'shop' || mode === 'scheme');
   if (mode === 'plan') { el.classList.remove('on'); el.innerHTML = ''; return; }
   el.classList.add('on');
-  if (mode === 'machines') {
+  if (mode === 'crops') {
+    const rows = CROPS.map(c => ({ key: c.id, name: c.name, sub: c.plantable ? '可种' : '邻区' }));
+    const d = cropDossier(cropPick) || cropDossier('potato');
+    const stages = d.stages.length
+      ? d.stages.map(s => `<div class="stage"><span><i style="background:${s.color}"></i>${s.name}</span><span>${s.days} 日${s.machine ? ' · ' + s.machine + ' 第 ' + s.machineAt + ' 日' : ''}</span></div><p class="note">${s.effect}</p>`).join('')
+      : `<p class="note">${d.yieldNote}</p>`;
+    const head = d.plantable
+      ? `<div class="who"><b>${d.name}</b><span>${d.analog} · ${d.days} 日</span></div><p class="note">${d.yieldNote}</p>${stages}`
+      : `<div class="who"><b>${d.name}</b><span>${d.analog} · 参考 ${d.days} 日</span></div><p class="note">${d.yieldNote}</p>`;
+    el.innerHTML = `<div class="split"><div><div class="who"><b>作物</b><span>点一种看阶段</span></div>${stackSlots(rows, d.id, 'data-cropid')}</div><div>${head}</div></div>`;
+  } else if (mode === 'scheme') {
+    const n = pickedFields.size;
+    el.innerHTML = `<div class="who"><b>规划</b><span>已选 ${n} 块田</span></div><p class="note">拖出方框选田。按住 Shift 再点，加选。右键已选的田，指定作物。生长从播种机开工才计时，不是从这一下。</p><button type="button" class="sell" id="plan-potato"${n ? '' : ' disabled'}>种中熟商品薯</button>`;
+  } else if (mode === 'machines') {
     el.innerHTML = `<div class="who"><b>农机</b><span>点一台，镜头跟着它</span></div>` + rigs.map(r => `<button type="button" class="rowbtn${watchRig && watchRig.id === r.id ? ' on' : ''}" data-rig="${r.id}"><b>${r.label}</b><small>${rigLine(r)}</small></button>`).join('');
   } else if (mode === 'store') {
-    const quotes = ['potato', 'starch', 'grub', 'bsf'].map(id => {
-      const p = productById(id);
-      return `<div class="price"><span>${p.nameZh}</span><em>牌价 ${fmt(p.sellPrice)}</em></div>`;
-    }).join('');
-    const lots = warehouse.map(lot => {
-      const where = lot.i == null || lot.j == null ? '培育层' : fieldCode(lot);
-      return `<button type="button" class="rowbtn${pickedLot === lot.id ? ' on' : ''}" data-lot="${lot.id}"><b>${lot.name}</b><small>${where} · ${fmt(lot.liters)} ${lot.unit || 'L'}</small></button>`;
-    }).join('');
-    el.innerHTML = `<div class="who"><b>仓库</b><span>中枢仓库。选中一批，再出售。</span></div>${quotes}<p class="note">牌价是记账价。行情以后接在这里，现在不会变。</p>${lots || '<p class="note">仓里还是空的。</p>'}<button type="button" class="sell" id="sell"${pickedLot == null ? ' disabled' : ''}>出售</button>`;
+    const cap = warehouseCapacity();
+    const stacks = warehouseStacks();
+    if (pickedStack && !stacks.some(s => s.key === pickedStack)) pickedStack = stacks[0]?.key || null;
+    if (!pickedStack && stacks[0]) pickedStack = stacks[0].key;
+    const slots = stacks.map(s => ({ key: s.key, name: s.name, sub: `${fmt(s.liters)} ${s.unit}` }));
+    const cur = stacks.find(s => s.key === pickedStack);
+    const capLine = cap.soft ? `已用 ${cap.usedSlots} 格 · ${fmt(cap.usedLiters)} L · 容量未封顶` : `已用 ${cap.usedSlots}/${cap.maxSlots ?? '—'} 格`;
+    const right = cur
+      ? `<div class="who"><b>${cur.name}</b><span>${fmt(cur.liters)} ${cur.unit} · 牌价 ${fmt(cur.listPrice)}</span></div><p class="note">${cur.n} 批叠在这一格。拖百分比，按这个比例出售。</p><input id="sell-pct" type="range" min="1" max="100" value="100" aria-label="出售比例"><div class="who"><span id="sell-pct-lab">100%</span></div><button type="button" class="sell" id="sell">出售</button>`
+      : `<p class="note">仓里还是空的。收获的薯和蛋白会叠到左边。</p>`;
+    el.innerHTML = `<div class="split"><div><div class="who"><b>仓库</b><span>${capLine}</span></div>${stackSlots(slots, pickedStack, 'data-stack')}</div><div>${right}</div></div>`;
+    const pct = $('sell-pct');
+    if (pct) pct.addEventListener('input', () => { const lab = $('sell-pct-lab'); if (lab) lab.textContent = pct.value + '%'; });
   } else if (mode === 'shop') {
-    const rows = SHOP.map(item => `<button type="button" class="rowbtn${shopPick === item.id ? ' on' : ''}" data-shop="${item.id}"><b>${item.name}</b><small>${fmt(item.price)} · 库存 ${stores[item.id]}</small></button>`).join('');
+    const rows = SHOP.map(item => ({ key: item.id, name: item.name, sub: `${fmt(item.price)} · 库存 ${stores[item.id]}` }));
     const item = SHOP.find(s => s.id === shopPick) || SHOP[0];
     const use = item.id === 'seed' ? `种一块田用 ${SEED_PER_FIELD}。` : item.id === 'fertilizer' ? `种一块田用 ${FERT_PER_FIELD}。` : '开一槽用 1。';
-    el.innerHTML = `<div class="who"><b>商店</b><span>用营收买。商品薯和蛋白仍在仓库出售。</span></div>${rows}<p class="note">${use}</p><div class="buyline"><input id="shop-qty" class="qty" type="text" inputmode="numeric" value="1" aria-label="购买数量" autocomplete="off"><button type="button" class="sell" id="buy">购买</button></div>`;
+    el.innerHTML = `<div class="split"><div><div class="who"><b>商店</b><span>用营收买</span></div>${stackSlots(rows, item.id, 'data-shop')}</div><div><div class="who"><b>${item.name}</b><span>单价 ${fmt(item.price)} · 库存 ${stores[item.id]}</span></div><p class="note">${use}商品薯和蛋白仍在仓库出售。</p><div class="buyline"><input id="shop-qty" class="qty" type="text" inputmode="numeric" value="1" aria-label="购买数量" autocomplete="off"><button type="button" class="sell" id="buy">购买</button></div></div></div>`;
     const qty = $('shop-qty');
     qty.addEventListener('focus', ev => ev.target.select());
     qty.addEventListener('mouseup', ev => ev.preventDefault());
@@ -1613,6 +1764,7 @@ function setMode(id) {
   mode = id;
   if (id === 'plan') { showPlan(); return; }
   if (id !== 'machines') watchRig = null;
+  if (id !== 'scheme') closePlanMenu();
   paintModes();
   paintSheet();
 }
@@ -1624,8 +1776,11 @@ $('tiers').addEventListener('click', e => {
 $('sheet').addEventListener('click', e => {
   const rig = e.target.closest('[data-rig]');
   if (rig) { lockRig(+rig.dataset.rig); return; }
-  const lot = e.target.closest('[data-lot]');
-  if (lot) { pickedLot = +lot.dataset.lot; paintSheet(); return; }
+  const cropId = e.target.closest('[data-cropid]');
+  if (cropId) { cropPick = cropId.dataset.cropid; paintSheet(); return; }
+  const stack = e.target.closest('[data-stack]');
+  if (stack) { pickedStack = stack.dataset.stack; paintSheet(); return; }
+  if (e.target.id === 'plan-potato') { planSelected('potato'); return; }
   const bact = e.target.closest('[data-bact]');
   if (bact) { buildAct = bact.dataset.bact; paintSheet(); return; }
   const bkind = e.target.closest('[data-bkind]');
@@ -1726,10 +1881,12 @@ $('sheet').addEventListener('click', e => {
     return;
   }
   if (e.target.id === 'sell') {
-    if (pickedLot == null) return;
-    const sold = sellLot(pickedLot);
-    pickedLot = null;
-    if (!sold) toast('这仓薯已经不在了');
+    if (!pickedStack) return;
+    const cropId = pickedStack.split('|')[0];
+    const frac = (+$('sell-pct')?.value || 100) / 100;
+    const sold = sellStack(cropId, frac);
+    if (!sold) toast('这仓已经不在了');
+    else toast(`<b>+${fmt(sold.listPrice)}</b>${sold.name}`);
     paintSheet();
     saveSoon();
   }
@@ -1789,6 +1946,30 @@ function fillDeckLabels(want, d) {
     }
     want.push({ x, z, y, pr: tank >= 0 ? 0 : 2, a: aCell, html: `<b>${title}</b><span>${sub}</span>`, cls: 'fld' + (hit || tank === deckTank && tank >= 0 ? ' act' : '') });
   }
+}
+function paintPicks() {
+  const host = $('picks');
+  if (!host) return;
+  if (mode !== 'scheme' || viewLayer !== 'surface' || !pickedFields.size) {
+    if (host.childElementCount) host.innerHTML = '';
+    return;
+  }
+  const bits = [];
+  for (const idx of pickedFields) {
+    const f = fields[idx];
+    if (!f) continue;
+    let minX = 1e9, minY = 1e9, maxX = -1e9, maxY = -1e9, ok = 0;
+    for (const [x, z] of [[f.x0, f.z0], [f.x0 + L.FIELD, f.z0], [f.x0, f.z0 + L.FIELD], [f.x0 + L.FIELD, f.z0 + L.FIELD]]) {
+      const s = project(x, 0, z);
+      if (!s) continue;
+      ok++;
+      minX = Math.min(minX, s[0]); minY = Math.min(minY, s[1]);
+      maxX = Math.max(maxX, s[0]); maxY = Math.max(maxY, s[1]);
+    }
+    if (ok < 2) continue;
+    bits.push(`<i style="left:${minX.toFixed(0)}px;top:${minY.toFixed(0)}px;width:${Math.max(2, maxX - minX).toFixed(0)}px;height:${Math.max(2, maxY - minY).toFixed(0)}px"></i>`);
+  }
+  host.innerHTML = bits.join('');
 }
 function updateLabels(d) {
   const want = [];
@@ -1928,8 +2109,14 @@ function updateDock() {
   }
   $('selid').textContent = `F-${String(f.i).padStart(3, '0')}${String(f.j).padStart(2, '0')}`;
   $('selstat').textContent = stat;
-  const p = watch && !watch.waiting ? Math.max(0, Math.min(1, watch.day / watch.days)) : 0;
-  $('selbar').style.width = (p * 100).toFixed(1) + '%';
+  const day = watch && !watch.waiting ? watch.day : 0;
+  const days = watch?.days || POTATO_DAYS;
+  const bar = $('bar');
+  if (bar) bar.innerHTML = POTATO_STAGES.map(s => {
+    const fill = day <= s.from ? 0 : day >= s.to ? 1 : (day - s.from) / (s.to - s.from);
+    const pct = (fill * 100).toFixed(1);
+    return `<i style="flex:${s.to - s.from};background:linear-gradient(90deg,${s.color} ${pct}%,rgba(232,216,208,.16) ${pct}%)"></i>`;
+  }).join('');
   document.querySelectorAll('#selbtns button').forEach(b => {
     b.disabled = !f.owned;
     b.classList.toggle('on', !!watch && !watch.waiting && stores.seed >= SEED_PER_FIELD);
@@ -2306,6 +2493,7 @@ function frame(now) {
   updateLabels(d);
   paintKpi();
   updateDock();
+  paintPicks();
   paintLock();
   drainLog();
   if (frames === 0) {
@@ -2346,6 +2534,8 @@ window.__farm = {
   },
   watch: () => cropWatch(selected),
   lock(id) { setMode('machines'); lockRig(id); paintLock(); },
+  setMode,
+  get picked() { return pickedFields.size; },
   aim(yawDeg, dist, pitch) {
     if (yawDeg != null) camT.yaw = camS.yaw = yawDeg * DEG;
     if (dist != null) camT.d = camS.d = dist;

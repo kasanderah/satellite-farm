@@ -1480,6 +1480,68 @@ function buildHubPlot(opts) {
     piece(box(opening * 2, t, ns, 0, yc, (H + opening) / 2, material));
   };
   if (!(opts && opts.game)) for (const f of floors) addSlab(f.y, f.mat, f.id);
+  // 游戏里不铺浅灰整板。培育层改成一块压暗的细分地板，井外摆满密封罐和管架，星空不再从这一格漏出来。
+  let growSealMat = null;
+  let tankLit = null;
+  if (opts && opts.game) {
+    growSealMat = mat({ color: '#7e868c', emissive: '#5c656b', emissiveIntensity: 0.42, roughness: 0.78, metalness: 0.28 });
+    const seg = Math.max(8, Math.ceil(plot / 48));
+    const slab = new THREE.Mesh(new THREE.BoxGeometry(plot, 0.55, plot, seg, 1, seg), growSealMat);
+    slab.position.y = -17.28;
+    slab.userData.layer = 'grow';
+    put(slab);
+    tankLit = mat({ color: '#d7dbd8', emissive: '#b7beb8', emissiveIntensity: 0.28, roughness: 0.62, metalness: 0.2 });
+    const capLit = mat({ color: '#1c3332', emissive: '#c8fff4', emissiveIntensity: 1.15, roughness: 0.4, metalness: 0 });
+    const pipeLit = mat({ color: '#2a3034', roughness: 0.64, metalness: 0.38 });
+    // 顶面停在剖面刀（世界 y = -1.55，组原点再高 0.15）下面，罐盖不被切掉。
+    const bodyH = 12.6;
+    const bodyGeo = new THREE.CylinderGeometry(12.6, 13.2, bodyH, 12);
+    const capGeo = new THREE.CylinderGeometry(7.6, 9.4, 1.4, 12);
+    const rackGeo = new THREE.BoxGeometry(28, 7.5, 12);
+    const bodies = [];
+    const caps = [];
+    const racks = [];
+    const margin = 34;
+    const step = 40;
+    let n = 0;
+    for (let x = -H + margin; x <= H - margin; x += step) {
+      for (let z = -H + margin; z <= H - margin; z += step) {
+        if (Math.hypot(x, z) < 40) continue;
+        const aisle = Math.abs(Math.abs(x) - Math.abs(z)) < 8;
+        if (aisle) continue;
+        if ((n + Math.round(x / step)) % 5 === 0) racks.push([x, z]);
+        else { bodies.push([x, z]); caps.push([x, z]); }
+        n++;
+      }
+    }
+    const addInst = (geo, material, spots, y, layer) => {
+      if (!spots.length) return;
+      const mesh = new THREE.InstancedMesh(geo, material, spots.length);
+      const dummy = new THREE.Object3D();
+      spots.forEach(([x, z], i) => {
+        dummy.position.set(x, y, z);
+        dummy.rotation.set(0, 0, 0);
+        dummy.scale.set(1, 1, 1);
+        dummy.updateMatrix();
+        mesh.setMatrixAt(i, dummy.matrix);
+      });
+      mesh.castShadow = mesh.receiveShadow = false;
+      mesh.userData.layer = layer;
+      g.add(mesh);
+    };
+    addInst(bodyGeo, tankLit, bodies, -17 + bodyH * 0.5 + 0.4, 'grow');
+    addInst(capGeo, capLit, caps, -17 + bodyH + 1.15, 'grow');
+    addInst(rackGeo, tankLit, racks, -17 + 3.9, 'grow');
+    const pipeGeo = new THREE.BoxGeometry(step * 0.82, 0.7, 0.7);
+    const pipes = [];
+    for (let x = -H + margin; x <= H - margin; x += step) {
+      for (let z = -H + margin; z <= H - margin - step; z += step) {
+        if (Math.hypot(x, z) < 48) continue;
+        pipes.push([x, z + step / 2]);
+      }
+    }
+    addInst(pipeGeo, pipeLit, pipes, -17 + 1.1, 'grow');
+  }
 
   const curbH = 1.15;
   const curbT = 2.4;
@@ -1754,7 +1816,7 @@ function buildHubPlot(opts) {
     floor: f.y,
     clip: i === 0 ? null : floors[i - 1].y - 1.55,
   }));
-  const clipMats = [shellMat, charMat, padMat, deckMat, equipMat, hullMat, hallMat, yelMat, redMat, coolMat, deckGlow, curbMat, trunkMat];
+  const clipMats = [shellMat, charMat, padMat, deckMat, equipMat, hullMat, hallMat, yelMat, redMat, coolMat, deckGlow, curbMat, trunkMat, growSealMat, tankLit].filter(Boolean);
   for (const pts of [shaftHalo, deckHalo, energyHalo, storeHalo, alarmHalo]) {
     if (pts && pts.material) clipMats.push(pts.material);
   }
@@ -1838,5 +1900,67 @@ function buildHubPlot(opts) {
     },
   };
 }
-  return { buildCultPlot, buildGrubTrough, buildHubPlot };
+  function buildTransferElevator() {
+    const g = new THREE.Group();
+    g.name = 'transfer-elevator';
+    const F = 44;
+    const panelT = 1.35;
+    const side = F / Math.sqrt(3);
+    const panelW = side * 0.62;
+    const faceDist = F / 2 - panelT / 2;
+    const y0 = -64;
+    const y1 = RING.R;
+    const h = y1 - y0;
+    const yc = (y0 + y1) / 2;
+    const shell = new THREE.MeshStandardMaterial({ color: '#d5d8d6', roughness: 0.72, metalness: 0.16 });
+    const seam = new THREE.MeshStandardMaterial({ color: '#2a3034', roughness: 0.64, metalness: 0.38 });
+    const tickMat = new THREE.MeshStandardMaterial({ color: '#3a3014', emissive: '#e2b15c', emissiveIntensity: 1.6, roughness: 0.42, metalness: 0 });
+    const put = (mesh) => { mesh.castShadow = mesh.receiveShadow = false; mesh.frustumCulled = false; g.add(mesh); return mesh; };
+    for (let i = 0; i < 6; i++) {
+      const a = i * Math.PI / 3;
+      const m = put(new THREE.Mesh(new THREE.BoxGeometry(panelW, h, panelT), shell));
+      m.position.set(Math.cos(a) * faceDist, yc, Math.sin(a) * faceDist);
+      m.rotation.y = Math.PI / 2 - a;
+    }
+    const rv = side * 0.72;
+    for (let i = 0; i < 6; i++) {
+      const a = Math.PI / 6 + i * Math.PI / 3;
+      const m = put(new THREE.Mesh(new THREE.BoxGeometry(1.2, h, 1.2), seam));
+      m.position.set(Math.cos(a) * rv, yc, Math.sin(a) * rv);
+    }
+    const step = 92;
+    const n = Math.max(1, Math.floor(h / step));
+    const pitch = h / n;
+    const bands = new THREE.InstancedMesh(new THREE.BoxGeometry(panelW * 1.06, 0.8, panelT + 0.55), seam, n * 6);
+    const ticks = new THREE.InstancedMesh(new THREE.BoxGeometry(0.55, pitch * 0.42, 0.28), tickMat, n);
+    bands.frustumCulled = false;
+    ticks.frustumCulled = false;
+    const dummy = new THREE.Object3D();
+    let bi = 0;
+    for (let lv = 0; lv < n; lv++) {
+      const y = y0 + (lv + 0.5) * pitch;
+      for (let i = 0; i < 6; i++) {
+        const a = i * Math.PI / 3;
+        dummy.position.set(Math.cos(a) * faceDist, y, Math.sin(a) * faceDist);
+        dummy.rotation.set(0, Math.PI / 2 - a, 0);
+        dummy.scale.set(1, 1, 1);
+        dummy.updateMatrix();
+        bands.setMatrixAt(bi++, dummy.matrix);
+      }
+      dummy.position.set(faceDist + 0.7, y, 0);
+      dummy.rotation.set(0, 0, 0);
+      dummy.updateMatrix();
+      ticks.setMatrixAt(lv, dummy.matrix);
+    }
+    g.add(bands, ticks);
+    const collar = put(new THREE.Mesh(new THREE.CylinderGeometry(F * 0.62, F * 0.68, 1.4, 6), shell));
+    collar.position.y = 0.7;
+    const car = put(new THREE.Mesh(new THREE.CylinderGeometry(F * 0.26, F * 0.24, 2.4, 6), shell));
+    car.position.y = 8;
+    const band = put(new THREE.Mesh(new THREE.CylinderGeometry(F * 0.28, F * 0.28, 0.32, 6), tickMat));
+    band.position.y = 8.9;
+    g.traverse(obj => { obj.frustumCulled = false; });
+    return g;
+  }
+  return { buildCultPlot, buildGrubTrough, buildHubPlot, buildTransferElevator };
 }

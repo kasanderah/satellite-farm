@@ -5,8 +5,8 @@ import {
   CROPS, L, PLOT, FIELD_HA, fields, fieldAt, fieldAtWorld, focus, rigs,
   plantField, step, economy, quote, log, exportSnapshot, applySnapshot, RING,
   stores, worldDay, cropWatch, fieldVisual, setPaused, setTimeScale,
-  DAY_SECONDS, MACHINE_MPS, warehouse, sellLot, placeBuilding, removeBuilding, buildings, rigReadout,
-  SHOP, buySeed, buyItem, SEED_PER_FIELD, resetGame, paused, onHubParcel,
+  DAY_SECONDS, MACHINE_MPS, warehouse, sellLot, sellStack, warehouseCapacity, placeBuilding, removeBuilding, buildings, rigReadout,
+  SHOP, buySeed, buyItem, SEED_PER_FIELD, resetGame, paused, onHubParcel, HUB_SITES, POTATO_STAGES, cropDossier,
   CULTURES, tanks, startCulture, harvestCulture, CULTURE_CELLS, inPlotBlock, fieldOrigin,
   devices, potatoStock, fertPlan, cultureFeedPlan, millWatch, startMill, orderProcess, removeMill,
 } from '../src/_shared.js';
@@ -57,8 +57,15 @@ test('a potato follows one 120-day clock through ridges, vines, vine-kill, and p
   assert.equal(planted.ok, true);
   assert.equal(stores.seed, 5);
   assert.equal(stores.fertilizer, 0);
+  assert.equal(bare.plantedAt, null, 'planning does not start the clock');
+  const planter0 = rigs.find(r => r.kind === 'planter');
+  assert.equal(planter0.mode, 'travel');
+  assert.equal(planter0.intent, 'job');
+  assert.equal(planter0.busy, true);
+  let arrive = 0;
+  while (planter0.mode !== 'work' && arrive < 8000) { step(0.5, 0, 1); arrive++; }
+  assert.equal(planter0.mode, 'work');
   assert.equal(cropWatch(bare).phase, 'plant');
-  assert.equal(rigs.find(r => r.kind === 'planter').busy, true);
   const days = (n, scale = 1) => step(n * DAY_SECONDS, 0, scale);
   step(50, 0, 1);
   const planterNow = rigs.find(r => r.kind === 'planter');
@@ -158,12 +165,18 @@ test('a working machine stays on its field, and the next machine starts from tha
   assert.ok(b, 'a second plot field');
   assert.equal(plantField(a, 'potato').ok, true);
   const planter = rigs.find(r => r.kind === 'planter');
+  assert.equal(planter.mode, 'travel');
+  assert.equal(a.plantedAt, null);
+  let arrive = 0;
+  while (planter.mode !== 'work' && arrive < 8000) { step(0.25, 0, 1); arrive++; }
+  assert.equal(planter.mode, 'work');
   const laneTime = L.FIELD / MACHINE_MPS;
   const turnTime = Math.PI * (L.LANE / 2) / MACHINE_MPS;
   const along = a.dir === 0 ? [1, 0] : [0, 1];
   const across = a.dir === 0 ? [0, 1] : [1, 0];
   const head = (ang, v) => Math.cos(ang) * v[0] + Math.sin(ang) * v[1];
-  step(laneTime - 0.15, 0, 1);
+  const remain = Math.abs((planter.lane % 2 === 0 ? L.FIELD : 0) - planter.u);
+  step(Math.max(0.05, remain / MACHINE_MPS - 0.2), 0, 1);
   assert.equal(planter.mode, 'work');
   assert.equal(planter.lane, 0);
   assert.ok(head(planter.ang, along) > 0.98, 'still facing down the first lane');
@@ -208,14 +221,21 @@ test('a working machine stays on its field, and the next machine starts from tha
   let guard = 0;
   while (a.jobS.planter < L.LANES - 0.01 && guard < 500) { step(2, 0, 1); guard++; }
   assert.ok(a.jobS.planter >= L.LANES - 0.01, a.jobS.planter);
-  assert.ok(planter.f === b, 'after the pass it takes the next field');
+  let hop = 0;
+  while (!(planter.f === b && (planter.mode === 'travel' || planter.mode === 'work')) && hop < 12000) {
+    step(0.5, 0, 1); hop++;
+  }
+  assert.equal(planter.f, b, 'after the pass it takes the next field');
   assert.ok(b.jobS.planter < 0.35, b.jobS.planter);
   const hiller = rigs.find(r => r.kind === 'hiller');
   const wait = (a.plantedAt + 20) - worldDay;
   assert.ok(wait > 1, wait);
   step(wait * DAY_SECONDS, 0, 1);
+  let hill = 0;
+  while (hiller.mode !== 'work' && hill < 8000) { step(0.5, 0, 1); hill++; }
+  assert.equal(hiller.mode, 'work');
   assert.equal(hiller.f, a, 'the hiller starts on the older field');
-  assert.ok(a.jobS.hiller < 0.05, a.jobS.hiller);
+  assert.ok(a.jobS.hiller < 0.2, a.jobS.hiller);
   const read = rigReadout(hiller);
   assert.ok(read.speed > 2 && read.speed < 3, read.speed);
   assert.equal(read.doing, '培土');
@@ -618,7 +638,13 @@ test('planning a potato does not start the growth clock until the planter begins
   const a = fieldAt(focus.i, focus.j);
   const b = fields.find(f => f.owned && f !== a && !f.live && f.state !== 3);
   assert.equal(plantField(a, 'potato').ok, true);
-  assert.equal(a.plantedAt, worldDay);
+  assert.equal(a.plantedAt, null);
+  assert.equal(cropWatch(a).waiting, true);
+  const planter = rigs.find(r => r.kind === 'planter');
+  let arrive = 0;
+  while (a.plantedAt == null && arrive < 8000) { step(0.5, 0, 1); arrive++; }
+  assert.equal(planter.mode, 'work');
+  assert.equal(typeof a.plantedAt, 'number');
   assert.equal(cropWatch(a).waiting, false);
   assert.equal(plantField(b, 'potato').ok, true);
   assert.equal(b.plantedAt, null);
@@ -638,4 +664,63 @@ test('planning a potato does not start the growth clock until the planter begins
   assert.equal(applySnapshot(snap), true);
   assert.equal(fieldAt(b.i, b.j).plantedAt, null);
   assert.equal(typeof fieldAt(a.i, a.j).plantedAt, 'number');
+});
+
+test('an empty machine returns to the garage and recharges before the next job', () => {
+  resetGame();
+  setPaused(false);
+  setTimeScale(1);
+  stores.seed = 2;
+  stores.fertilizer = 2;
+  const a = fieldAt(focus.i, focus.j);
+  assert.equal(plantField(a, 'potato').ok, true);
+  const planter = rigs.find(r => r.kind === 'planter');
+  assert.notEqual(Math.hypot(planter.x - a.x0, planter.z - a.z0), 0);
+  assert.equal(planter.mode, 'travel');
+  let n = 0;
+  while (planter.mode !== 'work' && n < 8000) { step(0.5, 0, 1); n++; }
+  assert.equal(planter.mode, 'work');
+  assert.equal(typeof a.plantedAt, 'number');
+  assert.ok(planter.charge < 1, planter.charge);
+  const held = a.jobS.planter;
+  planter.charge = 0;
+  step(0.3, 0, 1);
+  assert.equal(planter.intent, 'home');
+  assert.equal(planter.mode, 'travel');
+  assert.ok(Math.abs(a.jobS.planter - held) < 0.05);
+  n = 0;
+  while (planter.mode !== 'charge' && planter.mode !== 'park' && n < 8000) { step(0.5, 0, 1); n++; }
+  assert.ok(planter.mode === 'charge' || planter.mode === 'park');
+  const atGarage = Math.hypot(planter.x - planter.parkX, planter.z - planter.parkZ);
+  assert.ok(atGarage < 2, atGarage);
+  const before = planter.charge;
+  step(6, 0, 1);
+  assert.ok(planter.charge > before, planter.charge);
+  assert.ok(planter.charge < 1 || planter.mode === 'travel' || planter.mode === 'work');
+});
+
+test('warehouse stacks lots and keeps a soft capacity', () => {
+  resetGame();
+  warehouse.push(
+    { id: 901, crop: 'potato', name: '中熟商品薯', liters: 1000, listPrice: 400, i: 1, j: 1, t: 0 },
+    { id: 902, crop: 'potato', name: '中熟商品薯', liters: 500, listPrice: 200, i: 2, j: 1, t: 0 },
+  );
+  const cap = warehouseCapacity();
+  assert.equal(cap.soft, true);
+  assert.equal(cap.maxSlots, null);
+  assert.equal(cap.usedSlots, 1);
+  assert.equal(cap.usedLiters, 1500);
+  const sold = sellStack('potato', 0.5);
+  assert.equal(sold.listPrice, 300);
+  assert.equal(warehouseCapacity().usedLiters, 750);
+  assert.equal(sellStack('potato', 1).listPrice, 300);
+  assert.equal(warehouse.filter(lot => lot.crop === 'potato').length, 0);
+  const dossier = cropDossier('potato');
+  assert.equal(dossier.plantable, true);
+  assert.equal(dossier.stages.length, POTATO_STAGES.length);
+  assert.ok(dossier.stages.every(s => s.color && s.days > 0));
+  assert.equal(cropDossier('wheat').plantable, false);
+  assert.equal(HUB_SITES.filter(s => s.local).length, 1);
+  assert.equal(HUB_SITES.length, Math.floor(L.NBX / 7));
+  assert.ok(HUB_SITES.every(s => s.bj === L.HUBZ));
 });

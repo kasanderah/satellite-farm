@@ -94,6 +94,17 @@ PLOT.along = PLOT.x1 - PLOT.x0;
 PLOT.across = L.NBZ * L.BP - L.TRUNK;
 export const FIELD_HA = (L.FIELD * L.FIELD) / 10000;
 export function inPlotBlock(bi, bj) { return bi >= PLOT.bi0 && bi <= PLOT.bi1 && bj >= PLOT.bj0 && bj <= PLOT.bj1; }
+// 每个玩家一块 7 区宽的田，中枢在正中。环上隔 7 个区再立一座中枢。120 区不能整除，最后一隙是 8 区。
+export const HUB_SITES = (() => {
+  const span = 7;
+  const n = Math.floor(L.NBX / span);
+  const sites = [];
+  for (let k = 0; k < n; k++) {
+    const bi = (L.HUBX + k * span) % L.NBX;
+    sites.push({ bi, bj: L.HUBZ, local: bi === L.HUBX });
+  }
+  return sites;
+})();
 export function quote(crop) {
   const c = CROPS[crop];
   if (!c?.plantable) return 0;
@@ -188,6 +199,12 @@ export const DAY_SECONDS = 60;
 export const MACHINE_MPS = 2.8;
 export const SIM = { CUT: MACHINE_MPS, MOVE: MACHINE_MPS, STUBBLE: 8, TILL: 0 };
 export const POTATO_DAYS = 120;
+// 满电能走的米数。一趟田加大约两公里路还回得了机库。空了必须回库，充到能出门才再派工。
+export const BATT_RANGE = 4200;
+export const BATT_LEAVE = 0.34;
+export const RECHARGE_S = 24;
+// 软上限。maxSlots / maxLiters 为 null 时不拒收。以后把这两个数填上，warehouseCanStore 就会拦住。
+export const WAREHOUSE_CAP = { maxSlots: null, maxLiters: null };
 export function passWorldDays() {
   return (L.LANES * L.FIELD) / (MACHINE_MPS * DAY_SECONDS);
 }
@@ -269,6 +286,37 @@ export function stageNum(day) {
   if (day < 100) return 4;
   if (day < 114) return 5;
   return 6;
+}
+// 进度条和「作物」页共用。颜色按阶段切开。入仓量这一季仍是整块，不按走过的垄打折。
+export const POTATO_STAGES = [
+  { id: 'ridge', name: '播种起垄', from: 0, to: 18, color: PALETTE.rego, machine: '播种机', machineAt: 0, effect: '播种机走完，田面才起垄。120 日从这一趟开工起算。' },
+  { id: 'shoot', name: '出苗', from: 18, to: 46, color: PALETTE.oliveDp, machine: '培土机', machineAt: 20, effect: '第 20 日培土机进地。没走完的垄停在作业前沿。' },
+  { id: 'canopy', name: '封垄', from: 46, to: 72, color: PALETTE.olive, machine: null, machineAt: null, effect: '冠层合上。这一段没有额外农机。' },
+  { id: 'flower', name: '开花', from: 72, to: 100, color: '#c4b0d4', machine: null, machineAt: null, effect: '开花。入仓不按这一段加减。' },
+  { id: 'haulm', name: '碎秧', from: 100, to: 114, color: PALETTE.rust, machine: '杀秧机', machineAt: 100, effect: '第 100 日杀秧机进地，把秧打碎。' },
+  { id: 'lift', name: '起薯', from: 114, to: 120, color: PALETTE.straw, machine: '收获机', machineAt: 114, effect: '第 114 日收获机进地。第 120 日整块入仓。' },
+];
+{
+  const potato = CROPS.find(c => c.id === 'potato');
+  potato.stages = POTATO_STAGES;
+  potato.yieldNote = '到第 120 日按整块入仓，不按机器走过的垄打折。田面上没做完的阶段停在作业前沿。';
+  for (const c of CROPS) {
+    if (c.plantable) continue;
+    c.stages = [];
+    c.yieldNote = `邻区色块。这一季不能种。参考季长 ${c.season} 日。`;
+  }
+}
+export function cropDossier(id) {
+  const c = typeof id === 'number' ? CROPS[id] : CROPS.find(x => x.id === id);
+  if (!c) return null;
+  const stages = (c.stages || []).map(s => ({
+    name: s.name, from: s.from, to: s.to, days: s.to - s.from, color: s.color,
+    machine: s.machine, machineAt: s.machineAt, effect: s.effect,
+  }));
+  return {
+    id: c.id, name: c.name, analog: c.analog, plantable: !!c.plantable,
+    days: c.days || c.season, family: c.family, stages, yieldNote: c.yieldNote || '',
+  };
 }
 const JOB_ORDER = ['planter', 'hiller', 'topper', 'lifter'];
 const ACT = { planter: '播种', hiller: '培土', topper: '杀秧', lifter: '起薯' };
@@ -404,9 +452,20 @@ function pickField(kind) {
   }
   return best;
 }
-function parkRig(r) {
-  r.busy = false; r.f = null; r.mode = 'park';
+function parkRig(r, refill = false) {
+  r.busy = false; r.f = null; r.intent = null; r.route = null; r.ri = 0;
   r.x = r.parkX; r.z = r.parkZ; r.ang = -Math.PI / 2;
+  if (refill || r.charge == null) r.charge = 1;
+  r.mode = r.charge < 1 ? 'charge' : 'park';
+}
+function workTarget(f, kind) {
+  ensureJobs(f);
+  const s = Math.min(Math.max(f.jobS[kind], 0), L.LANES - 1e-4);
+  const lane = Math.floor(s);
+  const frac = s - lane;
+  const dirp = lane % 2 === 0;
+  const u = dirp ? frac * L.FIELD : (1 - frac) * L.FIELD;
+  return workPose(f, lane, u);
 }
 function beginJob(r, f) {
   ensureJobs(f);
@@ -415,42 +474,101 @@ function beginJob(r, f) {
   const lane = Math.floor(s);
   const frac = s - lane;
   const dirp = lane % 2 === 0;
-  r.f = f; r.busy = true; r.mode = 'work'; r.lane = lane;
+  r.f = f; r.busy = true; r.mode = 'work'; r.intent = 'job'; r.lane = lane;
   r.u = dirp ? frac * L.FIELD : (1 - frac) * L.FIELD;
   const pose = workPose(f, lane, r.u);
   r.x = pose.x; r.z = pose.z; r.ang = pose.ang;
+  r.route = null; r.ri = 0;
 }
-function startTravel(r, f) {
-  r.mode = 'travel'; r.f = f; r.busy = true;
-  const s = Math.min(Math.max(f.jobS[r.kind], 0), L.LANES - 1e-4);
-  const pose = workPose(f, Math.floor(s), (Math.floor(s) % 2 === 0)
-    ? (s - Math.floor(s)) * L.FIELD
-    : (1 - (s - Math.floor(s))) * L.FIELD);
-  r.tx = pose.x; r.tz = pose.z;
+// 先贴上最近的地表道路，再沿路拐到终点附近，最后才进田或进库。
+function roadRoute(x, z, ex, ez) {
+  const sx = nearestRoad(x), sz = nearestRoad(z);
+  const startVert = Math.abs(sx - x) <= Math.abs(sz - z);
+  const exr = nearestRoad(ex), ezr = nearestRoad(ez);
+  const endVert = Math.abs(exr - ex) <= Math.abs(ezr - ez);
+  const ax = startVert ? sx : x;
+  const az = startVert ? z : sz;
+  const bx = endVert ? exr : ex;
+  const bz = endVert ? ez : ezr;
+  const pts = [];
+  if (Math.hypot(ax - x, az - z) > 1.2) pts.push([ax, az]);
+  for (const c of manhattan(ax, az, startVert, bx, bz, endVert)) pts.push(c);
+  if (Math.hypot((pts.length ? pts[pts.length - 1][0] : bx) - ex, (pts.length ? pts[pts.length - 1][1] : bz) - ez) > 1.2) pts.push([ex, ez]);
+  const out = [];
+  let px = x, pz = z;
+  for (const p of pts) {
+    if (Math.hypot(p[0] - px, p[1] - pz) < 1.2) continue;
+    out.push(p);
+    px = p[0]; pz = p[1];
+  }
+  if (!out.length) out.push([ex, ez]);
+  return out;
+}
+function routeTo(r, ex, ez, intent, f) {
+  r.intent = intent;
+  r.f = f || null;
+  r.busy = true;
+  r.mode = 'travel';
+  const dist = Math.hypot(r.x - ex, r.z - ez);
+  // 已经在作业点旁边就直接开过去。从机库或另一块田过来才绕地表道路。
+  r.route = dist < 36 ? [[ex, ez]] : roadRoute(r.x, r.z, ex, ez);
+  r.ri = 0;
+}
+function routeToJob(r, f) {
+  const pose = workTarget(f, r.kind);
+  routeTo(r, pose.x, pose.z, 'job', f);
+}
+function goHome(r) {
+  const dist = Math.hypot(r.x - r.parkX, r.z - r.parkZ);
+  if (dist < 1.5) { parkRig(r, false); return; }
+  routeTo(r, r.parkX, r.parkZ, 'home', null);
+}
+function useCharge(r, meters) {
+  r.charge = Math.max(0, (r.charge ?? 1) - meters / BATT_RANGE);
+  return r.intent !== 'home' && r.charge <= 0;
 }
 function assignIdleRigs() {
   for (const r of rigs) {
     if (r.mode === 'work' || r.mode === 'turn' || r.mode === 'travel') continue;
+    if ((r.charge ?? 1) < BATT_LEAVE) {
+      r.mode = 'charge'; r.busy = false; r.f = null; r.intent = null;
+      continue;
+    }
     const f = pickField(r.kind);
-    if (!f) { if (r.mode !== 'park') parkRig(r); continue; }
-    beginJob(r, f);
+    if (!f) {
+      if (Math.hypot(r.x - r.parkX, r.z - r.parkZ) > 2) goHome(r);
+      else r.mode = (r.charge ?? 1) < 1 ? 'charge' : 'park';
+      continue;
+    }
+    routeToJob(r, f);
   }
 }
 function finishPass(r) {
   const f = r.f;
   if (f?.jobS) f.jobS[r.kind] = L.LANES;
+  if ((r.charge ?? 1) < BATT_LEAVE) { goHome(r); return; }
   const nxt = pickField(r.kind);
-  if (!nxt) { parkRig(r); return; }
-  startTravel(r, nxt);
+  if (!nxt) { goHome(r); return; }
+  routeToJob(r, nxt);
 }
 function stepWork(r, dt) {
   const f = r.f;
-  if (!f || !f.live || f.paid) { parkRig(r); return; }
+  if (!f || !f.live || f.paid) { goHome(r); return; }
+  if ((r.charge ?? 1) <= 0) { goHome(r); return; }
   ensureJobs(f);
   let rem = MACHINE_MPS * dt;
   const dirp = r.lane % 2 === 0;
   const dest = dirp ? L.FIELD : 0;
   const room = Math.abs(dest - r.u);
+  const leg = Math.min(rem, room);
+  if (useCharge(r, leg)) {
+    r.u += (dirp ? 1 : -1) * leg;
+    f.jobS[r.kind] = r.lane + (dirp ? r.u / L.FIELD : (L.FIELD - r.u) / L.FIELD);
+    const pose = workPose(f, r.lane, r.u);
+    r.x = pose.x; r.z = pose.z; r.ang = pose.ang;
+    goHome(r);
+    return;
+  }
   if (rem < room - 1e-8) {
     r.u += (dirp ? 1 : -1) * rem;
     f.jobS[r.kind] = r.lane + (dirp ? r.u / L.FIELD : (L.FIELD - r.u) / L.FIELD);
@@ -473,9 +591,12 @@ function stepWork(r, dt) {
 }
 function stepTurn(r, dt) {
   const f = r.f;
-  if (!f || !f.live || f.paid) { parkRig(r); return; }
+  if (!f || !f.live || f.paid) { goHome(r); return; }
+  if ((r.charge ?? 1) <= 0) { goHome(r); return; }
   let rem = MACHINE_MPS * dt;
   const left = r.turnLen - r.turnDist;
+  const leg = Math.min(rem, Math.max(0, left));
+  if (useCharge(r, leg)) { goHome(r); return; }
   if (rem < left - 1e-8) {
     r.turnDist += rem;
     const pose = headlandSample(f, r.lane, r.turnDist / r.turnLen);
@@ -493,26 +614,55 @@ function stepTurn(r, dt) {
   if (rem > 0) stepWork(r, rem / MACHINE_MPS);
 }
 function stepTravel(r, dt) {
-  const f = r.f;
-  if (!f || !jobReady(f, r.kind)) {
-    const nxt = pickField(r.kind);
-    if (!nxt) { parkRig(r); return; }
-    startTravel(r, nxt);
+  if (r.intent === 'job') {
+    if (!r.f || !jobReady(r.f, r.kind)) {
+      const nxt = (r.charge ?? 1) >= BATT_LEAVE ? pickField(r.kind) : null;
+      if (!nxt) { goHome(r); return; }
+      if (nxt !== r.f) routeToJob(r, nxt);
+    }
   }
-  const dx = r.tx - r.x, dz = r.tz - r.z;
+  if ((r.charge ?? 1) <= 0 && r.intent !== 'home') { goHome(r); return; }
+  if (!r.route || r.ri >= r.route.length) {
+    if (r.intent === 'home') { parkRig(r, false); return; }
+    beginJob(r, r.f);
+    return;
+  }
+  const [tx, tz] = r.route[r.ri];
+  const dx = tx - r.x, dz = tz - r.z;
   const dist = Math.hypot(dx, dz);
   const step = MACHINE_MPS * dt;
-  if (dist < 1.25 || step >= dist - 1e-6) {
+  const leg = Math.min(step, dist);
+  if (useCharge(r, leg)) {
+    if (dist > 1e-6) {
+      r.x += dx / dist * leg; r.z += dz / dist * leg; r.ang = Math.atan2(dz, dx);
+    }
+    goHome(r);
+    return;
+  }
+  if (dist < 1.1 || step >= dist - 1e-6) {
+    r.x = tx; r.z = tz; r.ri++;
     const extra = step > dist ? (step - dist) / MACHINE_MPS : 0;
-    beginJob(r, r.f);
-    if (extra > 0) stepWork(r, extra);
+    if (r.ri >= r.route.length) {
+      if (r.intent === 'home') { parkRig(r, false); return; }
+      beginJob(r, r.f);
+      if (extra > 0 && r.mode === 'work') stepWork(r, extra);
+      return;
+    }
+    if (extra > 0) stepTravel(r, extra);
     return;
   }
   r.x += dx / dist * step; r.z += dz / dist * step; r.ang = Math.atan2(dz, dx);
 }
 function stepRigs(dt) {
   for (const r of rigs) {
-    if ((r.mode === 'work' || r.mode === 'turn') && r.f && (!r.f.live || r.f.paid)) parkRig(r);
+    if ((r.mode === 'work' || r.mode === 'turn') && r.f && (!r.f.live || r.f.paid)) goHome(r);
+    if (r.mode === 'park' || r.mode === 'charge') {
+      if ((r.charge ?? 1) < 1) {
+        r.charge = Math.min(1, (r.charge ?? 1) + dt / RECHARGE_S);
+        r.mode = r.charge >= 1 ? 'park' : 'charge';
+        r.x = r.parkX; r.z = r.parkZ; r.ang = -Math.PI / 2;
+      }
+    }
   }
   assignIdleRigs();
   for (const r of rigs) {
@@ -553,11 +703,12 @@ export function rigReadout(r) {
   const speed = moving ? MACHINE_MPS * economy.timeScale : 0;
   let doing = '停在机库';
   if (r.mode === 'turn') doing = '地头转弯';
-  else if (r.mode === 'travel') doing = '开往下一田';
+  else if (r.mode === 'travel') doing = r.intent === 'home' ? '返回机库' : '开往田块';
+  else if (r.mode === 'charge') doing = '充电';
   else if (r.mode === 'work') doing = ACT[r.kind] || '作业';
   let frac = 0;
   if (r.f?.jobS && JOBS[r.kind]) frac = Math.max(0, Math.min(1, r.f.jobS[r.kind] / L.LANES));
-  return { speed, doing, frac };
+  return { speed, doing, frac, charge: r.charge ?? 1 };
 }
 
 // 镜头落在中枢旁一块可播种的裸地上。远处留一台不入账的收割机，近景镜头仍有机器可读。
@@ -581,7 +732,7 @@ export function rigReadout(r) {
   const garageAt = hubPad(3, 2);
   ['planter', 'hiller', 'topper', 'lifter'].forEach((kind, n) => {
     const x = garageAt.x - 18 + n * 12, z = garageAt.z + 22;
-    rigs.push({ id: n, kind, label: JOBS[kind].label, busy: false, f: null, mode: 'park', lane: 0, u: 0, parkX: x, parkZ: z, x, z, ang: -Math.PI / 2 });
+    rigs.push({ id: n, kind, label: JOBS[kind].label, busy: false, f: null, mode: 'park', intent: null, route: null, ri: 0, charge: 1, lane: 0, u: 0, parkX: x, parkZ: z, x, z, ang: -Math.PI / 2 });
   });
   for (const [di, dj, kind] of [[3, 1, 'warehouse'], [3, 2, 'garage'], [3, 3, 'process']]) {
     const at = hubPad(di, dj);
@@ -955,7 +1106,7 @@ export function resetGame() {
   nextDevice = 1;
   blankTanks();
   restoreStarters();
-  for (const r of rigs) parkRig(r);
+  for (const r of rigs) parkRig(r, true);
   syncPotatoLive();
   rebuildDemo();
   assignIdleRigs();
@@ -976,6 +1127,41 @@ export function buySeed(qty) {
   if (bought.ok) bought.seed = bought.stock;
   return bought;
 }
+export function warehouseStacks() {
+  const map = new Map();
+  for (const lot of warehouse) {
+    const unit = lot.unit || 'L';
+    const key = lot.crop + '|' + unit;
+    let s = map.get(key);
+    if (!s) {
+      s = { key, crop: lot.crop, name: lot.name, unit, liters: 0, listPrice: 0, n: 0 };
+      map.set(key, s);
+    }
+    s.liters += +lot.liters || 0;
+    s.listPrice += +lot.listPrice || 0;
+    s.n += 1;
+  }
+  return [...map.values()];
+}
+export function warehouseCapacity() {
+  const stacks = warehouseStacks();
+  const usedLiters = stacks.reduce((sum, s) => sum + s.liters, 0);
+  return {
+    maxSlots: WAREHOUSE_CAP.maxSlots,
+    maxLiters: WAREHOUSE_CAP.maxLiters,
+    usedSlots: stacks.length,
+    usedLiters,
+    soft: WAREHOUSE_CAP.maxSlots == null && WAREHOUSE_CAP.maxLiters == null,
+  };
+}
+export function warehouseCanStore(liters = 0, cropId = null) {
+  const cap = warehouseCapacity();
+  if (cap.soft) return true;
+  if (cap.maxLiters != null && cap.usedLiters + liters > cap.maxLiters + 1e-6) return false;
+  const stacks = cropId && warehouse.some(lot => lot.crop === cropId);
+  if (cap.maxSlots != null && !stacks && cap.usedSlots >= cap.maxSlots) return false;
+  return true;
+}
 export function sellLot(id) {
   const i = warehouse.findIndex(lot => lot.id === id);
   if (i < 0) return null;
@@ -983,6 +1169,29 @@ export function sellLot(id) {
   economy.revenue += lot.listPrice;
   log.push({ type: 'sale', pay: lot.listPrice, crop: lot.crop, name: lot.name, i: lot.i, j: lot.j, t: worldDay });
   return lot;
+}
+export function sellStack(cropId, fraction = 1) {
+  const frac = Math.min(1, Math.max(0, Number(fraction)));
+  if (!(frac > 0)) return null;
+  const lots = warehouse.filter(lot => lot.crop === cropId);
+  if (!lots.length) return null;
+  let pay = 0;
+  let liters = 0;
+  const name = lots[0].name;
+  for (let i = warehouse.length - 1; i >= 0; i--) {
+    const lot = warehouse[i];
+    if (lot.crop !== cropId) continue;
+    const cut = frac >= 0.999 ? 1 : frac;
+    const partPay = lot.listPrice * cut;
+    const partL = (lot.liters || 0) * cut;
+    pay += partPay;
+    liters += partL;
+    if (cut >= 0.999 || (lot.liters || 0) - partL <= 1e-3) warehouse.splice(i, 1);
+    else { lot.listPrice -= partPay; lot.liters -= partL; }
+  }
+  economy.revenue += pay;
+  log.push({ type: 'sale', pay, crop: cropId, name, i: null, j: null, t: worldDay });
+  return { crop: cropId, name, listPrice: pay, liters };
 }
 export function plantField(f, cropId) {
   if (!f?.owned) return { ok: false, reason: 'plot' };
@@ -1126,7 +1335,7 @@ export function applySnapshot(data) {
   worldDay = +(data.worldDay ?? data.simTime) || 0;
   simTime = worldDay;
   rebuildDemo();
-  for (const r of rigs) parkRig(r);
+  for (const r of rigs) parkRig(r, true);
   syncPotatoLive();
   assignIdleRigs();
   return true;
