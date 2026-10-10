@@ -1552,14 +1552,8 @@ function paintSheet() {
       const line = w ? `${w.name} · 第 ${Math.floor(w.day)} / ${w.days} 日${w.tended ? ' · 臂已照料' : ''}${w.ready ? ' · 可收' : ''}` : '空槽';
       return `<button type="button" class="rowbtn${deckTank === t.id ? ' on' : ''}" data-tank="${t.id}"><b>槽 ${t.id + 1}</b><small>${line}</small></button>`;
     }).join('');
-    const mill = millWatch();
+    const { mill, line: millLine } = millStatusText();
     const feed = cultureFeedPlan('grub');
-    const potatoL = Math.round(potatoStock());
-    const need = mill.recipe.inputs.find(i => i.id === 'potato').qty;
-    let millLine = '还没建。点选址，再点一块非中枢的单元。';
-    if (mill.state === 'build') millLine = `施工中 · 还要 ${Math.ceil(mill.left)} 日`;
-    else if (mill.state === 'job') millLine = `正在加工 · 还要 ${Math.ceil(mill.left)} 日`;
-    else if (mill.state === 'ready') millLine = `可以加工 · 仓库土豆 ${potatoL.toLocaleString('en-US')} L · 一批 ${need.toLocaleString('en-US')} L`;
     const millBtns = mill.state === 'none'
       ? `<button type="button" class="sell${millPlace ? ' on' : ''}" id="mill-arm">${millPlace ? '取消选址' : '选址建造'}</button>`
       : `<button type="button" class="sell" id="mill-run"${mill.state === 'ready' ? '' : ' disabled'}>加工一批</button><button type="button" class="sell" id="mill-del"${mill.state === 'job' ? ' disabled' : ''}>拆除</button>`;
@@ -1827,6 +1821,17 @@ const fmt = n => Math.round(n).toLocaleString('en-US');
 function stockText(n) {
   const r = Math.round((+n || 0) * 10) / 10;
   return Number.isInteger(r) ? String(r) : r.toFixed(1);
+}
+function millStatusText() {
+  const mill = millWatch();
+  const potatoL = Math.round(potatoStock());
+  const need = mill.recipe.inputs.find(i => i.id === 'potato').qty;
+  const starchN = warehouse.filter(lot => lot.crop === 'starch').length;
+  let line = '还没建。点选址，再点一块非中枢的单元。';
+  if (mill.state === 'build') line = `施工中 · 还要 ${Math.ceil(mill.left)} 日`;
+  else if (mill.state === 'job') line = `正在加工 · 还要 ${Math.ceil(mill.left)} 日`;
+  else if (mill.state === 'ready') line = `可以加工 · 仓库土豆 ${potatoL.toLocaleString('en-US')} L · 一批 ${need.toLocaleString('en-US')} L · 皮 ${stockText(stores.peel)} · 淀粉 ${starchN} 批`;
+  return { mill, line };
 }
 function saveNow() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(exportSnapshot())); } catch (e) { /* private mode */ } }
 function saveSoon() { clearTimeout(saveSoon.t); saveSoon.t = setTimeout(saveNow, 400); }
@@ -2235,19 +2240,13 @@ function frame(now) {
     });
     const millEl = document.querySelector('#sheet [data-mill]');
     if (millEl) {
-      const w = millWatch();
-      const potatoL = Math.round(potatoStock());
-      const need = w.recipe.inputs.find(i => i.id === 'potato').qty;
-      let line = '还没建。点选址，再点一块非中枢的单元。';
-      if (w.state === 'build') line = `施工中 · 还要 ${Math.ceil(w.left)} 日`;
-      else if (w.state === 'job') line = `正在加工 · 还要 ${Math.ceil(w.left)} 日`;
-      else if (w.state === 'ready') line = `可以加工 · 仓库土豆 ${potatoL.toLocaleString('en-US')} L · 一批 ${need.toLocaleString('en-US')} L · 皮 ${stockText(stores.peel)}`;
-      if (millEl.textContent !== line) {
+      const w = millStatusText();
+      if (millEl.textContent !== w.line) {
         const was = millEl.textContent;
-        millEl.textContent = line;
+        millEl.textContent = w.line;
         const run = document.getElementById('mill-run');
-        if (run) run.disabled = w.state !== 'ready';
-        if ((was.startsWith('正在加工') || was.startsWith('施工中')) && w.state === 'ready') paintSheet();
+        if (run) run.disabled = w.mill.state !== 'ready';
+        if ((was.startsWith('正在加工') || was.startsWith('施工中')) && w.mill.state === 'ready') paintSheet();
       }
     }
   }
