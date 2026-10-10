@@ -26,9 +26,10 @@ main{display:grid;grid-template-columns:220px 1fr 268px;min-height:0}
 #view canvas:active{cursor:grabbing}
 #states{position:absolute;left:50%;bottom:18px;transform:translateX(-50%);display:flex;gap:6px;z-index:2}
 #lights{position:absolute;left:50%;bottom:56px;transform:translateX(-50%);display:none;gap:6px;align-items:center;z-index:2}
-#lights i{font-style:normal;font-size:10px;letter-spacing:.18em;color:var(--mut)}
-#states button,#lights button,#brief button{font:inherit;color:var(--fg);background:rgba(10,12,20,.72);border:1px solid var(--line);padding:5px 12px;letter-spacing:.14em;cursor:pointer;font-size:12px}
-#states button.on,#lights button.on{border-color:var(--sig);color:var(--zone)}
+#section{position:absolute;left:50%;bottom:94px;transform:translateX(-50%);display:none;gap:6px;align-items:center;z-index:2}
+#lights i,#section i{font-style:normal;font-size:10px;letter-spacing:.18em;color:var(--mut)}
+#states button,#lights button,#section button,#brief button{font:inherit;color:var(--fg);background:rgba(10,12,20,.72);border:1px solid var(--line);padding:5px 12px;letter-spacing:.14em;cursor:pointer;font-size:12px}
+#states button.on,#lights button.on,#section button.on{border-color:var(--sig);color:var(--zone)}
 #lights button.off{color:var(--mut)}
 #hint{position:absolute;right:14px;bottom:16px;font-size:10px;letter-spacing:.12em;color:var(--mut);text-align:right;line-height:1.6;z-index:2}
 #brief{border-left:1px solid var(--line);padding:14px 14px 18px;overflow:auto;display:flex;flex-direction:column;gap:10px}
@@ -44,6 +45,7 @@ main{display:grid;grid-template-columns:220px 1fr 268px;min-height:0}
 <main>
   <nav id="catalog"></nav>
   <div id="view">
+    <div id="section"></div>
     <div id="lights"></div>
     <div id="states">
       <button type="button" data-s="idle">空闲</button>

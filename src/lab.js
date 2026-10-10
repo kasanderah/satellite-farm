@@ -1719,7 +1719,7 @@ function buildGrubTrough() {
   };
 }
 
-// 中枢地块。正中一格，四层，主井朝环轴。东北角剖开，方便看见井和下面几层。
+// 中枢地块。正中一格，四层，主井朝环轴。每层整板封住，只在井筒里留口。下层用剖面藏起上面。
 function buildHubPlot() {
   const plot = CULT_EMPTY.plot;
   const H = plot / 2;
@@ -1751,12 +1751,13 @@ function buildHubPlot() {
   const curbMat = mat({ color: '#9aa09c', roughness: 0.86, metalness: 0.08 });
 
   const F = 44;
-  const gap = F / 2 + 12;
+  // 井口留在六边形内壁里。板的其余部分铺满地块，东北角不再挖掉。
+  const opening = 16;
   const floors = [
-    { name: '地表', y: 0, mat: padMat },
-    { name: '培育层', y: -17, mat: deckMat },
-    { name: '设备层', y: -40, mat: equipMat },
-    { name: '承压壳', y: -64, mat: hullMat },
+    { id: 'surface', name: '地表', y: 0, mat: padMat },
+    { id: 'grow', name: '培育层', y: -17, mat: deckMat },
+    { id: 'equip', name: '设备层', y: -40, mat: equipMat },
+    { id: 'hull', name: '承压壳', y: -64, mat: hullMat },
   ];
   const put = (mesh) => {
     mesh.castShadow = mesh.receiveShadow = false;
@@ -1765,10 +1766,13 @@ function buildHubPlot() {
   };
   const addSlab = (y, material) => {
     const t = 1.5;
-    const westW = H - gap;
-    const southD = H - gap;
-    put(box(westW, t, plot, -(H + gap) / 2, y - t / 2, 0, material));
-    put(box(H + gap, t, southD, (H - gap) / 2, y - t / 2, -(H + gap) / 2, material));
+    const yc = y - t / 2;
+    const side = H - opening;
+    put(box(side, t, plot, -(H + opening) / 2, yc, 0, material));
+    put(box(side, t, plot, (H + opening) / 2, yc, 0, material));
+    const ns = H - opening;
+    put(box(opening * 2, t, ns, 0, yc, -(H + opening) / 2, material));
+    put(box(opening * 2, t, ns, 0, yc, (H + opening) / 2, material));
   };
   for (const f of floors) addSlab(f.y, f.mat);
 
@@ -1778,38 +1782,6 @@ function buildHubPlot() {
   put(box(plot, curbH, curbT, 0, curbH / 2, H - curbT / 2, curbMat));
   put(box(curbT, curbH, plot - curbT * 2, -H + curbT / 2, curbH / 2, 0, curbMat));
   put(box(curbT, curbH, plot - curbT * 2, H - curbT / 2, curbH / 2, 0, curbMat));
-  for (const z of [-180, -80, 20, 120, 220]) put(box(2.2, 64, 2.2, -gap, -32, z, charMat));
-  for (const x of [-180, -80, 20, 120, 220]) put(box(2.2, 64, 2.2, x, -32, -gap, charMat));
-
-  const faceLabel = (text) => {
-    const c = document.createElement('canvas');
-    c.width = 512;
-    c.height = 128;
-    const ctx = c.getContext('2d');
-    ctx.clearRect(0, 0, 512, 128);
-    ctx.fillStyle = '#efeae2';
-    ctx.font = '500 72px BarlowSC, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(text, 256, 68);
-    const tex = new THREE.CanvasTexture(c);
-    tex.colorSpace = THREE.SRGBColorSpace;
-    const m = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false });
-    m.userData.dispose = true;
-    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(36, 9), m);
-    mesh.renderOrder = 2;
-    return mesh;
-  };
-  for (const f of floors) {
-    const label = faceLabel(f.name);
-    label.position.set(gap + 6, f.y + 5.5, gap + 22);
-    label.rotation.y = 0.78;
-    g.add(label);
-    if (f.y === 0) continue;
-    put(box(H - 20, 0.28, 0.55, -(H + gap) / 2, f.y + 0.45, -gap + 0.4, deckGlow));
-    put(box(0.55, 0.28, H - 20, -gap + 0.4, f.y + 0.55, -(H + gap) / 2, deckGlow));
-    groups.deck.meshes.push(g.children[g.children.length - 1], g.children[g.children.length - 2]);
-  }
 
   const sideLen = F / Math.sqrt(3);
   const up = new THREE.Vector3(0, 1, 0);
@@ -1983,10 +1955,19 @@ function buildHubPlot() {
   groups.store.meshes.push(ballast);
   halo.store.push(-40, -55, -141);
 
+  const deckR = F / 2 + 10;
   for (const f of floors) {
-    if (f.y === 0) continue;
-    halo.deck.push(-80, f.y + 1.2, -gap);
-    halo.deck.push(-gap, f.y + 1.2, -120);
+    const y = f.y + 0.42;
+    const t = 0.5;
+    const span = deckR * 2;
+    groups.deck.meshes.push(
+      put(box(span, 0.28, t, 0, y, -deckR, deckGlow)),
+      put(box(span, 0.28, t, 0, y, deckR, deckGlow)),
+      put(box(t, 0.28, span - t * 2, -deckR, y, 0, deckGlow)),
+      put(box(t, 0.28, span - t * 2, deckR, y, 0, deckGlow)),
+    );
+    const hy = f.y + 1.15;
+    halo.deck.push(0, hy, -deckR, 0, hy, deckR, -deckR, hy, 0, deckR, hy, 0);
   }
 
   const car = new THREE.Group();
@@ -2007,12 +1988,42 @@ function buildHubPlot() {
 
   const ring = salmonRing(plot * 1.012, plot * 1.012, 0.55);
   g.add(ring);
-  g.userData.hub = { plot, layers: floors.map(f => f.name), shaft: 'hex', top: yTop };
+  const sections = floors.map((f, i) => ({
+    id: f.id,
+    label: f.name,
+    floor: f.y,
+    clip: i === 0 ? null : floors[i - 1].y - 1.55,
+  }));
+  const clipMats = [shellMat, charMat, padMat, deckMat, equipMat, hullMat, hallMat, yelMat, redMat, coolMat, deckGlow, curbMat];
+  for (const pts of [shaftHalo, deckHalo, energyHalo, storeHalo, alarmHalo]) {
+    if (pts && pts.material) clipMats.push(pts.material);
+  }
+  const clipPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), 0);
+  let clipOn = false;
+  g.userData.hub = { plot, layers: floors.map(f => f.name), shaft: 'hex', top: yTop, section: 'surface' };
+  const applySection = (sec) => {
+    const on = sec.clip != null;
+    if (on !== clipOn) {
+      renderer.localClippingEnabled = on;
+      for (const m of clipMats) {
+        m.clippingPlanes = on ? [clipPlane] : null;
+        m.clipShadows = false;
+        m.needsUpdate = true;
+      }
+      clipOn = on;
+    }
+    if (on) clipPlane.constant = sec.clip;
+    ring.position.y = sec.floor;
+    g.userData.hub.section = sec.id;
+  };
   return {
     group: g,
     ring,
     ownState: true,
     lightGroups: [groups.shaft, groups.deck, groups.energy, groups.store, groups.alarm],
+    sections,
+    section: 'surface',
+    applySection,
     motion(p, st) {
       const job = st === 'job';
       const br = st === 'break';
@@ -2054,6 +2065,7 @@ const BUILD = {
 };
 
 function disposeStage() {
+  renderer.localClippingEnabled = false;
   while (stage.children.length) {
     const o = stage.children.pop();
     o.userData.alive = false;
@@ -2121,6 +2133,7 @@ function show(id) {
   document.querySelectorAll('#catalog .ent').forEach(b => b.classList.toggle('on', b.dataset.id === entry.id));
   fillBrief(entry);
   paintLights();
+  paintSection();
 }
 
 // 资产声明 lightGroups: [{ id, label, on, lights, meshes }]。没有灯组的资产不显示开关。
@@ -2155,6 +2168,41 @@ function paintLights() {
     b.addEventListener('click', () => toggleLight(g.id));
     bar.appendChild(b);
   }
+}
+
+function paintSection() {
+  const bar = $('section');
+  if (!bar) return;
+  bar.replaceChildren();
+  const sections = shown && shown.sections;
+  if (!sections || !sections.length) {
+    bar.style.display = 'none';
+    return;
+  }
+  bar.style.display = 'flex';
+  const tag = document.createElement('i');
+  tag.textContent = '剖面';
+  bar.appendChild(tag);
+  const cur = shown.section || sections[0].id;
+  for (const s of sections) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.dataset.section = s.id;
+    b.textContent = s.label;
+    b.className = s.id === cur ? 'on' : '';
+    b.addEventListener('click', () => setHubSection(s.id));
+    bar.appendChild(b);
+  }
+}
+
+function setHubSection(id) {
+  const sections = shown && shown.sections;
+  if (!sections) return;
+  const sec = sections.find(s => s.id === id) || sections[0];
+  shown.section = sec.id;
+  if (shown.applySection) shown.applySection(sec);
+  eye.ty = sec.id === 'surface' ? -12 : sec.floor + 6;
+  paintSection();
 }
 
 function toggleLight(id, force) {
@@ -2235,7 +2283,7 @@ function classLabel(id) {
 }
 function fillBrief(entry) {
   const all = loadBriefs();
-  const marker = entry.id === 'cult-b' ? '漆面' : entry.id === 'cult-a' ? '后开始' : entry.id === 'grub-trough' ? '光晕' : entry.id === 'hub' ? '主井' : '';
+  const marker = entry.id === 'cult-b' ? '漆面' : entry.id === 'cult-a' ? '后开始' : entry.id === 'grub-trough' ? '光晕' : entry.id === 'hub' ? '剖面' : '';
   if (marker && (!all[entry.id] || !String(all[entry.id].notes || '').includes(marker))) {
     all[entry.id] = {
       name: entry.name,
@@ -2364,7 +2412,10 @@ window.__lab = {
   entries: LAB_ENTRIES.map(e => e.id),
   get id() { return curId; },
   get state() { return state; },
-  get view() { return { yaw: eye.yaw, pitch: eye.pitch, dist: eye.dist }; },
+  get view() { return { yaw: eye.yaw, pitch: eye.pitch, dist: eye.dist, tx: eye.tx, ty: eye.ty, tz: eye.tz }; },
+  get section() { return (shown && shown.section) || null; },
+  setSection(id) { setHubSection(id); },
+  get hub() { return (shown && shown.group && shown.group.userData.hub) || null; },
   select(id) { show(id); },
   reframe() { frameSpan(LAB_ENTRIES.find(e => e.id === curId)); },
   setState,
