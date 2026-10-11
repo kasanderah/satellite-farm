@@ -7,6 +7,7 @@ import {
   tractorKit, planterKit, hillerKit, topperKit, potatoLifterKit,
   cultureTankKit, warehouseKit, garageKit, processKit, armKit, irrigatorKit,
 } from './prefabs.js';
+import { createSurfaceBuilders } from './lab-surface.js';
 
 const $ = id => document.getElementById(id);
 const STORE = 'ringsheaf.assetlab.briefs';
@@ -2117,6 +2118,7 @@ const BUILD = {
   process: () => equip(processKit, 14, 10),
   arm: buildArm,
   irrigator: buildIrrigator,
+  ...createSurfaceBuilders({ box, salmonRing, padMat, addHalo, fadeHalos }),
 };
 
 function disposeStage() {
