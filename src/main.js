@@ -1329,7 +1329,7 @@ function applyDeckView() {
 }
 // 交互：左键平移 / 右键旋转 / 滚轮缩放 / WASD / QE / N 昼夜 / M 地图模式 / H 隐藏界面
 let drag = null, ptr = null, selected = null, selNote = '';
-let mode = 'plan', watchRig = null, pickedLot = null, pickedStack = null, shopPick = 'seed', rigPick = 'planter', cropPick = 'potato', deckTank = 0, deckBlock = null, deckHub = false, buildAct = 'place', buildKind = 'warehouse', buildPick = null, millPlace = false;
+let mode = 'look', watchRig = null, pickedLot = null, pickedStack = null, shopPick = 'seed', rigPick = 'planter', cropPick = 'potato', deckTank = 0, deckBlock = null, deckHub = false, buildAct = 'place', buildKind = 'warehouse', buildPick = null, millPlace = false;
 let planCycle = false, planBuy = false;
 const pickedFields = new Set();
 const raycaster = new THREE.Raycaster();
@@ -1579,7 +1579,11 @@ addEventListener('keydown', e => {
   if (e.key === 'c' || e.key === 'C') visitDeck(!camS.deck);
   if (e.key === 'F2' || e.key === '\\') { e.preventDefault(); toggleAdmin(); }
   if (e.key === 'v' || e.key === 'V') toggleViewer();
-  if (e.key === 'Escape') { $('admin').classList.remove('on'); $('viewer').classList.remove('on'); }
+  if (e.key === 'Escape') {
+    $('admin').classList.remove('on');
+    $('viewer').classList.remove('on');
+    returnToLook();
+  }
   if ('1234'.includes(e.key)) gotoTier(+e.key);
 });
 addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
@@ -1692,7 +1696,7 @@ function showLayer(id) {
   refreshLayerProps();
   if (next === 'grow') placeTanks();
   if (next === 'grow') mode = 'deck';
-  else if (mode === 'deck') mode = 'plan';
+  else if (mode === 'deck') mode = 'look';
   paintModes();
   paintSheet();
   paintLayers();
@@ -1702,12 +1706,8 @@ function visitDeck(on) {
   const want = on == null ? viewLayer === 'surface' : !!on;
   showLayer(want ? 'grow' : 'surface');
 }
-function showPlan() {
-  leaveDeck();
-  watchRig = null;
-  mode = 'plan';
-  const f = selected?.owned ? selected : fieldAt(focus.i, focus.j);
-  selectField(f, '');
+function frameFocus(f) {
+  f = f || fieldAt(focus.i, focus.j);
   camT.x = camS.x = f.x0 + L.FIELD / 2;
   camT.z = camS.z = f.z0 + L.FIELD / 2;
   camT.d = camS.d = 720;
@@ -1715,6 +1715,14 @@ function showPlan() {
   camT.pOff = camS.pOff = -8 * DEG;
   camT.lookUp = camS.lookUp = 0;
   camT.fovAdd = camS.fovAdd = 6;
+  return f;
+}
+function showPlan() {
+  leaveDeck();
+  watchRig = null;
+  mode = 'plan';
+  const f = frameFocus(selected?.owned ? selected : fieldAt(focus.i, focus.j));
+  selectField(f, '');
   paintModes();
   paintSheet();
 }
@@ -1737,7 +1745,7 @@ function stackSlots(list, pick, attr) {
 function paintSheet() {
   const el = $('sheet');
   el.classList.toggle('wide', mode === 'crops' || mode === 'store' || mode === 'shop' || mode === 'scheme' || mode === 'rigshop');
-  if (mode === 'plan') { el.classList.remove('on'); el.innerHTML = ''; return; }
+  if (mode === 'plan' || mode === 'look') { el.classList.remove('on'); el.innerHTML = ''; return; }
   el.classList.add('on');
   if (mode === 'crops') {
     const rows = CROPS.map(c => ({ key: c.id, name: c.name, sub: c.plantable ? '可种' : '邻区' }));
@@ -1818,6 +1826,17 @@ function paintSheet() {
     el.innerHTML = `<div class="who"><b>培育层</b><span>${DECK_CLIMATE.temp}°C · 湿度 ${DECK_CLIMATE.rh}%</span></div><p class="note">设定值，不是天气。${feedLine}</p><p class="note">养殖装在点中的单元上。当前 ${picked}。中枢不装培养槽。</p><div class="who"><b>加工厂</b><span data-mill>${millLine}</span></div><p class="note">土豆进，土豆淀粉和土豆皮出。皮可以抵一部分饲料。建造 ${fmt(mill.cost)} · ${mill.days} 日。水电在加工时从营收扣。</p><div class="buyline">${millBtns}</div>${rows}<div class="buyline"><button type="button" class="sell" data-spawn="grub">养蛴螬</button><button type="button" class="sell" data-spawn="bsf">养黑水虻</button></div><div class="buyline"><button type="button" class="sell" id="tend">照料</button><button type="button" class="sell" id="harvest">收获</button></div>`;
   }
 }
+function returnToLook() {
+  mode = 'look';
+  watchRig = null;
+  millPlace = false;
+  closePlanMenu();
+  pickedFields.clear();
+  selectField(null);
+  paintModes();
+  paintSheet();
+  paintLock();
+}
 function setMode(id) {
   if (id !== 'deck' && viewLayer !== 'surface') {
     holdCamera();
@@ -1834,10 +1853,14 @@ function setMode(id) {
   paintModes();
   paintSheet();
 }
+function toggleMode(id) {
+  if (mode === id) { returnToLook(); return; }
+  setMode(id);
+}
 $('tiers').addEventListener('click', e => {
   const b = e.target.closest('button');
   if (!b) return;
-  setMode(b.dataset.mode);
+  toggleMode(b.dataset.mode);
 });
 $('sheet').addEventListener('change', e => { if (e.target.dataset?.flag) readPlanFlags($('sheet')); });
 $('sheet').addEventListener('click', e => {
@@ -2179,16 +2202,36 @@ function paintKpi() {
     if (shownRev >= 0) { el.classList.remove('tick'); void el.offsetWidth; el.classList.add('tick'); }
     shownRev = economy.revenue;
   }
-  $('kpi-day').textContent = String(Math.floor(worldDay));
-  $('kpi-seed').textContent = String(stores.seed);
   $('kpi-act').textContent = String(act);
+  paintWorldClock();
   const fleetN = $('kpi').querySelector('em');
   if (fleetN) fleetN.textContent = `/ ${rigs.length}`;
   $('stores').textContent = `种薯 ${stores.seed} · 肥料 ${stockText(stores.fertilizer)} · 干燥剂 ${stores.spray} · 皮 ${stockText(stores.peel)} · 虫粪 ${stockText(stores.frass)}`;
 }
+function worldClockParts() {
+  const day = Math.floor(worldDay);
+  const mins = Math.floor((worldDay - day) * 1440 + 1e-6);
+  const hh = Math.floor(mins / 60) % 24;
+  const mm = mins % 60;
+  return { day, hh, mm, hm: `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}` };
+}
+function paintWorldClock() {
+  const c = worldClockParts();
+  const dayEl = $('kpi-day');
+  if (dayEl) dayEl.textContent = String(c.day);
+  const hm = $('kpi-hm');
+  if (hm) hm.textContent = c.hm;
+  const hour = $('kpi-hh');
+  const minute = $('kpi-mh');
+  if (hour) hour.style.transform = `rotate(${((c.hh % 12) + c.mm / 60) * 30}deg)`;
+  if (minute) minute.style.transform = `rotate(${c.mm * 6}deg)`;
+  const clock = $('clock');
+  if (clock) clock.textContent = paused ? `第 ${c.day} 日 · ${c.hm} · 暂停` : `第 ${c.day} 日 · ${c.hm}`;
+}
 function updateDock() {
   const el = $('dock');
-  if (viewLayer !== 'surface' || !selected) { el.classList.remove('on'); return; }
+  const show = viewLayer === 'surface' && selected && (mode === 'look' || mode === 'plan');
+  if (!show) { el.classList.remove('on'); return; }
   el.classList.add('on');
   const f = selected;
   const watch = cropWatch(f);
@@ -2229,7 +2272,7 @@ function paintRates() {
   const input = $('rate-in');
   if (input && document.activeElement !== input) input.value = String(economy.timeScale);
 }
-$('kpi').innerHTML = `<div><small>营收</small><b class="hv" id="kpi-rev">0</b></div><div><small>世界日</small><b id="kpi-day">0</b></div><div><small>种薯</small><b id="kpi-seed">${stores.seed}</b></div><div><small>作业</small><b class="hv" id="kpi-act">0</b><em>/ ${rigs.length}</em></div>`;
+$('kpi').innerHTML = `<div><small>营收</small><b class="hv" id="kpi-rev">0</b></div><div><small>世界日</small><b id="kpi-day">0</b></div><div><small>时刻</small><span class="clk"><i class="face" id="kpi-face" aria-hidden="true"><i id="kpi-hh"></i><i id="kpi-mh"></i></i><b id="kpi-hm">00:00</b></span></div><div><small>作业</small><b class="hv" id="kpi-act">0</b><em>/ ${rigs.length}</em></div>`;
 $('dock').innerHTML = `<div class="who"><b id="selid"></b><span id="selstat"></span></div><div id="bar"><i id="selbar"></i></div><div class="row" id="selbtns"></div>`;
 for (const c of CROPS) if (c.plantable) {
   const b = document.createElement('button');
@@ -2251,8 +2294,50 @@ $('rate-in').addEventListener('mouseup', e => e.preventDefault());
 $('rate-in').addEventListener('change', applyTypedRate);
 $('rate-in').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); applyTypedRate(); } });
 paintRates();
-function toggleAdmin() { $('admin').classList.toggle('on'); }
+const ADMIN_POS_KEY = 'ringsheaf.admin.pos';
+function placeAdmin(x, y) {
+  const el = $('admin');
+  const w = el.offsetWidth || 228;
+  x = Math.max(8, Math.min(innerWidth - w - 8, x));
+  y = Math.max(8, Math.min(innerHeight - 48, y));
+  el.style.left = Math.round(x) + 'px';
+  el.style.top = Math.round(y) + 'px';
+}
+function restoreAdminPos() {
+  try {
+    const raw = localStorage.getItem(ADMIN_POS_KEY);
+    if (!raw) return;
+    const p = JSON.parse(raw);
+    if (Number.isFinite(p.x) && Number.isFinite(p.y)) placeAdmin(p.x, p.y);
+  } catch (e) { /* private mode */ }
+}
+function toggleAdmin() {
+  const el = $('admin');
+  const open = el.classList.toggle('on');
+  if (open) restoreAdminPos();
+}
 $('admin-toggle').addEventListener('click', toggleAdmin);
+$('admin').querySelector('.ah').addEventListener('pointerdown', e => {
+  if (e.button !== 0) return;
+  const el = $('admin');
+  const bar = e.currentTarget;
+  const r = el.getBoundingClientRect();
+  const ox = e.clientX - r.left, oy = e.clientY - r.top;
+  bar.setPointerCapture(e.pointerId);
+  const move = ev => placeAdmin(ev.clientX - ox, ev.clientY - oy);
+  const up = () => {
+    bar.removeEventListener('pointermove', move);
+    bar.removeEventListener('pointerup', up);
+    try {
+      const box = el.getBoundingClientRect();
+      localStorage.setItem(ADMIN_POS_KEY, JSON.stringify({ x: Math.round(box.left), y: Math.round(box.top) }));
+    } catch (err) { /* private mode */ }
+  };
+  bar.addEventListener('pointermove', move);
+  bar.addEventListener('pointerup', up);
+  e.preventDefault();
+});
+restoreAdminPos();
 function paintCropBook() {
   const host = $('cropbook');
   if (!host) return;
@@ -2289,7 +2374,7 @@ $('tab-crops').addEventListener('click', () => setAdminTab('crops'));
 function paintPause() {
   $('pause').textContent = paused ? '继续' : '暂停';
   $('pause').classList.toggle('on', paused);
-  $('clock').textContent = paused ? `第 ${Math.floor(worldDay)} 日 · 暂停` : `第 ${Math.floor(worldDay)} 日`;
+  paintWorldClock();
 }
 $('pause').addEventListener('click', () => { setPaused(!paused); paintPause(); });
 function askReset(on) { $('admin').classList.toggle('on-reset', on); }
@@ -2306,8 +2391,9 @@ $('reset-yes').addEventListener('click', () => {
   seenLog = 0;
   shownRev = -1;
   watchRig = null;
-  selectField(fieldAt(focus.i, focus.j), '');
-  showPlan();
+  if (viewLayer !== 'surface' || cut.on) showLayer('surface');
+  returnToLook();
+  frameFocus();
   paintKpi();
   paintRates();
   paintPause();
@@ -2431,7 +2517,6 @@ function toggleViewer() {
 }
 $('viewer-close').addEventListener('click', () => $('viewer').classList.remove('on'));
 if (!VIEW && !Q.has('fresh')) loadNow();
-if (!VIEW) selectField(fieldAt(focus.i, focus.j));
 addEventListener('beforeunload', saveNow);
 writeFields();
 function frame(now) {
@@ -2632,10 +2717,7 @@ function frame(now) {
   updateDock();
   paintLock();
   drainLog();
-  if (frames === 0) {
-    $('clock').textContent = paused ? `第 ${Math.floor(worldDay)} 日 · 暂停` : `第 ${Math.floor(worldDay)} 日`;
-    $('fps').textContent = `${fpsShow.toFixed(0)} FPS`;
-  }
+  if (frames === 0) $('fps').textContent = `${fpsShow.toFixed(0)} FPS`;
   window.__stats = { fps: fpsShow, t, sim: simTime, d, revenue: economy.revenue, g: selected && selected.g, state: selected && selected.state, plants: Object.values(plantMeshes).reduce((a, m) => a + (m.visible ? m.count : 0), 0), harvesters: harvesters.length, active: harvesters.filter(h => h.mode === 'cut').length, calls: R.info.render.calls, tris: R.info.render.triangles };
   requestAnimationFrame(frame);
 }

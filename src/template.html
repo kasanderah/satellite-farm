@@ -24,7 +24,13 @@ body.nohud .hud,body.nohud #labels{opacity:0!important}
 #kpi small{display:block;font-size:10px;letter-spacing:.2em;color:var(--mut)}
 #kpi b{font-weight:400;font-size:19px;letter-spacing:.04em;font-variant-numeric:tabular-nums}
 #kpi b.hv{color:var(--sig)}#kpi em{font-style:normal;font-size:11px;color:var(--mut);margin-left:3px}
-#clock{top:72px;right:22px;font-size:11px;letter-spacing:.24em;color:var(--mut)}
+#kpi .clk{display:flex;align-items:center;gap:8px;margin-top:1px}
+#kpi .face{position:relative;width:22px;height:22px;border-radius:50%;border:1px solid rgba(232,216,208,.75);flex:none}
+#kpi .face i{position:absolute;left:50%;bottom:50%;width:1.5px;margin-left:-.75px;transform-origin:50% 100%;background:var(--fg);border-radius:1px}
+#kpi #kpi-hh{height:6px}
+#kpi #kpi-mh{height:9px;background:var(--sig)}
+#kpi .face:after{content:"";position:absolute;left:50%;top:50%;width:3px;height:3px;margin:-1.5px 0 0 -1.5px;border-radius:50%;background:var(--sig)}
+#clock{top:76px;right:22px;font-size:11px;letter-spacing:.14em;color:var(--mut)}
 /* 底部中间：缩放层级 + 比例尺 */
 #tiers{bottom:22px;left:50%;transform:translateX(-50%);display:flex;gap:0;padding:7px 6px}
 #tiers button{font-family:inherit;color:var(--fg);background:transparent;border:0;border-bottom:1px solid transparent;padding:2px 8px;text-align:center;opacity:.45;cursor:pointer;transition:all .3s}
@@ -61,7 +67,7 @@ body.nohud .hud,body.nohud #labels{opacity:0!important}
 #fps{top:94px;right:22px;font-size:10px;letter-spacing:.2em;color:var(--mut);opacity:.7}
 /* 地表标注 */
 #labels{position:fixed;inset:0;pointer-events:none;z-index:2;transition:opacity .4s}
-#layers{top:84px;right:20px;padding:9px 12px 7px;min-width:236px}
+#layers{top:100px;right:20px;padding:9px 12px 7px;min-width:236px}
 #layers .lh{font-size:10px;letter-spacing:.2em;color:var(--mut);margin-bottom:5px;display:flex;justify-content:space-between}
 #layers .lh em{font-style:normal;color:var(--mut);opacity:.8}
 #layers .ly{display:grid;grid-template-columns:10px 1fr auto;column-gap:8px;align-items:center;padding:3px 0;opacity:.42;transition:opacity .3s;cursor:pointer}
@@ -91,7 +97,8 @@ body.underground #legend{display:none}
 #admin a:hover{border-color:var(--sig)}
 #admin{top:98px;left:20px;display:none;flex-direction:column;gap:8px;padding:10px 12px;min-width:228px}
 #admin.on{display:flex}
-#admin .ah{display:flex;justify-content:space-between;font-size:10px;letter-spacing:.2em;color:var(--mut)}
+#admin .ah{display:flex;justify-content:space-between;font-size:10px;letter-spacing:.2em;color:var(--mut);cursor:grab;user-select:none;touch-action:none}
+#admin .ah:active{cursor:grabbing}
 #admin.on ~ #stores{top:268px}
 #admin.crop{max-height:74vh;overflow:auto;width:min(440px,92vw)}
 #admin.crop #clockpane{display:none}
@@ -185,12 +192,12 @@ body.underground #legend{display:none}
 <div class="hud" id="stores"></div>
 <div class="hud" id="fps"></div>
 <div class="hud panel" id="legend"></div>
-<div class="hud panel" id="layers"></div>
+<div class="hud panel hit" id="layers"></div>
 <div class="hud panel hit" id="sheet"></div>
 <div class="hud panel hit" id="tiers"></div>
 <div class="hud panel hit" id="dock"></div>
 <div class="hud" id="toasts"></div>
-<div class="hud" id="hint">选中裸地，点种薯。底部可开作物、规划、仓库、商店、农机店<br>拖动 平移 · 规划时拖框选田、右键指定作物 · 右键 旋转 · 滚轮 缩放 · C 培育层</div>
+<div class="hud" id="hint">点一块田再种薯。底部工具再点一次，或按 Esc，回到查看<br>拖动 平移 · 规划时拖框选田、右键指定作物 · 右键 旋转 · 滚轮 缩放 · C 培育层</div>
 <div id="picks"></div>
 <div id="marquee"></div>
 <div class="hud panel hit" id="planmenu"></div>
