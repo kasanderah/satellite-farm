@@ -409,9 +409,9 @@ test('culture tanks sit in one row off the hub and inside the plot', () => {
   }
 });
 
-test('asset lab lists the four classes and the live placeholders', () => {
-  assert.deepEqual(LAB_CLASSES.map(c => c.id), ['unit', 'machine', 'equip', 'rail']);
-  assert.deepEqual(LAB_CLASSES.map(c => c.label), ['单元', '农机', '设备', '轨道设备']);
+test('asset lab lists the workshop classes and the live placeholders', () => {
+  assert.deepEqual(LAB_CLASSES.map(c => c.id), ['unit', 'machine', 'hitch', 'equip', 'rail']);
+  assert.deepEqual(LAB_CLASSES.map(c => c.label), ['单元', '农机', '后挂', '设备', '轨道设备']);
   const ids = new Set(LAB_ENTRIES.map(e => e.id));
   for (const id of ['field', 'deck', 'hub', 'tank', 'arm', 'tractor']) assert.ok(ids.has(id), id);
   const cls = new Set(LAB_CLASSES.map(c => c.id));
@@ -432,6 +432,42 @@ test('asset lab lists the four classes and the live placeholders', () => {
   assert.equal(LAB_ENTRIES.find(e => e.id === 'tank').cls, 'equip');
   assert.equal(LAB_ENTRIES.find(e => e.id === 'arm').cls, 'rail');
   assert.equal(LAB_ENTRIES.find(e => e.id === 'tractor').cls, 'machine');
+  const surface = {
+    tractor_gen: ['machine', '通用拖拉机'],
+    harvester_combine: ['machine', '联合收割机'],
+    harvester_potato: ['machine', '土豆收获机'],
+    harvester_cabbage: ['machine', '结球收获机'],
+    transplanter: ['machine', '移栽机'],
+    impl_rotavator: ['hitch', '旋耕机'],
+    impl_subsoiler: ['hitch', '深松机'],
+    impl_cultivator: ['hitch', '中耕机'],
+    impl_fertilizer: ['hitch', '施肥机'],
+    impl_sprayer: ['hitch', '喷雾机'],
+    impl_seeder: ['hitch', '条播机'],
+    impl_potato_planter: ['hitch', '种薯播种机'],
+    impl_haulm: ['hitch', '碎秧机'],
+    impl_trailer: ['hitch', '挂车'],
+    impl_bedder: ['hitch', '起垄机'],
+    orbit_boom: ['rail', '轨道喷洒桁架'],
+  };
+  for (const [id, [clsName, name]] of Object.entries(surface)) {
+    const e = LAB_ENTRIES.find(x => x.id === id);
+    assert.ok(e, id);
+    assert.equal(e.cls, clsName, id);
+    assert.equal(e.name, name, id);
+    assert.match(e.notes, new RegExp(id));
+  }
+  assert.equal(ids.has('impl_baler'), false);
+  assert.match(LAB_ENTRIES.find(e => e.id === 'harvester_combine').notes, /大豆/);
+  assert.match(LAB_ENTRIES.find(e => e.id === 'harvester_combine').notes, /谷物/);
+  assert.match(LAB_ENTRIES.find(e => e.id === 'impl_cultivator').notes, /浅耕/);
+  assert.match(LAB_ENTRIES.find(e => e.id === 'impl_cultivator').notes, /除草/);
+  assert.match(LAB_ENTRIES.find(e => e.id === 'impl_cultivator').notes, /培土/);
+  assert.match(LAB_ENTRIES.find(e => e.id === 'impl_cultivator').notes, /清垄/);
+  assert.match(LAB_ENTRIES.find(e => e.id === 'impl_seeder').notes, /大豆圆盘/);
+  assert.match(LAB_ENTRIES.find(e => e.id === 'impl_seeder').notes, /谷物圆盘/);
+  assert.match(LAB_ENTRIES.find(e => e.id === 'impl_potato_planter').notes, /不做自走/);
+  assert.match(LAB_ENTRIES.find(e => e.id === 'impl_haulm').notes, /不做自走/);
 });
 
 test('empty cultivation unit matches the 4 km plot grid', () => {
