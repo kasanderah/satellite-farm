@@ -104,6 +104,14 @@ body.underground #legend{display:none}
 #cropbook .meta{color:var(--mut);font-size:11px;letter-spacing:.04em;line-height:1.5;margin-top:4px}
 #cropbook .io{display:flex;justify-content:space-between;gap:12px;font-size:11px;letter-spacing:.04em;margin-top:2px}
 #cropbook i{width:8px;height:8px;display:inline-block;margin-right:6px}
+#cropbook .note,#planmenu .note{margin:6px 0 0;color:var(--mut);font-size:11px;letter-spacing:.04em;line-height:1.5}
+#cropbook .gantt{display:flex;height:22px;margin-top:4px;gap:1px;background:rgba(232,216,208,.08)}
+#cropbook .gantt i{display:flex;align-items:center;overflow:hidden;min-width:0;height:100%;width:auto;margin:0}
+#cropbook .gantt em{font-style:normal;font-size:9px;letter-spacing:0;color:#1c140e;padding:0 3px;white-space:nowrap}
+#cropbook .gantt.jobs{height:16px}
+#cropbook .gantt.jobs em{color:var(--fg)}
+#sheet .tick,#planmenu .tick{display:flex;align-items:center;gap:8px;margin-top:8px;font-size:12px;letter-spacing:.06em;cursor:pointer}
+#sheet .tick input,#planmenu .tick input{accent-color:#d8693c}
 #admin .ask{display:none;margin:0;font-size:11px;letter-spacing:.06em;color:var(--mut);line-height:1.5}
 #admin #reset-go{display:none}
 #admin.on-reset .ask,#admin.on-reset #reset-go{display:flex}
@@ -112,7 +120,7 @@ body.underground #legend{display:none}
 #rates{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 #rates input{width:72px;font-family:inherit;font-size:12px;color:var(--fg);background:transparent;border:1px solid var(--line);padding:3px 6px;letter-spacing:.06em}
 #stores{top:100px;left:22px;font-size:11px;letter-spacing:.12em;color:var(--mut);line-height:1.6}
-#rates span{font-size:10px;letter-spacing:.22em;color:var(--mut)}
+#rates span{font-size:11px;letter-spacing:.06em;color:var(--mut)}
 #rates button,#dock button,#admin .arow button,#viewer .bar button,#viewer .card,#sheet .rowbtn,#sheet .sell{font-family:inherit;color:var(--fg);background:transparent;border:1px solid var(--line);cursor:pointer;letter-spacing:.08em}
 #rates button,#admin .arow button{padding:3px 8px;font-size:12px}
 #admin .arow{display:flex;gap:6px}

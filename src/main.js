@@ -417,16 +417,28 @@ vec3 farmAlbedo(vec2 p){
         bool shredded = worked || d.b >= 9.5;
         if (shredded) { col = stub; gTilt = acrossW * slope * 0.35 * rowVis; gRough = 0.92; }
         else { col = bloom; gTilt = acrossW * slope * 0.55 * rowVis; canopyHere = true; gRough = 0.66; }
-      } else if (worked) {
-        float tub = smoothstep(0.78, 0.96, hash12(floor(rc * 0.65)));
-        col = mix(soil * 1.05, g_straw * 1.15, mix(0.12, tub, nearS) * 0.9);
-        gTilt = acrossW * slope * 0.18 * rowVis;
-        gRough = 0.94;
+      } else if (pst < 7.5) {
+        if (worked) {
+          float tub = smoothstep(0.78, 0.96, hash12(floor(rc * 0.65)));
+          col = mix(soil * 1.05, g_straw * 1.15, mix(0.12, tub, nearS) * 0.9);
+          gTilt = acrossW * slope * 0.18 * rowVis;
+          gRough = 0.94;
+        } else {
+          col = mix(bloom, mix(soil, g_straw, 0.55), 0.35);
+          gTilt = acrossW * slope * 0.4 * rowVis;
+          canopyHere = true;
+          gRough = 0.72;
+        }
       } else {
-        col = stub;
-        gTilt = acrossW * slope * 0.28 * rowVis;
-        gRough = 0.92;
+        col = mix(g_deep, g_rust, 0.62) * (0.85 + patchy);
+        gTilt = acrossW * slope * 0.12 * rowVis;
+        gRough = 0.96;
       }
+      // 自然阶段用散点铺开，不整块换色。杀秧、起薯这些作业色盖在上面。
+      float frac = clamp(g - pst, 0.0, 0.999);
+      float blendDot = step(hash12(floor(uv * vec2(0.58, 0.47)) + pst), frac);
+      vec3 nxt = pst < 1.5 ? young : pst < 2.5 ? canopy : pst < 3.5 ? bloom : pst < 4.5 ? mix(bloom, stub, 0.65) : pst < 5.5 ? mix(soil, g_straw, 0.62) : pst < 6.5 ? mix(g_straw, g_olive, 0.45) : mix(g_deep, g_rust, 0.72);
+      if (!(worked && pst >= 4.5)) col = mix(col, nxt, blendDot);
     } else if (cut) {                                       // 残茬：作业带一深一浅（收割方向不同），带车辙
       float lane = floor(uv.y / LANE), lv = mod(uv.y, LANE) - LANE * .5;
       col = mix(g_soil, uCropStub[c], 0.6) * (1. + patchy);
@@ -621,10 +633,13 @@ varying vec3 vCropCol;`).replace('#include <begin_vertex>', `#include <begin_ver
     if (d.r >= 0.) {
       stage = floor(d.g + 0.001);
       bool opened = laneCut(uv, d.b);
-      gg = growthVis(d.g);
+      float frac = clamp(d.g - stage, 0.0, 0.999);
+      float speck = step(hash12(floor(io.xz * 0.45)), frac);
+      gg = mix(growthVis(stage + 0.2), growthVis(stage + 1.2), speck);
       if (stage < 0.5 && opened) gg = 0.;
-      if (stage > 4.5 && opened) gg = stage < 5.5 ? 0.08 : 0.;
-      if (stage > 0.5 && stage < 1.5) gg = 0.;
+      if (opened && stage > 4.5 && stage < 5.5) gg = 0.08;
+      if (opened && stage > 5.5) gg = 0.;
+      if (stage > 7.5) gg = 0.04;
       sc = gg;
     }
   }
@@ -1315,6 +1330,7 @@ function applyDeckView() {
 // 交互：左键平移 / 右键旋转 / 滚轮缩放 / WASD / QE / N 昼夜 / M 地图模式 / H 隐藏界面
 let drag = null, ptr = null, selected = null, selNote = '';
 let mode = 'plan', watchRig = null, pickedLot = null, pickedStack = null, shopPick = 'seed', rigPick = 'planter', cropPick = 'potato', deckTank = 0, deckBlock = null, deckHub = false, buildAct = 'place', buildKind = 'warehouse', buildPick = null, millPlace = false;
+let planCycle = false, planBuy = false;
 const pickedFields = new Set();
 const raycaster = new THREE.Raycaster();
 function pickFlat(cx, cy) {
@@ -1390,12 +1406,32 @@ function toast(html) {
   $('toasts').appendChild(d);
   setTimeout(() => d.remove(), 4800);
 }
+function planWhy(reason) {
+  if (reason === 'seed') return '种薯不足';
+  if (reason === 'fertilizer') return '肥料不足';
+  if (reason === 'busy') return '这块田正在长';
+  if (reason === 'season') return '现在不在农时里';
+  return '不能播种';
+}
+function readPlanFlags(root) {
+  if (!root) return;
+  const cycle = root.querySelector('[data-flag="cycle"]');
+  const buy = root.querySelector('[data-flag="buy"]');
+  if (cycle) planCycle = cycle.checked;
+  if (buy) planBuy = buy.checked;
+}
+function planOpts() {
+  return { cycle: planCycle, autoBuy: planBuy };
+}
+function planTicks() {
+  return `<label class="tick"><input type="checkbox" data-flag="cycle"${planCycle ? ' checked' : ''}>循环种植</label><label class="tick"><input type="checkbox" data-flag="buy"${planBuy ? ' checked' : ''}>自动购买物资</label><p class="note">循环：收完再种。自动购买：缺种薯或肥料时用营收买。这一站不看农时。</p>`;
+}
 function doPlant(id) {
   if (!selected?.owned) { toast('不能播种'); return { ok: false, reason: 'plot' }; }
-  const r = plantField(selected, id);
+  readPlanFlags($('sheet'));
+  const r = plantField(selected, id, planOpts());
   if (!r.ok) {
-    const why = r.reason === 'seed' ? '种薯不足' : r.reason === 'fertilizer' ? '肥料不足' : r.reason === 'busy' ? '这块田正在长' : '不能播种';
-    toast(why);
+    toast(planWhy(r.reason));
     return r;
   }
   plantWin = { x: 1e9, z: 1e9, w: 0 };
@@ -1417,15 +1453,18 @@ function applyFieldPick(list, shift) {
   if (mode === 'scheme') paintSheet();
 }
 function planSelected(cropId) {
+  readPlanFlags($('sheet'));
+  readPlanFlags($('planmenu'));
   closePlanMenu();
   let n = 0;
   let why = '';
+  const opts = planOpts();
   for (const idx of pickedFields) {
     const f = fields[idx];
     if (!f?.owned) continue;
-    const r = plantField(f, cropId);
+    const r = plantField(f, cropId, opts);
     if (r.ok) n++;
-    else if (!why) why = r.reason === 'seed' ? '种薯不足' : r.reason === 'fertilizer' ? '肥料不足' : r.reason === 'busy' ? '有的田正在长' : '有的田不能种';
+    else if (!why) why = r.reason === 'seed' ? '种薯不足' : r.reason === 'fertilizer' ? '肥料不足' : r.reason === 'busy' ? '有的田正在长' : r.reason === 'season' ? '现在不在农时里' : '有的田不能种';
   }
   if (n) toast(`已规划 ${n} 块。生长等播种机开工`);
   else toast(why || '没有种上');
@@ -1438,8 +1477,9 @@ function openPlanMenu(x, y) {
   menu.classList.add('on');
   menu.style.left = Math.min(x, innerWidth - 220) + 'px';
   menu.style.top = Math.min(y, innerHeight - 140) + 'px';
-  menu.innerHTML = `<div class="who"><b>规划 ${pickedFields.size} 块</b><span>钟从播种机开工起算</span></div><button type="button" class="sell" id="plan-potato-menu">种中熟商品薯</button>`;
+  menu.innerHTML = `<div class="who"><b>规划 ${pickedFields.size} 块</b><span>钟从播种机开工起算</span></div>${planTicks()}<button type="button" class="sell" id="plan-potato-menu">种中熟商品薯</button>`;
 }
+document.getElementById('planmenu').addEventListener('change', e => { if (e.target.dataset.flag) readPlanFlags($('planmenu')); });
 document.getElementById('planmenu').addEventListener('click', e => {
   if (e.target.id === 'plan-potato-menu') planSelected('potato');
 });
@@ -1711,7 +1751,7 @@ function paintSheet() {
     el.innerHTML = `<div class="split"><div><div class="who"><b>作物</b><span>点一种看阶段</span></div>${stackSlots(rows, d.id, 'data-cropid')}</div><div>${head}</div></div>`;
   } else if (mode === 'scheme') {
     const n = pickedFields.size;
-    el.innerHTML = `<div class="who"><b>规划</b><span>已选 ${n} 块田</span></div><p class="note">拖出方框选田。按住 Shift 再点，加选。右键已选的田，指定作物。生长从播种机开工才计时，不是从这一下。</p><button type="button" class="sell" id="plan-potato"${n ? '' : ' disabled'}>种中熟商品薯</button>`;
+    el.innerHTML = `<div class="who"><b>规划</b><span>已选 ${n} 块田</span></div><p class="note">拖出方框选田。按住 Shift 再点，加选。右键已选的田，指定作物。生长从播种机开工才计时，不是从这一下。</p>${planTicks()}<button type="button" class="sell" id="plan-potato"${n ? '' : ' disabled'}>种中熟商品薯</button>`;
   } else if (mode === 'machines') {
     el.innerHTML = `<div class="who"><b>农机</b><span>点一台，镜头跟着它</span></div>` + rigs.map(r => `<button type="button" class="rowbtn${watchRig && watchRig.id === r.id ? ' on' : ''}" data-rig="${r.id}"><b>${rigTitle(r)}</b><small>${rigLine(r)}</small></button>`).join('');
   } else if (mode === 'rigshop') {
@@ -1799,6 +1839,7 @@ $('tiers').addEventListener('click', e => {
   if (!b) return;
   setMode(b.dataset.mode);
 });
+$('sheet').addEventListener('change', e => { if (e.target.dataset?.flag) readPlanFlags($('sheet')); });
 $('sheet').addEventListener('click', e => {
   const rig = e.target.closest('[data-rig]');
   if (rig) { lockRig(+rig.dataset.rig); return; }
@@ -1806,6 +1847,7 @@ $('sheet').addEventListener('click', e => {
   if (cropId) { cropPick = cropId.dataset.cropid; paintSheet(); return; }
   const stack = e.target.closest('[data-stack]');
   if (stack) { pickedStack = stack.dataset.stack; paintSheet(); return; }
+  if (e.target.dataset.flag) { readPlanFlags($('sheet')); return; }
   if (e.target.id === 'plan-potato') { planSelected('potato'); return; }
   const bact = e.target.closest('[data-bact]');
   if (bact) { buildAct = bact.dataset.bact; paintSheet(); return; }
@@ -2154,6 +2196,7 @@ function updateDock() {
   if (!stat) {
     if (!f.owned) stat = '邻区快照 · 只读';
     else if (watch?.waiting) stat = '已规划 · 等播种机开工，生长还没计时';
+    else if (watch?.failed) stat = '中熟商品薯 · 烂在地里 · 没人收，不入仓';
     else if (watch) stat = `中熟商品薯 · ${watch.label} · 播后 ${Math.floor(watch.day)} / ${watch.days} 日`;
     else if (stores.seed < SEED_PER_FIELD) stat = '种薯不足。打开商店买一份。';
     else if (stores.fertilizer + 1e-9 < fertPlan().fromFert) stat = stores.frass > 0 ? '肥料不足。虫粪只能抵一半。' : '肥料不足。打开商店买一份。';
@@ -2196,7 +2239,7 @@ for (const c of CROPS) if (c.plantable) {
   b.addEventListener('click', () => doPlant(c.id));
   $('selbtns').appendChild(b);
 }
-$('rates').innerHTML = `<span>1× = 1 分/日</span>` + [1, 4, 12].map(r => `<button type="button" data-rate="${r}">${r}×</button>`).join('') + `<input id="rate-in" type="text" inputmode="decimal" value="1" aria-label="世界钟倍率" autocomplete="off">`;
+$('rates').innerHTML = `<span>1×：1 分 = 2 世界时</span>` + [1, 4, 12].map(r => `<button type="button" data-rate="${r}">${r}×</button>`).join('') + `<input id="rate-in" type="text" inputmode="decimal" value="1" aria-label="世界钟倍率" autocomplete="off">`;
 function applyTypedRate() {
   const v = +$('rate-in').value;
   if (!(v > 0)) { paintRates(); return; }
@@ -2213,7 +2256,13 @@ $('admin-toggle').addEventListener('click', toggleAdmin);
 function paintCropBook() {
   const host = $('cropbook');
   if (!host) return;
-  host.innerHTML = `<p class="lead">阶段、日数、投入和产出读作物定义。</p>` + CROPS.map(c => {
+  const gantt = stages => {
+    if (!stages.length) return '';
+    const growth = stages.map(s => `<i style="flex:${s.days} 1 0;background:${s.color}" title="${s.name} 第 ${s.from}–${s.to} 日"><em>${s.name}</em></i>`).join('');
+    const jobs = stages.map(s => `<i style="flex:${s.days} 1 0;background:${s.machine ? s.color : 'transparent'}" title="${s.machine ? s.machine + ' 第 ' + s.machineAt + ' 日 · ' + s.effect : '这一段没有农机'}"><em>${s.machine || ''}</em></i>`).join('');
+    return `<div class="meta">生长阶段 · 同一时间只在一段里</div><div class="gantt">${growth}</div><div class="meta">作业窗口 · 机器和效果写在阶段上</div><div class="gantt jobs">${jobs}</div><p class="note">只读预览。改阶段仍写在作物定义里。农时这一站不拦播种。</p>`;
+  };
+  host.innerHTML = `<p class="lead">阶段、日数、投入和产出读作物定义。条是只读预览，不能在这里改。</p>` + CROPS.map(c => {
     const d = cropDossier(c.id);
     const stages = d.stages.length
       ? d.stages.map(s => `<div class="io"><span><i style="background:${s.color}"></i>${s.name}</span><span>第 ${s.from}–${s.to} 日 · ${s.days} 日${s.machine ? ' · ' + s.machine : ''}</span></div>`).join('')
@@ -2225,7 +2274,7 @@ function paintCropBook() {
       ? d.outputs.map(o => `<div class="io"><span>${o.name}</span><span>${fmt(o.liters)} ${o.unit} · 牌价 ${fmt(o.price)}</span></div>`).join('')
       : `<div class="io"><span>产出</span><span>这一季不入仓</span></div>`;
     const span = d.plantable ? `${d.days} 日` : `参考 ${d.days} 日`;
-    return `<div class="crop"><b>${d.name}</b><div class="meta">${d.analog} · ${span}</div><div class="meta">${d.yieldNote}</div><div class="meta">阶段</div>${stages}<div class="meta">投入</div>${inputs}<div class="meta">产出</div>${outputs}</div>`;
+    return `<div class="crop"><b>${d.name}</b><div class="meta">${d.analog} · ${span}</div><div class="meta">${d.yieldNote}</div>${gantt(d.stages)}<div class="meta">阶段</div>${stages}<div class="meta">投入</div>${inputs}<div class="meta">产出</div>${outputs}</div>`;
   }).join('');
 }
 function setAdminTab(which) {
@@ -2249,6 +2298,8 @@ $('reset-no').addEventListener('click', () => askReset(false));
 $('reset-yes').addEventListener('click', () => {
   askReset(false);
   millPlace = false;
+  planCycle = false;
+  planBuy = false;
   resetGame();
   try { localStorage.removeItem(SAVE_KEY); } catch (e) { /* private mode */ }
   clearTimeout(saveSoon.t);

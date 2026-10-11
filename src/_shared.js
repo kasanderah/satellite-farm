@@ -193,12 +193,17 @@ export const fieldAt = (i, j) => (i < 0 || j < 0 || i >= L.NFX || j >= L.NFZ) ? 
 export const toWorld = (f, u, v) => f.dir === 0 ? [f.x0 + u, f.z0 + v] : [f.x0 + v, f.z0 + u];
 
 // ---------- ⑦ 玩家田区：一口世界钟上的中熟商品薯 ----------
-// 1×：一真实分钟 = 一个世界日。播种到起薯仍是 120 个世界日。倍率同时加快这口钟和农机。
-// 农机在 1× 下约 2.8 m/s，走过一条 128 m 田边大约 46 个真实秒。
-export const DAY_SECONDS = 60;
-export const MACHINE_MPS = 2.8;
+// 1×：一真实分钟 = 120 世界分钟（2 世界时）。一世界日 = 12 真实分钟。一真实日约 120 世界日。
+// 倍率仍同时加快这口钟和农机。暂停把两者都停住。
+// 农机按田里约 3 km/h，乘上这口钟的 120 倍，再 ÷10，画面上约 10 m/s。不要按 1440 去乘。
+export const WORLD_MIN_PER_REAL_MIN = 120;
+export const DAY_SECONDS = (1440 / WORLD_MIN_PER_REAL_MIN) * 60;
+export const MACHINE_MPS = (3000 / 3600) * WORLD_MIN_PER_REAL_MIN / 10;
 export const SIM = { CUT: MACHINE_MPS, MOVE: MACHINE_MPS, STUBBLE: 8, TILL: 0 };
 export const POTATO_DAYS = 120;
+// 成熟之后留在田里等收获。过了这扇窗口还没人收，就算烂在地里，不入仓。
+export const POTATO_HOLD = 14;
+export const POTATO_ROT_AT = POTATO_DAYS + POTATO_HOLD;
 // 满电能走的米数，是原先 4200 的五倍。一趟田加来回路程只占几个百分点。
 // 出库门槛是满电。人已经在田上、电还够走，就接着去下一块，不回库补满。
 export const BATT_RANGE = 21000;
@@ -263,6 +268,7 @@ export function setTimeScale(v) {
 export const PHASE_LABEL = {
   plant: '播种起垄', ridge: '裸垄', shoot: '出苗', hill: '培土',
   canopy: '封垄', flower: '开花', top: '杀秧', haulm: '碎秧', lift: '起薯',
+  await: '成熟待收', rot: '烂在地里',
 };
 const JOBS = {
   planter: { at: 0, label: '播种机' },
@@ -288,7 +294,9 @@ export function potatoPhase(day) {
   if (day < 100) return 'flower';
   if (day < 106) return 'top';
   if (day < 114) return 'haulm';
-  return 'lift';
+  if (day < POTATO_DAYS) return 'lift';
+  if (day < POTATO_ROT_AT) return 'await';
+  return 'rot';
 }
 export function stageNum(day) {
   if (day < 18) return 1;
@@ -296,7 +304,9 @@ export function stageNum(day) {
   if (day < 72) return 3;
   if (day < 100) return 4;
   if (day < 114) return 5;
-  return 6;
+  if (day < POTATO_DAYS) return 6;
+  if (day < POTATO_ROT_AT) return 7;
+  return 8;
 }
 // 进度条和「作物」页共用。颜色按阶段切开。入仓量这一季仍是整块，不按走过的垄打折。
 export const POTATO_STAGES = [
@@ -305,12 +315,13 @@ export const POTATO_STAGES = [
   { id: 'canopy', name: '封垄', from: 46, to: 72, color: PALETTE.olive, machine: null, machineAt: null, effect: '冠层合上。这一段没有额外农机。' },
   { id: 'flower', name: '开花', from: 72, to: 100, color: '#c4b0d4', machine: null, machineAt: null, effect: '开花。入仓不按这一段加减。' },
   { id: 'haulm', name: '碎秧', from: 100, to: 114, color: PALETTE.rust, machine: '杀秧机', machineAt: 100, effect: '第 100 日杀秧机进地，把秧打碎。' },
-  { id: 'lift', name: '起薯', from: 114, to: 120, color: PALETTE.straw, machine: '收获机', machineAt: 114, effect: '第 114 日收获机进地。第 120 日整块入仓。' },
+  { id: 'lift', name: '起薯', from: 114, to: 120, color: PALETTE.straw, machine: '收获机', machineAt: 114, effect: '第 114 日收获机可以进地。熟了不会自己入仓。' },
+  { id: 'await', name: '成熟待收', from: 120, to: 134, color: PALETTE.ochre, machine: '收获机', machineAt: 114, effect: '成熟后留在田里。收获机走完才入仓。第 134 日还没收，就烂在地里。' },
 ];
 {
   const potato = CROPS.find(c => c.id === 'potato');
   potato.stages = POTATO_STAGES;
-  potato.yieldNote = '到第 120 日按整块入仓，不按机器走过的垄打折。田面上没做完的阶段停在作业前沿。';
+  potato.yieldNote = '第 120 日成熟，留在田里等收获。过窗口没人收就烂在地里，不入仓。钟自己往前走，没做完的作业停在前沿。';
   for (const c of CROPS) {
     if (c.plantable) continue;
     c.stages = [];
@@ -321,7 +332,7 @@ export function cropDossier(id) {
   const c = typeof id === 'number' ? CROPS[id] : CROPS.find(x => x.id === id);
   if (!c) return null;
   const stages = (c.stages || []).map(s => ({
-    name: s.name, from: s.from, to: s.to, days: s.to - s.from, color: s.color,
+    id: s.id, name: s.name, from: s.from, to: s.to, days: s.to - s.from, color: s.color,
     machine: s.machine, machineAt: s.machineAt, effect: s.effect,
   }));
   const recipe = c.id === 'potato' ? recipeById('potato-field') : null;
@@ -363,20 +374,39 @@ function visualFront(f) {
   }
   return front;
 }
+function stageBlend(day) {
+  const st = stageNum(day);
+  const row = POTATO_STAGES[st - 1];
+  if (!row || row.to <= row.from) return st;
+  const frac = Math.min(0.999, Math.max(0, (day - row.from) / (row.to - row.from)));
+  return st + frac;
+}
 export function fieldVisual(f) {
+  if (f?.failed === 'rot' && f.crop >= 0 && CROPS[f.crop]?.id === 'potato') {
+    return { crop: f.crop, g: 8.05, s: 0, dir: f.dir };
+  }
   if (f && f.live && !f.paid && f.crop >= 0 && CROPS[f.crop].id === 'potato') {
     if (f.plantedAt == null) return { crop: f.crop, g: 0, s: 0, dir: f.dir };
     const day = Math.max(0, worldDay - f.plantedAt);
-    if (day < POTATO_DAYS) return { crop: f.crop, g: stageNum(day) + 0.2, s: visualFront(f), dir: f.dir };
+    return { crop: f.crop, g: stageBlend(day), s: visualFront(f), dir: f.dir };
   }
   return { crop: f.crop, g: f.state === 0 ? 0 : f.g, s: (f.state === 3 || f.state === 4) ? f.s : 0, dir: f.dir };
 }
 export function cropWatch(f) {
+  if (f?.failed === 'rot') return { day: POTATO_ROT_AT, phase: 'rot', label: '烂在地里', front: 0, days: POTATO_ROT_AT, waiting: false, failed: true };
   if (!f?.live || f.paid || f.crop < 0 || CROPS[f.crop].id !== 'potato') return null;
-  if (f.plantedAt == null) return { day: 0, phase: 'plan', label: '待播种', front: 0, days: POTATO_DAYS, waiting: true };
+  if (f.plantedAt == null) return { day: 0, phase: 'plan', label: '待播种', front: 0, days: POTATO_ROT_AT, waiting: true };
   const day = Math.max(0, worldDay - f.plantedAt);
-  const phase = potatoPhase(Math.min(day, POTATO_DAYS - 0.001));
-  return { day, phase, label: PHASE_LABEL[phase], front: visualFront(f), days: POTATO_DAYS, waiting: false };
+  const phase = potatoPhase(day);
+  return { day, phase, label: PHASE_LABEL[phase], front: visualFront(f), days: POTATO_ROT_AT, waiting: false };
+}
+// 农时。这一站没有季节，播种窗口始终开着。以后接到地球历，在这里按日拦住。
+export function seasonAllowsSow(_field, _day = worldDay) {
+  return true;
+}
+// 中耕弃作、改土这一季没做。裸地仍只能规划种薯。
+export function fieldOps() {
+  return { cultivate: false, amend: false, note: '中耕弃作和改土还没接上' };
 }
 
 // 与 v3.1 相同次数的随机数，好让后面的运输车 / 无人机还落在原来的位置上
@@ -604,6 +634,7 @@ function assignIdleRigs() {
 function finishPass(r) {
   const f = r.f;
   if (f?.jobS) f.jobS[r.kind] = L.LANES;
+  if (r.kind === 'lifter') completeHarvest(f);
   if ((r.charge ?? 1) <= 0) { goHome(r); return; }
   const nxt = pickField(r.kind, r);
   if (!nxt) { goHome(r); return; }
@@ -746,20 +777,70 @@ function settlePotatoCalendar() {
       f.sprayed = true;
       if (stores.spray > 0) stores.spray -= 1;
     }
-    if (day >= POTATO_DAYS) {
-      f.paid = true;
-      const crop = CROPS[f.crop];
-      const lot = {
-        id: nextLot++, crop: crop.id, name: crop.name,
-        liters: Math.round(FIELD_HA * crop.yieldL),
-        listPrice: quote(f.crop),
-        i: f.i, j: f.j, t: worldDay,
-      };
-      warehouse.push(lot);
-      log.push({ type: 'store', pay: 0, listPrice: lot.listPrice, crop: crop.id, name: crop.name, i: f.i, j: f.j, t: worldDay });
-      f.live = false; f.hold = true; f.state = 0; f.g = 0; f.s = 0; f.claimed = false;
+    // 自然阶段自己往前走。入仓只在收获机走完这一趟。窗口过了还没收，整块烂掉。
+    if (day >= POTATO_ROT_AT && (f.jobS?.lifter ?? 0) < L.LANES - 1e-3) {
+      markRot(f);
       potatoLive.splice(i, 1);
     }
+  }
+}
+function storePotato(f) {
+  const crop = CROPS[f.crop];
+  const lot = {
+    id: nextLot++, crop: crop.id, name: crop.name,
+    liters: Math.round(FIELD_HA * crop.yieldL),
+    listPrice: quote(f.crop),
+    i: f.i, j: f.j, t: worldDay,
+  };
+  warehouse.push(lot);
+  log.push({ type: 'store', pay: 0, listPrice: lot.listPrice, crop: crop.id, name: crop.name, i: f.i, j: f.j, t: worldDay });
+  return lot;
+}
+function markRot(f) {
+  f.paid = false;
+  f.live = false;
+  f.hold = true;
+  f.state = 0;
+  f.g = 0;
+  f.s = 0;
+  f.claimed = false;
+  f.plantedAt = null;
+  f.failed = 'rot';
+  f.cycle = false;
+  delete f.jobS;
+  log.push({ type: 'rot', pay: 0, name: '烂在地里', i: f.i, j: f.j, t: worldDay });
+}
+function fillCycleSupplies(autoBuy) {
+  const seedNeed = Math.max(0, SEED_PER_FIELD - stores.seed);
+  const fertNeed = Math.max(0, Math.ceil(fertPlan().fromFert - stores.fertilizer - 1e-9));
+  if ((seedNeed > 0 || fertNeed > 0) && !autoBuy) return false;
+  if (seedNeed > 0 && !buyItem('seed', seedNeed).ok) return false;
+  if (fertNeed > 0 && !buyItem('fertilizer', fertNeed).ok) return false;
+  return stores.seed >= SEED_PER_FIELD && stores.fertilizer + 1e-9 >= fertPlan().fromFert;
+}
+function completeHarvest(f) {
+  if (!f?.live || f.failed === 'rot' || f.paid) return;
+  const day = f.plantedAt == null ? 0 : worldDay - f.plantedAt;
+  if (day >= POTATO_ROT_AT) { markRot(f); dropPotato(f); return; }
+  const cycle = !!f.cycle;
+  const autoBuy = !!f.autoBuy;
+  storePotato(f);
+  f.paid = true;
+  f.live = false;
+  f.hold = true;
+  f.state = 0;
+  f.g = 0;
+  f.s = 0;
+  f.claimed = false;
+  f.plantedAt = null;
+  f.failed = null;
+  delete f.jobS;
+  dropPotato(f);
+  f.cycle = cycle;
+  f.autoBuy = autoBuy;
+  if (cycle && seasonAllowsSow(f)) {
+    if (!fillCycleSupplies(autoBuy)) return;
+    plantField(f, 'potato', { cycle, autoBuy });
   }
 }
 export function rigReadout(r) {
@@ -1153,6 +1234,9 @@ export function resetGame() {
     f.crop = s.crop; f.state = s.state; f.g = s.g; f.s = s.s; f.timer = s.timer;
     f.live = s.live; f.hold = s.hold; f.frozen = s.frozen; f.paid = s.paid; f.sprayed = s.sprayed; f.claimed = s.claimed;
     f.plantedAt = 0;
+    f.cycle = false;
+    f.autoBuy = false;
+    f.failed = null;
     delete f.jobS;
   }
   warehouse.length = 0;
@@ -1298,8 +1382,9 @@ export function sellStack(cropId, fraction = 1) {
   log.push({ type: 'sale', pay, crop: cropId, name, i: null, j: null, t: worldDay });
   return { crop: cropId, name, listPrice: pay, liters };
 }
-export function plantField(f, cropId) {
+export function plantField(f, cropId, opts = {}) {
   if (!f?.owned) return { ok: false, reason: 'plot' };
+  if (!seasonAllowsSow(f)) return { ok: false, reason: 'season' };
   if (f.state === 3 || f.live) return { ok: false, reason: 'busy' };
   const crop = typeof cropId === 'number' ? cropId : CROPS.findIndex(c => c.id === cropId);
   if (crop < 0 || !CROPS[crop].plantable) return { ok: false, reason: 'crop' };
@@ -1314,7 +1399,9 @@ export function plantField(f, cropId) {
   f.crop = crop; f.state = 1; f.g = 0; f.s = 0; f.timer = 0;
   f.live = true; f.hold = false; f.frozen = false;
   // 点种薯只是规划。120 日从播种机真正开始这一趟才计。
-  f.plantedAt = null; f.paid = false; f.sprayed = false; f.claimed = false;
+  f.plantedAt = null; f.paid = false; f.sprayed = false; f.claimed = false; f.failed = null;
+  f.cycle = !!opts.cycle;
+  f.autoBuy = !!opts.autoBuy;
   f.planSeq = planSeq++;
   f.jobS = blankJobs();
   trackPotato(f);
@@ -1348,6 +1435,7 @@ export function exportSnapshot() {
       g: +f.g.toFixed(4), s: +f.s.toFixed(4), timer: +(+f.timer || 0).toFixed(3),
       growT: f.growT, live: !!f.live, hold: !!f.hold, plantedAt: f.plantedAt == null ? null : f.plantedAt, planSeq: f.planSeq || 0,
       paid: !!f.paid, sprayed: !!f.sprayed,
+      cycle: !!f.cycle, autoBuy: !!f.autoBuy, failed: f.failed || null,
       jobs: f.jobS ? { planter: +f.jobS.planter || 0, hiller: +f.jobS.hiller || 0, topper: +f.jobS.topper || 0, lifter: +f.jobS.lifter || 0 } : undefined,
     })),
     fleet: rigs.slice(4).map(r => ({ kind: r.kind })),
@@ -1381,6 +1469,7 @@ export function applySnapshot(data) {
     f.plantedAt = s.plantedAt == null ? null : +s.plantedAt;
     if (s.planSeq) f.planSeq = +s.planSeq;
     f.paid = !!s.paid; f.sprayed = !!s.sprayed;
+    f.cycle = !!s.cycle; f.autoBuy = !!s.autoBuy; f.failed = s.failed || null;
     f.claimed = false; f.frozen = false; f.owned = true;
     if (s.jobs) {
       f.jobS = {
