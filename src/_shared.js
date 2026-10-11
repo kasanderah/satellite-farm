@@ -340,7 +340,7 @@ for (const c of CROPS) {
 // 进度条和「作物」页共用。入仓量仍是整块，再乘漏做的惩罚。
 export const POTATO_STAGES = CROPS.find(c => c.id === 'potato').stages;
 const FIELD_RECIPE = { potato: 'potato-field', soy: 'soy-field', feed_barley: 'barley-field', cabbage: 'cabbage-field' };
-// 农机店。拖拉机进库、能看见，没有后挂，不接作业。联合收割、结球收、移栽用占位网格。
+// 农机店。拖拉机进库后按作业回库换挂。联合收割、结球收、移栽是自走平台，侧卸另派有挂车的拖拉机。
 export const MACHINE_SHOP = [
   { id: 'tractor', name: '拖拉机', price: 12000 },
   { id: 'planter', name: '播种机', price: 9000 },
@@ -589,7 +589,8 @@ function jobOpen(f, job) {
   ensureJobs(f);
   if (jobDone(f, job.id)) return false;
   if (job.afterHarvest) return !!f.harvested;
-  if (job.from <= 0) return true;
+  // 整地从第 0 日开始，钟还没走也能派出去。钟一旦记上，窗口结束就关掉，不能一直占到成熟待收。
+  if (job.from <= 0 && f.plantedAt == null) return true;
   if (f.plantedAt == null) return false;
   const day = fieldDay(f);
   return day >= job.from && day < job.to;
@@ -871,7 +872,22 @@ function finishPass(r) {
   if (!f?.live) { goHome(r); return; }
   afterWork(r);
 }
+function assignmentLegal(r) {
+  const f = r.f;
+  const job = f && r.job ? cropOf(f)?.jobs.find(j => j.id === r.job) : null;
+  if (!job) return false;
+  return jobOpen(f, job) && rigCan(r.kind, job);
+}
+// 已经出门的机器也要重新核对。窗口关掉、或者这台机器根本没有这项能力，就停下，不能把培土机留在成熟待收的田里。
+function releaseIllegal(r) {
+  if (r.intent === 'home' || r.intent === 'unload' || r.intent === 'deliver' || r.intent === 'service') return false;
+  if (assignmentLegal(r)) return false;
+  r.job = null;
+  afterWork(r);
+  return true;
+}
 function stepWork(r, dt) {
+  if (releaseIllegal(r)) return;
   const f = r.f;
   const key = r.job;
   if (!f || !key || !f.live || f.paid) { goHome(r); return; }
@@ -921,6 +937,7 @@ function stepWork(r, dt) {
   if (rem > 0) stepTurn(r, rem / MACHINE_MPS);
 }
 function stepTurn(r, dt) {
+  if (releaseIllegal(r)) return;
   const f = r.f;
   const key = r.job;
   if (!f || !key || !f.live || f.paid) { goHome(r); return; }
@@ -1008,6 +1025,7 @@ function stepService(r, dt) {
   r.partner = null;
 }
 function stepSwitch(r, dt) {
+  if (releaseIllegal(r)) return;
   r.switchT = (r.switchT || 0) - dt;
   if (r.switchT > 0) return;
   const job = r.f && cropOf(r.f)?.jobs.find(j => j.id === r.job);
@@ -1016,13 +1034,12 @@ function stepSwitch(r, dt) {
 }
 function stepTravel(r, dt) {
   if (crowded(r)) return;
-  if (r.intent === 'job') {
-    const job = r.f && cropOf(r.f)?.jobs.find(j => j.id === r.job);
-    if (!r.f || !job || !jobOpen(r.f, job)) {
-      const nxt = (r.charge ?? 1) > 0 ? pickAssignment(r) : null;
-      if (!nxt) { goHome(r); return; }
-      if (nxt.f !== r.f || nxt.job.id !== r.job) routeToJob(r, nxt.f, nxt.job);
-    }
+  if (r.intent === 'job' && !assignmentLegal(r)) {
+    r.job = null;
+    const nxt = (r.charge ?? 1) > 0 ? pickAssignment(r) : null;
+    if (!nxt) { goHome(r); return; }
+    routeToJob(r, nxt.f, nxt.job);
+    return;
   }
   if ((r.charge ?? 1) <= 0 && r.intent !== 'home' && r.intent !== 'deliver') { goHome(r); return; }
   if (!r.route || r.ri >= r.route.length) { arriveTravel(r); return; }

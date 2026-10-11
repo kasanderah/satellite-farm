@@ -123,12 +123,16 @@ function box(w, h, d, x, y, z, mat) {
   return m;
 }
 
-function unitMaterial(kind, w) {
+function unitMaterial(kind, w, look) {
+  const stage = look || {};
   const u = {
-    uKind: { value: kind === 'field' ? 0 : kind === 'deck' ? 1 : 2 },
+    uKind: { value: kind === 'field' ? 0 : kind === 'deck' ? 1 : kind === 'road' ? 3 : 2 },
     uJob: { value: 0 },
     uSel: { value: 0 },
     uHalf: { value: w * 0.5 },
+    uCover: { value: stage.cover || 0 },
+    uCut: { value: stage.cut || 0 },
+    uCanopy: { value: C(stage.canopy || '#51542c') },
     uSoil: { value: C(PALETTE.regoDk) },
     uOchre: { value: C(PALETTE.ochre) },
     uMetal: { value: C(PALETTE.metalDk) },
@@ -153,8 +157,8 @@ function unitMaterial(kind, w) {
       .replace('#include <project_vertex>', 'vP = position;\n#include <project_vertex>');
     sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>
 varying vec3 vP;
-uniform float uKind, uJob, uSel, uHalf;
-uniform vec3 uSoil, uOchre, uMetal, uHaze, uDeep, uRego, uData, uZone, uSteel;
+uniform float uKind, uJob, uSel, uHalf, uCover, uCut;
+uniform vec3 uCanopy, uSoil, uOchre, uMetal, uHaze, uDeep, uRego, uData, uZone, uSteel;
 vec3 unitAlbedo(){
   vec2 p = vP.xz;
   vec3 col = uSoil;
@@ -163,16 +167,27 @@ vec3 unitAlbedo(){
     col = mix(uSoil, uOchre, smoothstep(0.12, 0.38, ridge));
     float head = smoothstep(6.0, 2.0, uHalf - abs(p.y));
     col = mix(col, uSoil * 1.2, head * 0.7);
+    float row = smoothstep(0.22, 0.46, ridge);
+    col = mix(col, uCanopy, row * uCover);
+    float lanes = max(1.0, floor(uHalf * 2.0 / 8.0));
+    float across = (floor((p.y + uHalf) / 8.0) + 0.5) / lanes;
+    col = mix(col, uSoil * 0.82, step(across, uCut) * 0.8);
   } else if (uKind < 1.5) {
     float lane = 1.0 - smoothstep(0.06, 0.45, abs(mod(p.x + uHalf, 12.8) - 6.4));
     float edge = 1.0 - smoothstep(0.25, 1.3, min(uHalf - abs(p.x), uHalf - abs(p.y)));
     col = mix(uMetal * 1.3, uHaze * 0.45, 0.4);
     col = mix(col, uDeep, edge * 0.7);
     col = mix(col, uData, lane * 0.42);
-  } else {
+  } else if (uKind < 2.5) {
     vec2 jl = abs(mod(p + uHalf, 8.0) - 4.0);
     float seam = 1.0 - smoothstep(3.55, 3.95, max(jl.x, jl.y));
     col = mix(uRego, uHaze, 0.35) * (1.0 - seam * 0.2);
+  } else {
+    float shoulder = smoothstep(0.2, 1.4, abs(p.y) - uHalf * 0.28);
+    col = mix(uMetal * 1.15, uSoil, 0.45);
+    col = mix(col, uOchre * 0.85, (1.0 - shoulder) * 0.35);
+    float dash = step(0.42, abs(fract(p.x * 0.06) - 0.5));
+    col = mix(col, uRego, (1.0 - dash) * (1.0 - shoulder) * 0.45);
   }
   float sweep = 1.0 - smoothstep(0.0, max(1.2, uHalf * 0.06), abs(p.x - mix(-uHalf, uHalf, uJob)));
   col = mix(col, uZone, sweep * step(0.02, uJob) * 0.62);
@@ -196,12 +211,29 @@ function addWalls(g, w, t, h, mat, y0 = 0) {
   g.add(box(t, h, inner, o, y0 + h / 2, 0, mat));
 }
 
-function buildUnit(kind, w) {
+function buildUnit(kind, w, look) {
   const g = new THREE.Group();
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(w, w).rotateX(-Math.PI / 2), unitMaterial(kind, w));
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(w, w).rotateX(-Math.PI / 2), unitMaterial(kind, w, look));
   floor.receiveShadow = true;
   g.add(floor);
-  if (kind === 'field') addWalls(g, w - 1.2, 2.2, 1.15, soilMat);
+  if (kind === 'field') {
+    addWalls(g, w - 1.2, 2.2, 1.15, soilMat);
+    const cover = look?.cover || 0;
+    if (cover > 0.12) {
+      const mat = new THREE.MeshStandardMaterial({ color: look.canopy || '#51542c', roughness: 0.86, metalness: 0 });
+      mat.userData.dispose = true;
+      const rows = 6;
+      const span = w * 0.62;
+      const cut = Math.min(0.92, look.cut || 0);
+      for (let i = 0; i < rows; i++) {
+        const x = -w * 0.32 + (rows === 1 ? 0 : i * (w * 0.64 / (rows - 1)));
+        const h = 0.18 + cover * 1.35;
+        const row = box(0.42, h, span, x, 1.15 + h / 2, 0, mat);
+        row.scale.z = Math.max(0.18, 1 - cut);
+        g.add(row);
+      }
+    }
+  }
   if (kind === 'deck') {
     addWalls(g, w, 0.55, 5.2, shellMat);
     const beam = 3.2, by = 5.15;
@@ -232,6 +264,33 @@ function buildUnit(kind, w) {
         u.uSel.value = st === 'sel' ? 1 : 0;
       }
     },
+  };
+}
+
+function buildFieldLook(look) {
+  return buildUnit('field', 48, look);
+}
+function buildRoad() {
+  const g = new THREE.Group();
+  const shoulder = (z) => {
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(36, 28).rotateX(-Math.PI / 2), unitMaterial('field', 36, { cover: 0.2, canopy: '#8a7a45', cut: 0 }));
+    mesh.position.set(0, 0, z);
+    mesh.receiveShadow = true;
+    g.add(mesh);
+  };
+  shoulder(-18);
+  shoulder(18);
+  const road = new THREE.Mesh(new THREE.PlaneGeometry(64, 8).rotateX(-Math.PI / 2), unitMaterial('road', 64));
+  road.position.y = 0.02;
+  road.receiveShadow = true;
+  g.add(road);
+  addWalls(g, 35, 1.1, 0.7, soilMat);
+  const ring = salmonRing(66, 42, 0.2);
+  g.add(ring);
+  return {
+    group: g,
+    ring,
+    motion() {},
   };
 }
 
@@ -386,6 +445,10 @@ const BUILD = {
   arm: buildArm,
   irrigator: buildIrrigator,
 };
+for (const entry of LAB_ENTRIES) {
+  if (entry.road) BUILD[entry.id] = buildRoad;
+  else if (entry.look) BUILD[entry.id] = () => buildFieldLook(entry.look);
+}
 
 function disposeStage() {
   renderer.localClippingEnabled = false;

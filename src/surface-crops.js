@@ -195,7 +195,11 @@ export const RIG_PROFILE = {
   hiller: { logicId: 'tractor_gen', label: '培土机', mesh: 'tractor_gen', defaultHitch: 'impl_cultivator', defaultMode: 'hill', kit: ['impl_cultivator'] },
   topper: { logicId: 'tractor_gen', label: '杀秧机', mesh: 'tractor_gen', defaultHitch: 'impl_haulm', kit: ['impl_haulm'] },
   lifter: { logicId: 'harvester_potato', label: '收获机', mesh: 'harvester_potato', kit: [] },
-  tractor: { logicId: 'tractor_gen', label: '拖拉机', mesh: 'tractor_gen', kit: [] },
+  // 买来的拖拉机要能换上这些后挂，否则整地、播种、碎秆和侧卸都没人做。
+  tractor: {
+    logicId: 'tractor_gen', label: '拖拉机', mesh: 'tractor_gen',
+    kit: ['impl_rotavator', 'impl_subsoiler', 'impl_cultivator', 'impl_fertilizer', 'impl_sprayer', 'impl_seeder', 'impl_potato_planter', 'impl_haulm', 'impl_trailer', 'impl_bedder'],
+  },
   harvester_combine: { logicId: 'harvester_combine', label: '联合收割机', mesh: 'harvester_combine', kit: [] },
   harvester_cabbage: { logicId: 'harvester_cabbage', label: '结球收获机', mesh: 'harvester_cabbage', kit: [] },
   transplanter: { logicId: 'transplanter', label: '移栽机', mesh: 'transplanter', kit: [] },
@@ -357,4 +361,31 @@ export function rigCan(kind, job) {
 export function rigHas(kind, impl) {
   const profile = rigProfile(kind);
   return !!profile && (profile.kit || []).includes(impl);
+}
+
+// 某一作物、某一天，地上作业会派给哪些 kind。自动灌溉和无人机不在这张表里。
+// 收获行的 kinds 必须是对应自走收获机，培土机、播种机、拖拉机不能出现。
+export function auditDispatch(cropId, day, opts = {}) {
+  const def = cropDef(cropId);
+  if (!def) return [];
+  const harvested = !!opts.harvested;
+  const planted = opts.planted !== false;
+  const done = opts.done || null;
+  return def.jobs.filter(job => {
+    if (job.auto || job.drone || job.spray) return false;
+    if (done && done[job.id]) return false;
+    if (job.afterHarvest) return harvested;
+    if (!planted) return job.from <= 0;
+    return day >= job.from && day < job.to;
+  }).map(job => ({
+    id: job.id,
+    name: job.name,
+    stage: job.stage,
+    harvest: !!job.harvest,
+    cap: job.cap || (job.caps ? job.caps.join('|') : null),
+    mode: job.mode || null,
+    tank: job.tank || null,
+    self: job.self || null,
+    kinds: Object.keys(RIG_PROFILE).filter(kind => rigCan(kind, job)),
+  }));
 }

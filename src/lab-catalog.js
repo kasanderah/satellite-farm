@@ -1,6 +1,6 @@
 // 资产工坊目录。只有名字和分类，不进主进度存档。
 export const LAB_CLASSES = [
-  { id: 'unit', label: '单元' },
+  { id: 'unit', label: '地块' },
   { id: 'machine', label: '农机' },
   { id: 'equip', label: '设备' },
   { id: 'rail', label: '轨道设备' },
@@ -129,6 +129,41 @@ export const HUB_PLOT_NOTES = `中枢地块。农场 7×7 的正中一格。不�
 选中：地块有选中圈，指示更亮。
 损坏：警示变红，能源收暗，轿厢停在设备层。`;
 
+// 地表田块的当前外观。工坊里用现有田块网格加阶段色，方便对裸土、四作物和田路，不在这里重画正式美术。
+function fieldLook(id, name, notes, look) {
+  return {
+    id, cls: 'unit', name, size: '48 × 48 m', span: 52, notes, look,
+  };
+}
+function fieldSeries() {
+  const bare = '现有田块网格。垄和田埂是现在这套，冠层是阶段色块，不是最终植株。';
+  return [
+    fieldLook('field-bare', '裸土', `${bare} 还没出苗，只有土垄。`, { cover: 0, canopy: '#6f6a61', cut: 0 }),
+    {
+      id: 'field-road', cls: 'unit', name: '田路', size: '64 × 40 m', span: 72,
+      notes: '两块田之间的路。路面和田肩用现在的土色和金属色，没有新模型。',
+      road: true,
+    },
+    fieldLook('field-potato-till', '商品薯 · 整地', `${bare} 整地空田，垄还是裸的。`, { cover: 0.04, canopy: '#6f6a61', cut: 0 }),
+    fieldLook('field-potato-plant', '商品薯 · 播种', `${bare} 播种趟刚走完一段，其余仍是裸土。`, { cover: 0.08, canopy: '#4a4844', cut: 0.35 }),
+    fieldLook('field-potato-emerg', '商品薯 · 出苗', `${bare} 出苗以后才铺绿色。`, { cover: 0.38, canopy: '#51542c', cut: 0 }),
+    fieldLook('field-potato-hill', '商品薯 · 培土', `${bare} 培土后的冠层。`, { cover: 0.66, canopy: '#787c32', cut: 0 }),
+    fieldLook('field-potato-bulk', '商品薯 · 膨大', `${bare} 膨大期，冠层最满。`, { cover: 0.92, canopy: '#c4b0d4', cut: 0 }),
+    fieldLook('field-potato-haulm', '商品薯 · 杀秧', `${bare} 杀秧后的碎秧色，已走过的垄压低。`, { cover: 0.22, canopy: '#9e543a', cut: 0.55 }),
+    fieldLook('field-potato-harvest', '商品薯 · 待收', `${bare} 成熟待收。收获机走过的垄是空的。`, { cover: 0.16, canopy: '#81683f', cut: 0.7 }),
+    fieldLook('field-soy-young', '大豆 · 分枝', `${bare} 大豆出苗后的分枝。`, { cover: 0.48, canopy: '#51542c', cut: 0 }),
+    fieldLook('field-soy-pod', '大豆 · 结荚', `${bare} 结荚，冠层收拢。`, { cover: 0.82, canopy: '#787c32', cut: 0 }),
+    fieldLook('field-soy-harvest', '大豆 · 待收', `${bare} 大豆成熟待收。联合收割走豆模式。`, { cover: 0.28, canopy: '#81683f', cut: 0.6 }),
+    fieldLook('field-barley-young', '饲料大麦 · 分蘖', `${bare} 分蘖，浅中耕可选，还不是收获。`, { cover: 0.42, canopy: '#8a7a45', cut: 0 }),
+    fieldLook('field-barley-grain', '饲料大麦 · 灌浆', `${bare} 灌浆，只灌溉，不派培土机。`, { cover: 0.78, canopy: '#b59a63', cut: 0 }),
+    fieldLook('field-barley-harvest', '饲料大麦 · 待收', `${bare} 成熟待收。这一段只派联合收割机谷模式，旁边停车侧卸。`, { cover: 0.3, canopy: '#81683f', cut: 0.62 }),
+    fieldLook('field-cabbage-bed', '结球甘蓝 · 作畦', `${bare} 作畦，苗还没栽，地面是畦。`, { cover: 0.1, canopy: '#6f6a61', cut: 0 }),
+    fieldLook('field-cabbage-rosette', '结球甘蓝 · 莲座', `${bare} 定植之后的莲座叶。`, { cover: 0.58, canopy: '#8fbbad', cut: 0 }),
+    fieldLook('field-cabbage-head', '结球甘蓝 · 结球', `${bare} 结球期。`, { cover: 0.86, canopy: '#52747e', cut: 0 }),
+    fieldLook('field-cabbage-harvest', '结球甘蓝 · 待收', `${bare} 成熟待收。这一段只派结球收获机。`, { cover: 0.34, canopy: '#81683f', cut: 0.5 }),
+  ];
+}
+
 // span：沙盒里把镜头框住的边长（米）。和游戏里的模数一致，只用于取景。
 export const LAB_ENTRIES = [
   {
@@ -148,6 +183,7 @@ export const LAB_ENTRIES = [
     notes: CULT_B_NOTES,
   },
   { id: 'field', cls: 'unit', name: '地表田块', size: '128 × 128 m', span: 128, notes: '露天小格。地面是垄，四周是田埂。没有顶。' },
+  ...fieldSeries(),
   { id: 'deck', cls: 'unit', name: '培育层地板', size: '128 × 128 m', span: 128, notes: '密封小格。金属地板、墙和顶缘。冷色缝灯。' },
   {
     id: 'hub',

@@ -14,6 +14,7 @@ import {
   devices, potatoStock, fertPlan, cultureFeedPlan, millWatch, startMill, orderProcess, removeMill,
 } from '../src/_shared.js';
 import { productById, recipeById, deviceById, flowModel, LOOP_OFFSETS } from '../src/products.js';
+import { auditDispatch, rigCan, rigHas, hitchPlan } from '../src/surface-crops.js';
 
 test('one colonist plot is about 4 km on the ring', () => {
   assert.ok(PLOT.along > 3500 && PLOT.along < 4500, PLOT.along);
@@ -488,7 +489,12 @@ test('culture tanks sit in one row off the hub and inside the plot', () => {
 
 test('asset lab lists the four classes and the live placeholders', () => {
   assert.deepEqual(LAB_CLASSES.map(c => c.id), ['unit', 'machine', 'equip', 'rail']);
-  assert.deepEqual(LAB_CLASSES.map(c => c.label), ['单元', '农机', '设备', '轨道设备']);
+  assert.deepEqual(LAB_CLASSES.map(c => c.label), ['地块', '农机', '设备', '轨道设备']);
+  for (const id of ['field-bare', 'field-road', 'field-potato-hill', 'field-potato-harvest', 'field-soy-harvest', 'field-barley-young', 'field-barley-harvest', 'field-cabbage-head', 'field-cabbage-harvest']) {
+    const entry = LAB_ENTRIES.find(e => e.id === id);
+    assert.ok(entry, id);
+    assert.equal(entry.cls, 'unit', id);
+  }
   const ids = new Set(LAB_ENTRIES.map(e => e.id));
   for (const id of ['field', 'deck', 'hub', 'tank', 'arm', 'tractor']) assert.ok(ids.has(id), id);
   const cls = new Set(LAB_CLASSES.map(c => c.id));
@@ -907,6 +913,93 @@ test('two planters take different fields and a spare stays home', () => {
   assert.ok(d > 3, d);
   const moved = planters.some((p, i) => Math.hypot(p.x - x0[i], p.z - z0[i]) > 1);
   assert.equal(moved, true);
+  resetGame();
+});
+
+test('harvest dispatch matches the crop, and a hiller cannot take it', () => {
+  const expectKind = { potato: 'lifter', soy: 'harvester_combine', feed_barley: 'harvester_combine', cabbage: 'harvester_cabbage' };
+  for (const [crop, kind] of Object.entries(expectKind)) {
+    const def = cropDef(crop);
+    for (const stage of def.stages) {
+      const day = stage.from + Math.min(0.2, stage.days * 0.25);
+      const rows = auditDispatch(crop, day, { planted: true });
+      for (const row of rows) {
+        assert.ok(row.kinds.length > 0, `${crop} ${row.id} has no machine`);
+        if (!row.harvest) continue;
+        assert.deepEqual(row.kinds, [kind], `${row.id} -> ${row.kinds.join(',')}`);
+        assert.equal(row.kinds.includes('hiller'), false, row.id);
+        assert.equal(row.kinds.includes('planter'), false, row.id);
+        assert.equal(row.kinds.includes('topper'), false, row.id);
+        assert.equal(row.kinds.includes('tractor'), false, row.id);
+      }
+    }
+  }
+  const barley = cropDef('feed_barley');
+  const harvest = barley.jobs.find(j => j.id === 'barley_harvest');
+  const open = auditDispatch('feed_barley', barley.maturity + 0.4, { planted: true });
+  assert.deepEqual(open.map(row => row.id), ['barley_harvest']);
+  assert.equal(harvest.mode, 'grain');
+  assert.equal(harvest.tank, 'grain');
+  assert.equal(hitchPlan('harvester_combine', null, harvest).platform, true);
+  assert.equal(rigCan('hiller', harvest), false);
+  assert.equal(rigCan('planter', harvest), false);
+  assert.equal(rigCan('tractor', harvest), false);
+  assert.equal(rigHas('tractor', 'impl_trailer'), true);
+  assert.equal(rigHas('planter', 'impl_trailer'), true);
+  assert.equal(rigHas('hiller', 'impl_trailer'), false);
+  assert.equal(rigCan('tractor', barley.jobs.find(j => j.id === 'barley_plant')), true);
+  assert.equal(rigCan('tractor', barley.jobs.find(j => j.id === 'barley_rotavate')), true);
+  const clear = auditDispatch('feed_barley', barley.maturity + 0.4, { planted: true, harvested: true, done: { barley_harvest: true } });
+  assert.ok(clear.some(row => row.id === 'barley_clear' && row.kinds.includes('hiller')));
+  assert.ok(clear.every(row => !row.harvest));
+
+  resetGame();
+  setPaused(false);
+  setTimeScale(1);
+  economy.revenue = START_REVENUE;
+  stores.seed_barley = 2;
+  stores.fertilizer = 2;
+  assert.equal(buyMachine('harvester_combine').ok, true);
+  const f = fieldAt(focus.i, focus.j);
+  assert.equal(plantField(f, 'feed_barley').ok, true);
+  f.plantedAt = worldDay - (barley.maturity + 0.3);
+  for (const job of barley.jobs) f.jobS[job.id] = job.harvest || job.afterHarvest ? 0 : L.LANES;
+  f.harvested = false;
+  f.stored = false;
+  f.yieldFactor = 1;
+  f.penalized = {};
+  for (const r of rigs) {
+    r.mode = 'park'; r.busy = false; r.f = null; r.job = null; r.intent = null; r.route = null;
+    r.charge = 1; r.bin = 0; r.cargo = 0; r.partner = null; r.pending = null;
+    r.x = r.parkX; r.z = r.parkZ;
+  }
+  const combine = rigs.find(r => r.kind === 'harvester_combine');
+  const hiller = rigs.find(r => r.kind === 'hiller');
+  hiller.f = f;
+  hiller.job = 'barley_harvest';
+  hiller.mode = 'work';
+  hiller.busy = true;
+  hiller.intent = 'job';
+  hiller.lane = 1;
+  hiller.u = 20;
+  hiller.charge = 1;
+  step(1, 0, 1);
+  assert.notEqual(hiller.job, 'barley_harvest');
+  assert.notEqual(hiller.f, f);
+  assert.ok((f.jobS.barley_harvest || 0) < 0.05, f.jobS.barley_harvest);
+  let guard = 0;
+  while (combine.job !== 'barley_harvest' && guard < 400) { step(1, 0, 1); guard++; }
+  assert.equal(combine.job, 'barley_harvest');
+  assert.equal(combine.f, f);
+  assert.equal(combine.tank, 'grain');
+  assert.notEqual(hiller.f, f);
+  guard = 0;
+  while (combine.mode !== 'need_unload' && combine.mode !== 'unload' && guard < 400) { step(1, 0, 1); guard++; }
+  assert.ok(combine.mode === 'need_unload' || combine.mode === 'unload', combine.mode);
+  guard = 0;
+  while (!rigs.some(r => r.intent === 'unload' || r.mode === 'unload' || r.pending?.hitch === 'impl_trailer') && guard < 600) { step(1, 0, 1); guard++; }
+  assert.ok(rigs.some(r => (r.intent === 'unload' || r.mode === 'unload' || r.pending?.hitch === 'impl_trailer') && r.kind !== 'hiller'));
+  assert.ok(!rigs.some(r => r.kind === 'hiller' && r.job === 'barley_harvest'));
   resetGame();
 });
 
