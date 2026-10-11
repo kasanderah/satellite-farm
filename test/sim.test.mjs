@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { LAB_CLASSES, LAB_ENTRIES, CULT_EMPTY, CULT_EMPTY_NOTES, CULT_B_NOTES, GRUB_TROUGH_NOTES, planGrubColumns, GRUB_DEMO_GANTRIES, GRUB_WORK_MPS, GRUB_GANTRY_OPTIONS } from '../src/lab-catalog.js';
+import { LAB_CLASSES, LAB_ENTRIES, CULT_EMPTY, CULT_EMPTY_NOTES, CULT_B_NOTES, GRUB_TROUGH_NOTES, planGrubColumns, GRUB_DEMO_GANTRIES, GRUB_WORK_MPS, GRUB_GANTRY_OPTIONS, REF_SKETCHFAB_COMBINE } from '../src/lab-catalog.js';
 import {
   CROPS, L, PLOT, FIELD_HA, fields, fieldAt, fieldAtWorld, focus, rigs,
   plantField, step, economy, quote, log, exportSnapshot, applySnapshot, RING,
@@ -488,8 +488,23 @@ test('culture tanks sit in one row off the hub and inside the plot', () => {
 });
 
 test('asset lab lists the four classes and the live placeholders', () => {
-  assert.deepEqual(LAB_CLASSES.map(c => c.id), ['unit', 'machine', 'equip', 'rail']);
-  assert.deepEqual(LAB_CLASSES.map(c => c.label), ['地块', '农机', '设备', '轨道设备']);
+  assert.deepEqual(LAB_CLASSES.map(c => c.id), ['unit', 'machine', 'equip', 'rail', 'ref']);
+  assert.deepEqual(LAB_CLASSES.map(c => c.label), ['地块', '农机', '设备', '轨道设备', '参考·外部']);
+  for (const id of ['ref-tractor-compare', 'ref-kenney-shovel', 'ref-sketchfab-combine']) {
+    const entry = LAB_ENTRIES.find(e => e.id === id);
+    assert.ok(entry, id);
+    assert.equal(entry.cls, 'ref', id);
+    assert.match(entry.notes, /不替换|未下载/);
+  }
+  const compare = LAB_ENTRIES.find(e => e.id === 'ref-tractor-compare');
+  assert.match(compare.notes, /Kenney/);
+  assert.match(compare.notes, /Pixor/);
+  assert.match(compare.notes, /tractor_gen/);
+  const shovel = LAB_ENTRIES.find(e => e.id === 'ref-kenney-shovel');
+  assert.match(shovel.notes, /kenney-tractor-shovel\.glb/);
+  const sketch = LAB_ENTRIES.find(e => e.id === 'ref-sketchfab-combine');
+  assert.match(sketch.notes, /401/);
+  assert.ok(sketch.notes.includes(REF_SKETCHFAB_COMBINE));
   for (const id of ['field-bare', 'field-road', 'field-potato-hill', 'field-potato-harvest', 'field-soy-harvest', 'field-barley-young', 'field-barley-harvest', 'field-cabbage-head', 'field-cabbage-harvest']) {
     const entry = LAB_ENTRIES.find(e => e.id === id);
     assert.ok(entry, id);

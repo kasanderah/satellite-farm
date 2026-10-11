@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { PALETTE, RING } from './_shared.js';
 import { LAB_CLASSES, LAB_ENTRIES, CULT_EMPTY } from './lab-catalog.js';
+import { createRefShows } from './lab-refs.js';
 import { makeColony } from './colony-art.js';
 import {
   tractorKit, planterKit, hillerKit, topperKit, potatoLifterKit,
@@ -83,6 +84,18 @@ function kitGroup(builder) {
   for (const k of ['light', 'dark', 'glass', 'emis']) {
     if (!kit[k]) continue;
     const mesh = new THREE.Mesh(kit[k], MAT[k]);
+    mesh.castShadow = k !== 'emis';
+    mesh.receiveShadow = k !== 'emis';
+    g.add(mesh);
+  }
+  return g;
+}
+
+function kitClone(built) {
+  const g = new THREE.Group();
+  for (const k of ['light', 'dark', 'glass', 'emis']) {
+    if (!built[k]) continue;
+    const mesh = new THREE.Mesh(built[k].clone(), MAT[k]);
     mesh.castShadow = k !== 'emis';
     mesh.receiveShadow = k !== 'emis';
     g.add(mesh);
@@ -426,6 +439,8 @@ const buildCultPlot = colony.buildCultPlot;
 const buildGrubTrough = colony.buildGrubTrough;
 const buildHubPlot = colony.buildHubPlot;
 
+const refShows = createRefShows({ salmonRing, padMat, kitClone, alertMat });
+
 const BUILD = {
   'cult-a': () => buildCultPlot('a'),
   'cult-b': () => buildCultPlot('b'),
@@ -444,6 +459,9 @@ const BUILD = {
   process: () => equip(processKit, 14, 10),
   arm: buildArm,
   irrigator: buildIrrigator,
+  'ref-tractor-compare': () => refShows.tractors(),
+  'ref-kenney-shovel': () => refShows.shovel(),
+  'ref-sketchfab-combine': () => refShows.combine(),
 };
 for (const entry of LAB_ENTRIES) {
   if (entry.road) BUILD[entry.id] = buildRoad;
@@ -475,8 +493,9 @@ function frameSpan(entry) {
   eye.tx = 0;
   eye.ty = entry.cls === 'unit' ? 0 : Math.min(entry.span * 0.08, 5);
   eye.tz = 0;
-  eye.yaw = entry.cls === 'rail' ? 0.7 : 0.85;
-  eye.pitch = entry.cls === 'unit' ? 0.95 : entry.cls === 'rail' ? 0.42 : 0.46;
+  eye.yaw = entry.cls === 'rail' ? 0.7 : entry.cls === 'ref' ? 0.62 : 0.85;
+  eye.pitch = entry.cls === 'unit' ? 0.95 : entry.cls === 'rail' ? 0.42 : entry.cls === 'ref' ? 0.4 : 0.46;
+  if (entry.cls === 'ref') eye.ty = 1.15;
   if (entry.id === 'grub-trough') {
     const occ = shown && shown.group.userData.cult && shown.group.userData.cult.occupied;
     if (occ) {
@@ -826,4 +845,24 @@ window.__lab = {
   },
   toggleLight(id) { toggleLight(id); },
   setLight(id, on) { toggleLight(id, on); },
+  whenRefs() { return (shown && shown.whenRefs) || Promise.resolve(); },
+  get refError() { return (shown && shown.group && shown.group.userData.refError) || ''; },
+  refRoots() {
+    const out = [];
+    if (!shown || !shown.group) return out;
+    shown.group.traverse(o => {
+      if (!o.userData.refRoot) return;
+      const box = new THREE.Box3().setFromObject(o);
+      const size = box.getSize(new THREE.Vector3());
+      out.push({
+        label: o.userData.refLabel || '',
+        x: +size.x.toFixed(2),
+        y: +size.y.toFixed(2),
+        z: +size.z.toFixed(2),
+        minY: +box.min.y.toFixed(3),
+      });
+    });
+    return out;
+  },
+  draw() { placeCam(); renderer.render(scene, cam); },
 };

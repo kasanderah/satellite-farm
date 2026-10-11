@@ -4,7 +4,11 @@ export const LAB_CLASSES = [
   { id: 'machine', label: '农机' },
   { id: 'equip', label: '设备' },
   { id: 'rail', label: '轨道设备' },
+  { id: 'ref', label: '参考·外部' },
 ];
+
+// Sketchfab「Low Poly Combine Harvestors」可下载，但未登录的下载接口返回 401。工坊只留链接。
+export const REF_SKETCHFAB_COMBINE = 'https://sketchfab.com/3d-models/low-poly-combine-harvestors-84b8a341aabc421b8f7268c3a4b173f1';
 
 // 培育层空单元。农场 4 km 切成 7×7 地块，和地表同一套地块边界；中枢占正中一格，不放台。
 // 口头「约 143 m」是 570/4 的口算。缝、窄环路和墙从地块里扣掉，台面净边略小。
@@ -212,4 +216,42 @@ export const LAB_ENTRIES = [
   { id: 'process', cls: 'equip', name: '加工棚', size: '12 × 8 m', span: 28, notes: '中枢上的加工。只建在中枢。' },
   { id: 'arm', cls: 'rail', name: '收获臂', size: '沿槽排', span: 42, notes: '龙门臂。沿轨道走，作业时探向槽。' },
   { id: 'irrigator', cls: 'rail', name: '喷灌桁架', size: '跨 124 m', span: 140, notes: '沿田块往返的桁架。' },
+  {
+    id: 'ref-tractor-compare',
+    cls: 'ref',
+    name: '拖拉机对照',
+    size: '现用约 4.5 m · 参考已对齐车长',
+    span: 30,
+    notes: `外部低模，只作对照，不替换田里的农机。
+
+从左到右：现用 tractor_gen、Kenney Car Kit 拖拉机、Pixor Library 拖拉机。参考模型缩放到现用车长，车头朝同一边。
+
+Kenney：CC0。https://kenney.nl/assets/car-kit
+文件 refs/machines/kenney-tractor.glb
+Pixor：CC0。https://pixor.art/library/farm/tractor/
+文件 refs/machines/pixor-library-tractor.glb`,
+  },
+  {
+    id: 'ref-kenney-shovel',
+    cls: 'ref',
+    name: 'Kenney 铲斗',
+    size: '现用约 4.5 m · 参考已对齐车长',
+    span: 22,
+    notes: `Kenney Car Kit 的铲斗拖拉机，CC0。只作对照，不替换田里的农机，不进机队。
+
+左边是现用 tractor_gen，右边是 refs/machines/kenney-tractor-shovel.glb。参考模型缩放到现用车长。
+来源 https://kenney.nl/assets/car-kit`,
+  },
+  {
+    id: 'ref-sketchfab-combine',
+    cls: 'ref',
+    name: 'Sketchfab 收割机',
+    size: '现用联合收割机 · 外部未下载',
+    span: 36,
+    notes: `Sketchfab「Low Poly Combine Harvestors」，作者 iedalton，CC-BY 4.0。未下载。
+
+下载要登录。未登录时接口返回 401，所以这里没有 GLB，只留链接，旁边是现用 harvester_combine。
+
+${REF_SKETCHFAB_COMBINE}`,
+  },
 ];
