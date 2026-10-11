@@ -11,10 +11,11 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { HorizontalTiltShiftShader } from 'three/addons/shaders/HorizontalTiltShiftShader.js';
 import { VerticalTiltShiftShader } from 'three/addons/shaders/VerticalTiltShiftShader.js';
-import { PALETTE, CROPS, TEX_ID, L, fields, harvesters, haulers, drones, step, TRUNKS_X, TRUNKS_Z, depots, inCrater, ROADS, RING, LAYERS, CUT, wrapX, PLOT, economy, focus, signals, log, plantField, quote, setTimeScale, setPaused, paused, exportSnapshot, applySnapshot, fieldAtWorld, fieldAt, fieldOrigin, simTime, worldDay, stores, rigs, fieldVisual, cropWatch, POTATO_DAYS, POTATO_STAGES, warehouse, buildings, sellLot, sellStack, warehouseStacks, warehouseCapacity, placeBuilding, removeBuilding, rigReadout, SHOP, buySeed, buyItem, SEED_PER_FIELD, FERT_PER_FIELD, resetGame, CULTURES, DECK_CLIMATE, tanks, cultureWatch, startCulture, tendCulture, harvestCulture, BUILDING_KINDS, CULTURE_CELLS, tankSite, devices, potatoStock, fertPlan, cultureFeedPlan, millWatch, startMill, removeMill, orderProcess, HUB_SITES, cropDossier, MACHINE_SHOP, buyMachine } from './_shared.js';
+import { PALETTE, CROPS, TEX_ID, L, fields, harvesters, haulers, drones, step, TRUNKS_X, TRUNKS_Z, depots, inCrater, ROADS, RING, LAYERS, CUT, wrapX, PLOT, economy, focus, signals, log, plantField, quote, setTimeScale, setPaused, paused, exportSnapshot, applySnapshot, fieldAtWorld, fieldAt, fieldOrigin, simTime, worldDay, stores, rigs, fieldVisual, cropWatch, POTATO_DAYS, POTATO_STAGES, warehouse, buildings, sellLot, sellStack, warehouseStacks, warehouseCapacity, placeBuilding, removeBuilding, rigReadout, SHOP, buySeed, buyItem, SEED_PER_FIELD, FERT_PER_FIELD, resetGame, CULTURES, DECK_CLIMATE, tanks, cultureWatch, startCulture, tendCulture, harvestCulture, BUILDING_KINDS, CULTURE_CELLS, tankSite, devices, potatoStock, fertPlan, cultureFeedPlan, millWatch, startMill, removeMill, orderProcess, HUB_SITES, cropDossier, MACHINE_SHOP, buyMachine, cropDef, boomWatch, rigProfile, DRONE_SHOP, workDrones, buyDrone } from './_shared.js';
 import { productById } from './products.js';
 import { NOISE, FARM, CURVE_DECL, CURVE_PROJECT } from './glsl.js';
-import { harvesterKit, haulerKit, droneKit, personKit, conveyorKit, depotKit, hubKit, plantGeometry, mastKit, irrigatorKit, growRackKit, tankKit, pumpKit, pipeRackKit, tractorKit, planterKit, hillerKit, topperKit, potatoLifterKit, shedKit, warehouseKit, garageKit, processKit, cultureTankKit, armKit, deckLightKit } from './prefabs.js';
+import { harvesterKit, haulerKit, droneKit, personKit, conveyorKit, depotKit, hubKit, plantGeometry, mastKit, irrigatorKit, growRackKit, tankKit, pumpKit, pipeRackKit, shedKit, warehouseKit, garageKit, processKit, cultureTankKit, armKit, deckLightKit, droneBaseKit } from './prefabs.js';
+import { surfaceKits, hitchOffset } from './surface-kits.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CULT_EMPTY } from './lab-catalog.js';
 import { makeColony } from './colony-art.js';
@@ -381,7 +382,7 @@ vec3 farmAlbedo(vec2 p){
     if (pst >= 1.0 && tex == 2) {                    // 商品薯：与其它田块同一套行距和颗粒，只换阶段颜色
       bool worked = laneCut(uv, d.b);
       vec3 soil = g_soil * (0.78 + 0.1 * prof * rowVis) * (1. + patchy);
-      float cover = pst < 1.5 ? 0.0 : pst < 2.5 ? 0.22 : pst < 3.5 ? 0.72 : pst < 4.5 ? 0.84 : 0.0;
+      float cover = pst < 1.5 ? 0.0 : pst < 2.5 ? 0.18 : pst < 3.5 ? 0.55 : pst < 4.5 ? 0.78 : pst < 5.5 ? 0.9 : 0.0;
       vec3 young = mix(g_oliveDp, g_moss, 0.35);
       vec3 ripe = mix(g_oliveDp, g_olive, 0.55);
       vec3 crop = mix(young, ripe, smoothstep(1.5, 3.5, pst)) * (1. + patchy * 1.4);
@@ -408,12 +409,12 @@ vec3 farmAlbedo(vec2 p){
         col = soil;
         gTilt = acrossW * slope * (worked ? 0.85 : 0.35) * rowVis;
         gRough = 0.97;
-      } else if (pst < 4.5) {
-        col = pst < 3.5 ? canopy : bloom;
-        gTilt = acrossW * slope * (pst < 2.5 ? 0.85 : 0.55) * rowVis;
-        canopyHere = true;
-        gRough = pst < 2.5 ? 0.9 : 0.68;
       } else if (pst < 5.5) {
+        col = pst < 2.5 ? mix(soil, young, 0.55) : pst < 4.5 ? canopy : bloom;
+        gTilt = acrossW * slope * (pst < 2.5 ? 0.7 : 0.5) * rowVis;
+        canopyHere = pst >= 2.5;
+        gRough = pst < 2.5 ? 0.92 : 0.68;
+      } else if (pst < 6.5) {
         bool shredded = worked || d.b >= 9.5;
         if (shredded) { col = stub; gTilt = acrossW * slope * 0.35 * rowVis; gRough = 0.92; }
         else { col = bloom; gTilt = acrossW * slope * 0.55 * rowVis; canopyHere = true; gRough = 0.66; }
@@ -437,8 +438,9 @@ vec3 farmAlbedo(vec2 p){
       // 自然阶段用散点铺开，不整块换色。杀秧、起薯这些作业色盖在上面。
       float frac = clamp(g - pst, 0.0, 0.999);
       float blendDot = step(hash12(floor(uv * vec2(0.58, 0.47)) + pst), frac);
-      vec3 nxt = pst < 1.5 ? young : pst < 2.5 ? canopy : pst < 3.5 ? bloom : pst < 4.5 ? mix(bloom, stub, 0.65) : pst < 5.5 ? mix(soil, g_straw, 0.62) : pst < 6.5 ? mix(g_straw, g_olive, 0.45) : mix(g_deep, g_rust, 0.72);
-      if (!(worked && pst >= 4.5)) col = mix(col, nxt, blendDot);
+      vec3 nxt = pst < 1.5 ? soil : pst < 2.5 ? young : pst < 3.5 ? canopy : pst < 4.5 ? bloom : pst < 5.5 ? mix(bloom, stub, 0.45) : pst < 6.5 ? stub : pst < 7.5 ? mix(soil, g_straw, 0.62) : mix(g_deep, g_rust, 0.72);
+      // 整地阶段不往出苗绿点上混。播种作业没走完时 g 停在 1，这里再挡一层。
+      if (pst >= 1.5 && !(worked && pst >= 5.5)) col = mix(col, nxt, blendDot);
     } else if (cut) {                                       // 残茬：作业带一深一浅（收割方向不同），带车辙
       float lane = floor(uv.y / LANE), lv = mod(uv.y, LANE) - LANE * .5;
       col = mix(g_soil, uCropStub[c], 0.6) * (1. + patchy);
@@ -733,13 +735,12 @@ const HV = harvesterKit();
 const H_NEAR = 80, PARKED = 14;
 const harvSet = instanced(HV, H_NEAR + PARKED);
 const RIG_CAP = 8;
-const rigMesh = {
-  tractor: instanced(tractorKit(), RIG_CAP),
-  planter: instanced(planterKit(), RIG_CAP),
-  hiller: instanced(hillerKit(), RIG_CAP),
-  topper: instanced(topperKit(), RIG_CAP),
-  lifter: instanced(potatoLifterKit(), RIG_CAP),
-};
+const rigMesh = {};
+for (const id of Object.keys(surfaceKits)) {
+  if (id === 'orbit_boom') continue;
+  rigMesh[id] = instanced(surfaceKits[id], RIG_CAP);
+}
+const boomSet = instanced(surfaceKits.orbit_boom, 1);
 const edgeMat = curved(new THREE.MeshBasicMaterial({ color: C('harvest'), toneMapped: false, fog: false }));
 edgeMat.polygonOffset = true; edgeMat.polygonOffsetFactor = -4; edgeMat.polygonOffsetUnits = -4;
 const edgeMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), edgeMat, 2048);
@@ -751,11 +752,13 @@ const buildingSets = {
   garage: instanced(garageKit(), 8),
   process: instanced(processKit(), 8),
   shed: instanced(shedKit(), 8),
+  drone_base: instanced(droneBaseKit(), 4),
 };
 const millSet = instanced(processKit(), 2);
 const parked = Array.from({ length: PARKED }, (_, n) => ({ x: HUBC + 85 + (n % 7) * 14.6, z: HUBC + 150 + Math.floor(n / 7) * 22, ang: -Math.PI / 2 }));
 const haulSet = instanced(haulerKit(), haulers.length);
 const droneSet = instanced(droneKit(), drones.length, false);
+const workDroneSet = instanced(droneKit(), 8, false);
 // 小人：在中枢场地上散步
 const people = Array.from({ length: 46 }, (_, n) => ({ x: HUBC - 120 + hr() * 260, z: HUBC - 60 + hr() * 200, a: hr() * 6.28, sp: 0.6 + hr() * 0.8 }));
 const peopleSet = instanced(personKit(), people.length);
@@ -1314,6 +1317,8 @@ function applyDeckView() {
   for (const k in buildingSets) setShown(buildingSets[k], !on);
   setShown(millSet, grow);
   for (const k in rigMesh) setShown(rigMesh[k], !on);
+  setShown(boomSet, !on);
+  setShown(workDroneSet, !on);
   setShown(edgeMesh, !on);
   if (netMesh) netMesh.visible = !on;
   icons.visible = !on;
@@ -1388,8 +1393,8 @@ function onMapClick(cx, cy) {
       buildPick = best.id; paintSheet(); return;
     }
     const r = placeBuilding(p.x, p.z, buildKind);
-    if (!r.ok) toast(r.reason === 'field' ? '房子建在中枢地块上' : '只能建在自己的田区里');
-    else { toast(`${r.building.name}已放下`); saveSoon(); paintSheet(); }
+    if (!r.ok) toast(r.reason === 'field' ? '房子建在中枢地块上' : r.reason === 'money' ? '营收不够' : '只能建在自己的田区里');
+    else { toast(r.cost ? `<b>−${fmt(r.cost)}</b>${r.building.name}` : `${r.building.name}已放下`); saveSoon(); paintSheet(); }
     return;
   }
   if (!p) { selectField(null); return; }
@@ -1407,7 +1412,7 @@ function toast(html) {
   setTimeout(() => d.remove(), 4800);
 }
 function planWhy(reason) {
-  if (reason === 'seed') return '种薯不足';
+  if (reason === 'seed') return '种子不足';
   if (reason === 'fertilizer') return '肥料不足';
   if (reason === 'busy') return '这块田正在长';
   if (reason === 'season') return '现在不在农时里';
@@ -1423,8 +1428,14 @@ function readPlanFlags(root) {
 function planOpts() {
   return { cycle: planCycle, autoBuy: planBuy };
 }
+function planCropButtons(disabled) {
+  return CROPS.filter(c => c.plantable).map(c => {
+    const label = cropDef(c.id)?.planLabel || c.name;
+    return `<button type="button" class="sell" data-plan="${c.id}"${disabled ? ' disabled' : ''}>${label}</button>`;
+  }).join('');
+}
 function planTicks() {
-  return `<label class="tick"><input type="checkbox" data-flag="cycle"${planCycle ? ' checked' : ''}>循环种植</label><label class="tick"><input type="checkbox" data-flag="buy"${planBuy ? ' checked' : ''}>自动购买物资</label><p class="note">循环：收完再种。自动购买：缺种薯或肥料时用营收买。这一站不看农时。</p>`;
+  return `<label class="tick"><input type="checkbox" data-flag="cycle"${planCycle ? ' checked' : ''}>循环种植</label><label class="tick"><input type="checkbox" data-flag="buy"${planBuy ? ' checked' : ''}>自动购买物资</label><p class="note">循环：收完清田后再种。自动购买：缺种薯、种子、甘蓝苗或肥料时用营收买。种苗只从商店来。这一站不看农时。</p>`;
 }
 function doPlant(id) {
   if (!selected?.owned) { toast('不能播种'); return { ok: false, reason: 'plot' }; }
@@ -1464,9 +1475,9 @@ function planSelected(cropId) {
     if (!f?.owned) continue;
     const r = plantField(f, cropId, opts);
     if (r.ok) n++;
-    else if (!why) why = r.reason === 'seed' ? '种薯不足' : r.reason === 'fertilizer' ? '肥料不足' : r.reason === 'busy' ? '有的田正在长' : r.reason === 'season' ? '现在不在农时里' : '有的田不能种';
+    else if (!why) why = r.reason === 'seed' ? '种子不足' : r.reason === 'fertilizer' ? '肥料不足' : r.reason === 'busy' ? '有的田正在长' : r.reason === 'season' ? '现在不在农时里' : '有的田不能种';
   }
-  if (n) toast(`已规划 ${n} 块。生长等播种机开工`);
+  if (n) toast(`已规划 ${n} 块。生长等第一趟作业开工`);
   else toast(why || '没有种上');
   paintSheet();
   saveSoon();
@@ -1477,11 +1488,12 @@ function openPlanMenu(x, y) {
   menu.classList.add('on');
   menu.style.left = Math.min(x, innerWidth - 220) + 'px';
   menu.style.top = Math.min(y, innerHeight - 140) + 'px';
-  menu.innerHTML = `<div class="who"><b>规划 ${pickedFields.size} 块</b><span>钟从播种机开工起算</span></div>${planTicks()}<button type="button" class="sell" id="plan-potato-menu">种中熟商品薯</button>`;
+  menu.innerHTML = `<div class="who"><b>规划 ${pickedFields.size} 块</b><span>钟从第一趟作业起算</span></div>${planTicks()}${planCropButtons(false)}`;
 }
 document.getElementById('planmenu').addEventListener('change', e => { if (e.target.dataset.flag) readPlanFlags($('planmenu')); });
 document.getElementById('planmenu').addEventListener('click', e => {
-  if (e.target.id === 'plan-potato-menu') planSelected('potato');
+  const plan = e.target.closest('[data-plan]');
+  if (plan) planSelected(plan.dataset.plan);
 });
 R.domElement.addEventListener('contextmenu', e => e.preventDefault());
 document.addEventListener('contextmenu', e => e.preventDefault(), true);
@@ -1647,6 +1659,12 @@ function rigTitle(r) {
 }
 function rigLine(r) {
   const info = rigReadout(r);
+  const aerial = r.kind === 'drone_scout' || r.kind === 'drone_spray';
+  if (aerial) {
+    const where = r.f ? ' · ' + fieldCode(r.f) : '';
+    if (!r.busy) return '停在基站';
+    return `${info.doing}${where}`;
+  }
   const pct = Math.round((info.charge ?? 1) * 100);
   if (!r.busy && r.mode !== 'charge') return `停在机库 · 电 ${pct}%`;
   const where = r.f ? ' · ' + fieldCode(r.f) : '';
@@ -1759,19 +1777,32 @@ function paintSheet() {
     el.innerHTML = `<div class="split"><div><div class="who"><b>作物</b><span>点一种看阶段</span></div>${stackSlots(rows, d.id, 'data-cropid')}</div><div>${head}</div></div>`;
   } else if (mode === 'scheme') {
     const n = pickedFields.size;
-    el.innerHTML = `<div class="who"><b>规划</b><span>已选 ${n} 块田</span></div><p class="note">拖出方框选田。按住 Shift 再点，加选。右键已选的田，指定作物。生长从播种机开工才计时，不是从这一下。</p>${planTicks()}<button type="button" class="sell" id="plan-potato"${n ? '' : ' disabled'}>种中熟商品薯</button>`;
+    el.innerHTML = `<div class="who"><b>规划</b><span>已选 ${n} 块田</span></div><p class="note">拖出方框选田。按住 Shift 再点，加选。右键已选的田，指定作物。生长从第一趟作业开工才计时。播种或移栽走完以前，田面保持裸土。</p>${planTicks()}${planCropButtons(!n)}`;
   } else if (mode === 'machines') {
-    el.innerHTML = `<div class="who"><b>农机</b><span>点一台，镜头跟着它</span></div>` + rigs.map(r => `<button type="button" class="rowbtn${watchRig && watchRig.id === r.id ? ' on' : ''}" data-rig="${r.id}"><b>${rigTitle(r)}</b><small>${rigLine(r)}</small></button>`).join('');
+    const fleetRows = rigs.map(r => `<button type="button" class="rowbtn${watchRig === r ? ' on' : ''}" data-rig="${r.id}"><b>${rigTitle(r)}</b><small>${rigLine(r)}</small></button>`).join('')
+      + workDrones.map(d => `<button type="button" class="rowbtn${watchRig === d ? ' on' : ''}" data-drone="${d.id}"><b>${d.label}</b><small>${rigLine(d)}</small></button>`).join('');
+    el.innerHTML = `<div class="who"><b>农机</b><span>点一台，镜头跟着它</span></div>` + (fleetRows || '<p class="note">机库是空的。</p>');
   } else if (mode === 'rigshop') {
     const rows = MACHINE_SHOP.map(item => {
       const n = rigs.filter(r => r.kind === item.id).length;
       return { key: item.id, name: item.name, sub: `${fmt(item.price)} · 已有 ${n}` };
-    });
-    const item = MACHINE_SHOP.find(s => s.id === rigPick) || MACHINE_SHOP[0];
-    const n = rigs.filter(r => r.kind === item.id).length;
+    }).concat(DRONE_SHOP.map(item => {
+      const n = workDrones.filter(d => d.kind === item.id).length;
+      return { key: item.id, name: item.name, sub: `${fmt(item.price)} · 已有 ${n}` };
+    }));
+    const item = MACHINE_SHOP.find(s => s.id === rigPick) || DRONE_SHOP.find(s => s.id === rigPick) || MACHINE_SHOP[0];
+    const n = DRONE_SHOP.some(s => s.id === item.id) ? workDrones.filter(d => d.kind === item.id).length : rigs.filter(r => r.kind === item.id).length;
     const note = item.id === 'tractor'
-      ? '停在机库，能看见。这一季没有单独的拖拉机作业。'
-      : '买来就停进机库，充满再出库。';
+      ? '停在机库，能看见。没有后挂，不接作业。'
+      : item.id === 'planter'
+        ? '通用拖拉机。按作业自动换挂：旋耕、施肥、薯播、精播、作畦、运输挂车。喷雾挂具留到病害。'
+        : item.id === 'drone_scout'
+          ? '从无人机基站起飞，只做田间侦察。没有基站不能买，也不进机库。'
+          : item.id === 'drone_spray'
+            ? '从基站起飞，只做虫害防治。病害以后才用地喷和轨道喷杆。田是齐模块，不补边角。'
+        : item.id === 'harvester_combine' || item.id === 'harvester_cabbage' || item.id === 'transplanter'
+          ? '工坊锁定的低模剪影，买来就能按能力派单。'
+          : '买来就停进机库，充满再出库。';
     el.innerHTML = `<div class="split"><div><div class="who"><b>农机店</b><span>用营收买</span></div>${stackSlots(rows, item.id, 'data-rigshop')}</div><div><div class="who"><b>${item.name}</b><span>单价 ${fmt(item.price)} · 已有 ${n}</span></div><p class="note">${note}</p><button type="button" class="sell" id="buy-rig">购买</button></div></div>`;
   } else if (mode === 'store') {
     const cap = warehouseCapacity();
@@ -1790,7 +1821,10 @@ function paintSheet() {
   } else if (mode === 'shop') {
     const rows = SHOP.map(item => ({ key: item.id, name: item.name, sub: `${fmt(item.price)} · 库存 ${stores[item.id]}` }));
     const item = SHOP.find(s => s.id === shopPick) || SHOP[0];
-    const use = item.id === 'seed' ? `种一块田用 ${SEED_PER_FIELD}。` : item.id === 'fertilizer' ? `种一块田用 ${FERT_PER_FIELD}。` : '开一槽用 1。';
+    const seeded = CROPS.find(c => cropDef(c.id)?.seed === item.id);
+    const use = seeded
+      ? `种一块${seeded.name}用 ${cropDef(seeded.id).seedQty}。只从商店买，田里不育苗。`
+      : item.id === 'fertilizer' ? `种一块田用 ${FERT_PER_FIELD}。` : '开一槽用 1。';
     el.innerHTML = `<div class="split"><div><div class="who"><b>商店</b><span>用营收买</span></div>${stackSlots(rows, item.id, 'data-shop')}</div><div><div class="who"><b>${item.name}</b><span>单价 ${fmt(item.price)} · 库存 ${stores[item.id]}</span></div><p class="note">${use}商品薯和蛋白仍在仓库出售。</p><div class="buyline"><input id="shop-qty" class="qty" type="text" inputmode="numeric" value="1" aria-label="购买数量" autocomplete="off"><button type="button" class="sell" id="buy">购买</button></div></div></div>`;
     const qty = $('shop-qty');
     qty.addEventListener('focus', ev => ev.target.select());
@@ -1800,7 +1834,11 @@ function paintSheet() {
     const acts = [['place', '放下'], ['delete', '拆除'], ['watch', '查看']].map(([id, name]) => `<button type="button" class="sell${buildAct === id ? ' on' : ''}" data-bact="${id}">${name}</button>`).join('');
     let body = '';
     if (buildAct === 'place') {
-      body = `<p class="note">先选一种，再点中枢地块。田里种薯。</p>` + ['warehouse', 'garage', 'process'].map(id => `<button type="button" class="rowbtn${buildKind === id ? ' on' : ''}" data-bkind="${id}"><b>${BUILDING_KINDS[id].name}</b><small>点中枢放下</small></button>`).join('');
+      body = `<p class="note">先选一种，再点中枢地块。田里种薯。无人机从基站起飞，不进机库。</p>` + ['warehouse', 'garage', 'process', 'drone_base'].map(id => {
+        const spec = BUILDING_KINDS[id];
+        const sub = spec.price ? `${fmt(spec.price)} · 点中枢放下` : '点中枢放下';
+        return `<button type="button" class="rowbtn${buildKind === id ? ' on' : ''}" data-bkind="${id}"><b>${spec.name}</b><small>${sub}</small></button>`;
+      }).join('');
     } else if (buildAct === 'delete') {
       const rows = buildings.map(b => `<button type="button" class="rowbtn${buildPick === b.id ? ' on' : ''}" data-bdel="${b.id}"><b>${b.name}</b><small>中枢 · ${Math.round(b.x)}, ${Math.round(b.z)}</small></button>`).join('');
       body = `<p class="note">选中一栋再拆除。查看不在这一档。</p>${rows || '<p class="note">中枢上没有房子。</p>'}<button type="button" class="sell" id="bremove"${buildPick == null ? ' disabled' : ''}>拆除所选</button>`;
@@ -1866,12 +1904,24 @@ $('sheet').addEventListener('change', e => { if (e.target.dataset?.flag) readPla
 $('sheet').addEventListener('click', e => {
   const rig = e.target.closest('[data-rig]');
   if (rig) { lockRig(+rig.dataset.rig); return; }
+  const droneBtn = e.target.closest('[data-drone]');
+  if (droneBtn) {
+    const d = workDrones.find(x => x.id === +droneBtn.dataset.drone);
+    if (!d) return;
+    watchRig = d;
+    camT.d = camS.d = 80;
+    camT.x = camS.x = d.x;
+    camT.z = camS.z = d.z;
+    paintSheet();
+    return;
+  }
   const cropId = e.target.closest('[data-cropid]');
   if (cropId) { cropPick = cropId.dataset.cropid; paintSheet(); return; }
   const stack = e.target.closest('[data-stack]');
   if (stack) { pickedStack = stack.dataset.stack; paintSheet(); return; }
   if (e.target.dataset.flag) { readPlanFlags($('sheet')); return; }
-  if (e.target.id === 'plan-potato') { planSelected('potato'); return; }
+  const plan = e.target.closest('[data-plan]');
+  if (plan) { planSelected(plan.dataset.plan); return; }
   const bact = e.target.closest('[data-bact]');
   if (bact) { buildAct = bact.dataset.bact; paintSheet(); return; }
   const bkind = e.target.closest('[data-bkind]');
@@ -1902,8 +1952,10 @@ $('sheet').addEventListener('click', e => {
   const rigRow = e.target.closest('[data-rigshop]');
   if (rigRow) { rigPick = rigRow.dataset.rigshop; paintSheet(); return; }
   if (e.target.id === 'buy-rig') {
-    const bought = buyMachine(rigPick);
+    const bought = DRONE_SHOP.some(s => s.id === rigPick) ? buyDrone(rigPick) : buyMachine(rigPick);
     if (!bought.ok && bought.reason === 'money') toast('营收不够');
+    else if (!bought.ok && bought.reason === 'base') toast('先在中枢建无人机基站');
+    else if (!bought.ok && bought.reason === 'full') toast('基站已经停满');
     else if (!bought.ok) toast('这台不卖');
     else toast(`<b>−${fmt(bought.cost)}</b>${bought.name}`);
     paintSheet();
@@ -2206,7 +2258,7 @@ function paintKpi() {
   paintWorldClock();
   const fleetN = $('kpi').querySelector('em');
   if (fleetN) fleetN.textContent = `/ ${rigs.length}`;
-  $('stores').textContent = `种薯 ${stores.seed} · 肥料 ${stockText(stores.fertilizer)} · 干燥剂 ${stores.spray} · 皮 ${stockText(stores.peel)} · 虫粪 ${stockText(stores.frass)}`;
+  $('stores').textContent = `种薯 ${stores.seed} · 豆种 ${stores.seed_soy || 0} · 麦种 ${stores.seed_barley || 0} · 甘蓝苗 ${stores.seedling_cabbage || 0} · 肥料 ${stockText(stores.fertilizer)} · 干燥剂 ${stores.spray}`;
 }
 function worldClockParts() {
   const day = Math.floor(worldDay);
@@ -2238,32 +2290,36 @@ function updateDock() {
   let stat = selNote;
   if (!stat) {
     if (!f.owned) stat = '邻区快照 · 只读';
-    else if (watch?.waiting) stat = '已规划 · 等播种机开工，生长还没计时';
-    else if (watch?.failed) stat = '中熟商品薯 · 烂在地里 · 没人收，不入仓';
-    else if (watch) stat = `中熟商品薯 · ${watch.label} · 播后 ${Math.floor(watch.day)} / ${watch.days} 日`;
-    else if (stores.seed < SEED_PER_FIELD) stat = '种薯不足。打开商店买一份。';
+    else if (watch?.waiting) stat = `${CROPS[f.crop].name} · 已规划 · 等第一趟作业，生长还没计时`;
+    else if (watch?.failed) stat = `${CROPS[f.crop].name} · 烂在地里 · 没人收，不入仓`;
+    else if (watch && watch.planted === false) stat = `${CROPS[f.crop].name} · ${watch.label} · 播种还没走完 · 第 ${Math.floor(watch.day)} 日`;
+    else if (watch) stat = `${CROPS[f.crop].name} · ${watch.label} · 播后 ${Math.floor(watch.day)} / ${watch.days} 日`;
     else if (stores.fertilizer + 1e-9 < fertPlan().fromFert) stat = stores.frass > 0 ? '肥料不足。虫粪只能抵一半。' : '肥料不足。打开商店买一份。';
-    else if (f.state === 0) stat = '裸地 · 点种薯，播种机起垄';
-    else stat = '定格冠层 · 可改种商品薯';
+    else if (f.state === 0) stat = '裸地 · 选一种作物。种苗只从商店来';
+    else stat = '定格冠层 · 可改种';
   }
   $('selid').textContent = `F-${String(f.i).padStart(3, '0')}${String(f.j).padStart(2, '0')}`;
   $('selstat').textContent = stat;
   const day = watch && !watch.waiting ? watch.day : 0;
-  const days = watch?.days || POTATO_DAYS;
+  const stages = (f.crop >= 0 && CROPS[f.crop].stages?.length) ? CROPS[f.crop].stages : POTATO_STAGES;
   const bar = $('bar');
-  if (bar) bar.innerHTML = POTATO_STAGES.map(s => {
+  if (bar) bar.innerHTML = stages.map(s => {
     const fill = day <= s.from ? 0 : day >= s.to ? 1 : (day - s.from) / (s.to - s.from);
     const pct = (fill * 100).toFixed(1);
     return `<i style="flex:${s.to - s.from};background:linear-gradient(90deg,${s.color} ${pct}%,rgba(232,216,208,.16) ${pct}%)"></i>`;
   }).join('');
   document.querySelectorAll('#selbtns button').forEach(b => {
+    const def = cropDef(b.dataset.crop);
+    const seedName = def ? (productById(def.seed)?.nameZh || '种子') : '';
+    const have = def ? (stores[def.seed] || 0) >= def.seedQty : false;
     b.disabled = !f.owned;
-    b.classList.toggle('on', !!watch && !watch.waiting && stores.seed >= SEED_PER_FIELD);
+    b.classList.toggle('on', !!watch && !watch.waiting && have && CROPS[f.crop]?.id === b.dataset.crop);
     const small = b.querySelector('small');
-    if (small && b.dataset.crop === 'potato') {
+    if (small && def) {
       const fert = fertPlan();
       const fertTxt = Math.abs(fert.fromFert - 1) < 1e-6 ? '1' : stockText(fert.fromFert);
-      small.textContent = `种薯 ${SEED_PER_FIELD} · 肥料 ${fertTxt} · ${POTATO_DAYS} 日 · ${fmt(quote(CROPS.findIndex(c => c.id === 'potato')))}`;
+      const crop = CROPS.find(c => c.id === b.dataset.crop);
+      small.textContent = `${seedName} ${def.seedQty} · 肥料 ${fertTxt} · ${crop.days} 日`;
     }
   });
 }
@@ -2272,12 +2328,14 @@ function paintRates() {
   const input = $('rate-in');
   if (input && document.activeElement !== input) input.value = String(economy.timeScale);
 }
-$('kpi').innerHTML = `<div><small>营收</small><b class="hv" id="kpi-rev">0</b></div><div><small>世界日</small><b id="kpi-day">0</b></div><div><small>时刻</small><span class="clk"><i class="face" id="kpi-face" aria-hidden="true"><i id="kpi-hh"></i><i id="kpi-mh"></i></i><b id="kpi-hm">00:00</b></span></div><div><small>作业</small><b class="hv" id="kpi-act">0</b><em>/ ${rigs.length}</em></div>`;
+$('kpi').innerHTML = `<div class="k-rev"><small>营收</small><b class="hv" id="kpi-rev">0</b></div><div class="k-day"><small>世界日</small><b id="kpi-day">0</b></div><div class="k-time"><small>时刻</small><span class="clk"><i class="face" id="kpi-face" aria-hidden="true"><i id="kpi-hh"></i><i id="kpi-mh"></i></i><b id="kpi-hm">00:00</b></span></div><div class="k-act"><small>作业</small><b class="hv" id="kpi-act">0</b><em>/ ${rigs.length}</em></div>`;
 $('dock').innerHTML = `<div class="who"><b id="selid"></b><span id="selstat"></span></div><div id="bar"><i id="selbar"></i></div><div class="row" id="selbtns"></div>`;
 for (const c of CROPS) if (c.plantable) {
   const b = document.createElement('button');
   b.dataset.crop = c.id;
-  b.innerHTML = `<b>${c.name}</b><small>种薯 ${SEED_PER_FIELD} · 肥料 1 · ${POTATO_DAYS} 日 · ${fmt(quote(CROPS.indexOf(c)))}</small>`;
+  const def = cropDef(c.id);
+  const seedName = productById(def.seed)?.nameZh || '种子';
+  b.innerHTML = `<b>${c.name}</b><small>${seedName} ${def.seedQty} · 肥料 1 · ${c.days} 日</small>`;
   b.style.gridColumn = '1 / -1';
   b.addEventListener('click', () => doPlant(c.id));
   $('selbtns').appendChild(b);
@@ -2494,13 +2552,18 @@ function buildViewer() {
   for (const id of ['view-stages', 'view-machines', 'view-tiles']) $(id).replaceChildren();
   const potato = CROPS.findIndex(c => c.id === 'potato');
   const host = fieldAt(focus.i, focus.j);
-  for (const [name, g] of [['裸垄', 1.2], ['出苗', 2.2], ['封垄', 3.2], ['开花', 4.2], ['碎秧', 5.2], ['起薯', 6.2]]) {
+  for (const [name, g] of [['整地', 1], ['播种', 2.1], ['出苗', 3.2], ['培土', 4.2], ['膨大', 5.2], ['杀秧', 6.2], ['待收', 7.2]]) {
     const el = assetCard(name); $('view-stages').appendChild(el);
     shootField(host, el.querySelector('canvas'), { crop: potato, g, s: L.LANES, dir: 0 });
   }
-  for (const [name, kit] of [['拖拉机', tractorKit], ['播种机', planterKit], ['培土机', hillerKit], ['杀秧机', topperKit], ['收获机', potatoLifterKit]]) {
-    const el = assetCard(name); $('view-machines').appendChild(el);
-    shootMachine(kit, el.querySelector('canvas'));
+  const kitName = {
+    tractor_gen: '通用拖拉机', harvester_combine: '联合收割机', harvester_potato: '薯类收获机', harvester_cabbage: '结球收获机', transplanter: '移栽机',
+    impl_rotavator: '旋耕机', impl_subsoiler: '深松机', impl_cultivator: '中耕机', impl_fertilizer: '施肥机', impl_sprayer: '喷雾机',
+    impl_seeder: '精量播种机', impl_potato_planter: '薯类播种机', impl_haulm: '打秧机', impl_trailer: '运输挂车', impl_bedder: '作畦机', orbit_boom: '轨道喷杆',
+  };
+  for (const id of Object.keys(kitName)) {
+    const el = assetCard(kitName[id]); $('view-machines').appendChild(el);
+    shootMachine(() => surfaceKits[id], el.querySelector('canvas'));
   }
   const tileName = { drill: '条播田块', wide: '宽行田块', ridges: '垄作田块', paddy: '水田', beds: '菜畦' };
   for (const tex of Object.keys(tileName)) {
@@ -2594,17 +2657,38 @@ function frame(now) {
   setCount(harvSet, d < 1500 ? n : 0);
   const rigShown = viewLayer === 'surface' && d < 1500;
   const rigCounts = {};
+  const showRig = (id, x, z, ang) => {
+    const set = rigMesh[id];
+    if (!set) return;
+    const i = rigCounts[id] || 0;
+    if (i >= RIG_CAP) return;
+    setInst(set, i, x, 0, z, ang, 1);
+    rigCounts[id] = i + 1;
+  };
   if (rigShown) for (const r of rigs) {
-    const set = rigMesh[r.kind];
-    if (!set || inCut(r.x, r.z, 8)) continue;
-    const i = rigCounts[r.kind] || 0;
-    if (i >= RIG_CAP) continue;
+    if (inCut(r.x, r.z, 8)) continue;
+    const profile = rigProfile(r.kind);
+    const platform = profile?.logicId && rigMesh[profile.logicId] ? profile.logicId : 'tractor_gen';
     r.va = r.va === undefined ? r.ang : r.va + Math.atan2(Math.sin(r.ang - r.va), Math.cos(r.ang - r.va)) * Math.min(1, dt * 8);
-    setInst(set, i, r.x, 0, r.z, r.va, r.kind === 'lifter' ? 1.45 : 2.4);
-    rigCounts[r.kind] = i + 1;
+    showRig(platform, r.x, r.z, r.va);
+    const hauling = r.intent === 'unload' || r.intent === 'deliver' || r.mode === 'unload';
+    const hitch = platform === 'tractor_gen' ? (hauling && profile?.kit?.includes('impl_trailer') ? 'impl_trailer' : (r.hitch || profile?.defaultHitch || null)) : null;
+    if (hitch != null && hitchOffset[hitch] != null) {
+      const ox = hitchOffset[hitch];
+      showRig(hitch, r.x + ox * Math.cos(r.va), r.z + ox * Math.sin(r.va), r.va);
+    }
     if (r.busy && d < 700) for (let e = 0; e < 2; e++) emitDust(r.x, r.z, r.va);
   }
+  let wd = 0;
+  if (rigShown) for (const d of workDrones) {
+    if (wd >= 8 || inCut(d.x, d.z, 6)) continue;
+    setInst(workDroneSet, wd++, d.x, d.y || 1.5, d.z, d.ang || 0, 2.2);
+  }
+  setCount(workDroneSet, rigShown ? wd : 0);
+  const boomNow = rigShown ? boomWatch() : null;
+  if (boomNow) setInst(boomSet, 0, boomNow.x, 0, boomNow.z, boomNow.ang + Math.PI / 2, 1);
   for (const k in rigMesh) setCount(rigMesh[k], rigShown ? (rigCounts[k] || 0) : 0);
+  setCount(boomSet, boomNow ? 1 : 0);
   haulers.forEach((h, i) => setInst(haulSet, i, h.x, 0, h.z, h.ang)); setCount(haulSet, d < 1500 ? haulers.length : 0);
   drones.forEach((dr, i) => setInst(droneSet, i, dr.x, dr.y, dr.z, dr.ang)); setCount(droneSet, d < 1200 ? drones.length : 0);
   people.forEach((p, i) => { p.a += (Math.sin(t * 0.3 + i) * 0.5) * dt; p.x += Math.cos(p.a) * p.sp * dt; p.z += Math.sin(p.a) * p.sp * dt; setInst(peopleSet, i, p.x, 0, p.z, p.a); }); setCount(peopleSet, d < 700 ? people.length : 0);
@@ -2688,10 +2772,16 @@ function frame(now) {
   paintPicks();
   composer.render();
   // HUD
-  if (mode === 'machines') document.querySelectorAll('#sheet [data-rig] small').forEach(el => {
-    const r = rigs.find(x => x.id === +el.parentElement.dataset.rig);
-    if (r) el.textContent = rigLine(r);
-  });
+  if (mode === 'machines') {
+    document.querySelectorAll('#sheet [data-rig] small').forEach(el => {
+      const r = rigs.find(x => x.id === +el.parentElement.dataset.rig);
+      if (r) el.textContent = rigLine(r);
+    });
+    document.querySelectorAll('#sheet [data-drone] small').forEach(el => {
+      const d = workDrones.find(x => x.id === +el.parentElement.dataset.drone);
+      if (d) el.textContent = rigLine(d);
+    });
+  }
   if (mode === 'deck') {
     document.querySelectorAll('#sheet [data-tank] small').forEach(el => {
       const tank = tanks[+el.parentElement.dataset.tank];
@@ -2729,6 +2819,7 @@ addEventListener('resize', () => { cam.aspect = innerWidth / innerHeight; cam.up
 window.__farm = {
   economy, stores, focus, fields, harvesters, rigs, log, CROPS, PLOT, quote, fieldAtWorld, project, pick: pickFlat,
   warehouse, buildings, sellLot, placeBuilding, removeBuilding, buySeed, buyItem, buyMachine, resetGame, shop: SHOP, machines: MACHINE_SHOP,
+  workDrones, buyDrone, droneShop: DRONE_SHOP,
   cultures: CULTURES, tanks, climate: DECK_CLIMATE, startCulture, tendCulture, harvestCulture, cultureWatch,
   devices, potatoStock, fertPlan, cultureFeedPlan, millWatch, startMill, removeMill, orderProcess, products: productById,
   deck(on) { visitDeck(on == null ? !camS.deck : !!on); },

@@ -250,6 +250,20 @@ export function haulerKit() {
   return k.build();
 }
 
+// 无人机基站占位。侦察机和植保机从这里起飞，不进机库。
+export function droneBaseKit() {
+  const k = new Kit();
+  k.box('dark', 16, 0.4, 12, [0, 0.2, 0], [0, 0, 0], 'deep', 0.02);
+  k.box('light', 4.4, 3.1, 3.6, [-4.4, 1.85, -2.2], [0, 0, 0], 'haze');
+  k.box('glass', 2.4, 1.05, 0.12, [-4.4, 2.15, -0.35]);
+  k.box('dark', 0.4, 6.2, 0.4, [4.6, 3.3, 3.2]);
+  k.cyl('emis', 0.24, 0.24, 0.14, [4.6, 6.5, 3.2], [0, 0, 0], glow('data', 8), 8);
+  k.box('light', 3.4, 0.08, 3.4, [3.2, 0.48, 1.4], [0, 0, 0], 'regoLt');
+  k.box('light', 3.4, 0.08, 3.4, [3.2, 0.48, -2.4], [0, 0, 0], 'regoLt');
+  k.box('emis', 1.6, 0.06, 0.08, [3.2, 0.58, 1.4], [0, 0, 0], glow('paper', 4));
+  return k.build();
+}
+
 // ---------------- 巡检无人机（1.4 m） ----------------
 export function droneKit() {
   const k = new Kit();

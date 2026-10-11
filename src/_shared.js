@@ -3,6 +3,8 @@
 //  _shared.js —— 色板 / 作物参数 / 农场布局 / 自动化模拟（纯数据与逻辑，不含渲染）
 // =====================================================================
 import { productById, recipeById, deviceById, shopRows, utilityCost, LOOP_OFFSETS } from './products.js';
+import { cropDef, rigProfile, rigCan, rigHas, hitchPlan, hitchHasModes, droneCan, JOB_PENALTY, UNLOAD_WHILE_MOVING, BIN_LANES, UNLOAD_SECONDS, TRAILER_CARGO_CAP, HITCH_SWAP_S, RELOAD_S, MODE_SWITCH_S, SURFACE_CROPS } from './surface-crops.js';
+export { cropDef, rigProfile, JOB_PENALTY, UNLOAD_WHILE_MOVING, BIN_LANES, SURFACE_CROPS };
 
 // ---------- ① 色板（来自 art-ref 报告 5.4 节，只允许使用这些键名） ----------
 export const PALETTE = {
@@ -23,18 +25,19 @@ export const PALETTE = {
 // stub : 收割后残茬色    height : 株高(米)，决定长影长度与近景单株高度
 // row  : 行距(米)        along : 株距(米)    tex : 远景田垄纹理    shape : 近景单株造型
 // grow : 邻区定格冠层的参考相位（秒），不驱动玩家的世界钟。
-// plantable : 这一切片只能种中熟商品薯。其余条目只给环带色块，名字不进播种界面。
-// weight : 环带上的占比（邻区快照仍用全部 8 种纹理，色板才和美术小样一致）
-// 商品薯：120 个世界日。yieldL / price 只作一茬营收的量级，不是百科条目。
+// plantable : 表层四作物可种。其余条目只给环带色块。饲料大麦加在末尾，权重 0，不进邻区抽选，旧存档的作物下标不变。
+// weight : 环带上的占比（邻区快照仍用原来的纹理，色板才和美术小样一致）
+// 商品薯阶段中点加总后，成熟待收从第 81 日开始。yieldL / price 只作一茬营收的量级。
 export const CROPS = [
   { id: 'wheat',   name: '麦色冠层', analog: '小麦', family: 'grain', young: 'olive',   ripe: 'straw',  stub: 'regoLt', height: 1.0, row: 0.45, along: 0.30, tex: 'drill',  shape: 'ear',     grow: 260, season: 22, plantable: false, weight: 0.27 },
   { id: 'maize',   name: '高秆冠层', analog: '玉米', family: 'green', young: 'oliveDp', ripe: 'olive',  stub: 'ochre',  height: 2.6, row: 0.80, along: 0.32, tex: 'wide',   shape: 'stalk',   grow: 320, season: 26, plantable: false, weight: 0.17 },
-  { id: 'soy',     name: '矮丛冠层', analog: '大豆', family: 'green', young: 'oliveDp', ripe: 'oliveDp',stub: 'regoDk', height: 0.8, row: 0.50, along: 0.30, tex: 'drill',  shape: 'bush',    grow: 240, season: 20, plantable: false, weight: 0.15 },
-  { id: 'potato',  name: '中熟商品薯', analog: '商品薯', family: 'grain', young: 'oliveDp', ripe: 'ochre', stub: 'rust', height: 0.55, row: 0.90, along: 0.40, tex: 'ridges', shape: 'bush', grow: 280, season: 120, plantable: true, yieldL: 44000, price: 412, weight: 0.10, days: 120 },
+  { id: 'soy',     name: '大豆', analog: '大豆', family: 'green', young: 'oliveDp', ripe: 'oliveDp',stub: 'regoDk', height: 0.8, row: 0.50, along: 0.30, tex: 'drill',  shape: 'bush',    grow: 240, season: 87, plantable: true, yieldL: 3200, price: 520, weight: 0.15, days: 77 },
+  { id: 'potato',  name: '中熟商品薯', analog: '商品薯', family: 'grain', young: 'oliveDp', ripe: 'ochre', stub: 'rust', height: 0.55, row: 0.90, along: 0.40, tex: 'ridges', shape: 'bush', grow: 280, season: 92, plantable: true, yieldL: 44000, price: 412, weight: 0.10, days: 81 },
   { id: 'rice',    name: '水田冠层', analog: '水稻', family: 'teal',  young: 'tealGy',  ripe: 'tealGy', stub: 'regoDk', height: 0.8, row: 0.40, along: 0.30, tex: 'paddy',  shape: 'tuft',    grow: 300, season: 24, plantable: false, weight: 0.08 },
-  { id: 'cabbage', name: '霜甘蓝', analog: '甘蓝', family: 'teal',  young: 'tealGy',  ripe: 'sage',   stub: 'regoDk', height: 0.45,row: 0.70, along: 0.55, tex: 'beds',   shape: 'rosette', grow: 220, season: 22, plantable: false, weight: 0.08 },
+  { id: 'cabbage', name: '结球甘蓝', analog: '甘蓝', family: 'teal',  young: 'tealGy',  ripe: 'sage',   stub: 'regoDk', height: 0.45,row: 0.70, along: 0.55, tex: 'beds',   shape: 'rosette', grow: 220, season: 76, plantable: true, yieldL: 48000, price: 96, weight: 0.08, days: 66 },
   { id: 'alfalfa', name: '银叶苜', analog: '苜蓿', family: 'teal',  young: 'tealGy',  ripe: 'steel',  stub: 'regoDk', height: 0.7, row: 0.30, along: 0.25, tex: 'drill',  shape: 'tuft',    grow: 200, season: 18, plantable: false, weight: 0.10 },
   { id: 'sorghum', name: '锈穗粱', analog: '高粱', family: 'grain', young: 'olive',   ripe: 'rust',   stub: 'ochre',  height: 1.8, row: 0.75, along: 0.30, tex: 'wide',   shape: 'stalk',   grow: 300, season: 24, plantable: false, weight: 0.05 },
+  { id: 'feed_barley', name: '饲料大麦', analog: '大麦', family: 'grain', young: 'olive', ripe: 'straw', stub: 'ochre', height: 0.9, row: 0.4, along: 0.28, tex: 'drill', shape: 'ear', grow: 240, season: 65, plantable: true, yieldL: 5200, price: 180, weight: 0, days: 57 },
 ];
 export const TEX_ID = { drill: 0, wide: 1, ridges: 2, paddy: 3, beds: 4 };
 
@@ -200,10 +203,11 @@ export const WORLD_MIN_PER_REAL_MIN = 120;
 export const DAY_SECONDS = (1440 / WORLD_MIN_PER_REAL_MIN) * 60;
 export const MACHINE_MPS = (3000 / 3600) * WORLD_MIN_PER_REAL_MIN / 10;
 export const SIM = { CUT: MACHINE_MPS, MOVE: MACHINE_MPS, STUBBLE: 8, TILL: 0 };
-export const POTATO_DAYS = 120;
+const potatoDef = cropDef('potato');
+export const POTATO_DAYS = potatoDef.maturity;
 // 成熟之后留在田里等收获。过了这扇窗口还没人收，就算烂在地里，不入仓。
-export const POTATO_HOLD = 14;
-export const POTATO_ROT_AT = POTATO_DAYS + POTATO_HOLD;
+export const POTATO_HOLD = potatoDef.hold;
+export const POTATO_ROT_AT = potatoDef.rotAt;
 // 满电能走的米数，是原先 4200 的五倍。一趟田加来回路程只占几个百分点。
 // 出库门槛是满电。人已经在田上、电还够走，就接着去下一块，不回库补满。
 export const BATT_RANGE = 21000;
@@ -223,7 +227,7 @@ export const SHOP = shopRows();
 const START_FERTILIZER = FERT_PER_FIELD;
 const START_SPRAY = 6;
 const START_FEED = 2;
-export const stores = { seed: SEED_PER_FIELD, fertilizer: START_FERTILIZER, spray: START_SPRAY, feed: START_FEED, peel: 0, frass: 0 };
+export const stores = { seed: SEED_PER_FIELD, fertilizer: START_FERTILIZER, spray: START_SPRAY, feed: START_FEED, peel: 0, frass: 0, seed_soy: 0, seed_barley: 0, seedling_cabbage: 0 };
 // 培育层两种蛋白。天数取自发表的幼虫历期，牌价读产品表。
 // 蛴螬：白星花金龟 Protaetia brevitarsis 幼虫，30°C 发酵基质上幼虫期 64.8 日，这里记 65 日。
 // 黑水虻：Hermetia illucens，30°C 配方饲料上幼虫期 12.8 日，这里记 13 日。
@@ -241,6 +245,7 @@ export const BUILDING_KINDS = {
   garage: { id: 'garage', name: '机库' },
   process: { id: 'process', name: '加工棚' },
   shed: { id: 'shed', name: '仓棚' },
+  drone_base: { id: 'drone_base', name: '无人机基站', price: 8000 },
 };
 export const warehouse = [];
 export const buildings = [];
@@ -265,68 +270,64 @@ export function setTimeScale(v) {
   if (!Number.isFinite(n) || n <= 0) return;
   economy.timeScale = Math.min(10000, n);
 }
-export const PHASE_LABEL = {
-  plant: '播种起垄', ridge: '裸垄', shoot: '出苗', hill: '培土',
-  canopy: '封垄', flower: '开花', top: '杀秧', haulm: '碎秧', lift: '起薯',
-  await: '成熟待收', rot: '烂在地里',
-};
-const JOBS = {
-  planter: { at: 0, label: '播种机' },
-  hiller: { at: 20, label: '培土机' },
-  topper: { at: 100, label: '杀秧机' },
-  lifter: { at: 114, label: '收获机' },
-};
-// 农机店。拖拉机进库、能看见，这一季没有单独的作业。不要写进 SHOP，商店仍是种薯、肥料、饲料。
+export const PHASE_LABEL = { plan: '待播种', rot: '烂在地里' };
+function decorateStages(def) {
+  return def.stages.map(s => {
+    const mine = def.jobs.filter(j => j.stage === s.id);
+    const named = mine.filter(j => !j.auto).map(j => j.name);
+    const machine = named.join('、') || (mine.some(j => j.auto) ? '水网' : null);
+    return { ...s, machine, machineAt: machine ? s.from : null };
+  });
+}
+for (const c of CROPS) {
+  const def = cropDef(c.id);
+  if (!def) {
+    c.stages = [];
+    c.yieldNote = `邻区色块。这一季不能种。参考季长 ${c.season} 日。`;
+    continue;
+  }
+  c.days = def.maturity;
+  c.season = def.rotAt;
+  c.stages = decorateStages(def);
+  for (const s of c.stages) PHASE_LABEL[s.id] = s.name;
+  const seedName = productById(def.seed)?.nameZh || '种子';
+  c.yieldNote = `第 ${def.maturity} 日进入成熟待收，第 ${def.rotAt} 日还没收就烂在地里。${seedName}只从商店来。钟自己往前走。播种或移栽走完以前，田面保持裸土。`;
+}
+// 进度条和「作物」页共用。入仓量仍是整块，再乘漏做的惩罚。
+export const POTATO_STAGES = CROPS.find(c => c.id === 'potato').stages;
+const FIELD_RECIPE = { potato: 'potato-field', soy: 'soy-field', feed_barley: 'barley-field', cabbage: 'cabbage-field' };
+// 农机店。拖拉机进库、能看见，没有后挂，不接作业。联合收割、结球收、移栽用占位网格。
 export const MACHINE_SHOP = [
   { id: 'tractor', name: '拖拉机', price: 12000 },
   { id: 'planter', name: '播种机', price: 9000 },
   { id: 'hiller', name: '培土机', price: 7000 },
   { id: 'topper', name: '杀秧机', price: 7000 },
   { id: 'lifter', name: '收获机', price: 14000 },
+  { id: 'harvester_combine', name: '联合收割机', price: 16000 },
+  { id: 'harvester_cabbage', name: '结球收获机', price: 15000 },
+  { id: 'transplanter', name: '移栽机', price: 11000 },
 ];
+// 无人机不进机库。基站在中枢买下之后，侦察和植保从基站起飞。
+export const DRONE_SHOP = [
+  { id: 'drone_scout', name: '侦察无人机', price: 4500 },
+  { id: 'drone_spray', name: '植保无人机', price: 5200 },
+];
+export const DRONE_MPS = 18;
+export const workDrones = [];
+let nextDroneId = 1;
+export function droneBase() {
+  return buildings.find(b => b.kind === 'drone_base') || null;
+}
 export function potatoPhase(day) {
-  if (day < 6) return 'plant';
-  if (day < 18) return 'ridge';
-  if (day < 20) return 'shoot';
-  if (day < 26) return 'hill';
-  if (day < 46) return 'shoot';
-  if (day < 72) return 'canopy';
-  if (day < 100) return 'flower';
-  if (day < 106) return 'top';
-  if (day < 114) return 'haulm';
-  if (day < POTATO_DAYS) return 'lift';
-  if (day < POTATO_ROT_AT) return 'await';
+  const stages = POTATO_STAGES;
+  if (day >= POTATO_ROT_AT) return 'rot';
+  for (const s of stages) if (day < s.to) return s.id;
   return 'rot';
 }
 export function stageNum(day) {
-  if (day < 18) return 1;
-  if (day < 46) return 2;
-  if (day < 72) return 3;
-  if (day < 100) return 4;
-  if (day < 114) return 5;
-  if (day < POTATO_DAYS) return 6;
-  if (day < POTATO_ROT_AT) return 7;
-  return 8;
-}
-// 进度条和「作物」页共用。颜色按阶段切开。入仓量这一季仍是整块，不按走过的垄打折。
-export const POTATO_STAGES = [
-  { id: 'ridge', name: '播种起垄', from: 0, to: 18, color: PALETTE.rego, machine: '播种机', machineAt: 0, effect: '播种机走完，田面才起垄。120 日从这一趟开工起算。' },
-  { id: 'shoot', name: '出苗', from: 18, to: 46, color: PALETTE.oliveDp, machine: '培土机', machineAt: 20, effect: '第 20 日培土机进地。没走完的垄停在作业前沿。' },
-  { id: 'canopy', name: '封垄', from: 46, to: 72, color: PALETTE.olive, machine: null, machineAt: null, effect: '冠层合上。这一段没有额外农机。' },
-  { id: 'flower', name: '开花', from: 72, to: 100, color: '#c4b0d4', machine: null, machineAt: null, effect: '开花。入仓不按这一段加减。' },
-  { id: 'haulm', name: '碎秧', from: 100, to: 114, color: PALETTE.rust, machine: '杀秧机', machineAt: 100, effect: '第 100 日杀秧机进地，把秧打碎。' },
-  { id: 'lift', name: '起薯', from: 114, to: 120, color: PALETTE.straw, machine: '收获机', machineAt: 114, effect: '第 114 日收获机可以进地。熟了不会自己入仓。' },
-  { id: 'await', name: '成熟待收', from: 120, to: 134, color: PALETTE.ochre, machine: '收获机', machineAt: 114, effect: '成熟后留在田里。收获机走完才入仓。第 134 日还没收，就烂在地里。' },
-];
-{
-  const potato = CROPS.find(c => c.id === 'potato');
-  potato.stages = POTATO_STAGES;
-  potato.yieldNote = '第 120 日成熟，留在田里等收获。过窗口没人收就烂在地里，不入仓。钟自己往前走，没做完的作业停在前沿。';
-  for (const c of CROPS) {
-    if (c.plantable) continue;
-    c.stages = [];
-    c.yieldNote = `邻区色块。这一季不能种。参考季长 ${c.season} 日。`;
-  }
+  if (day >= POTATO_ROT_AT) return 8;
+  const i = POTATO_STAGES.findIndex(s => day < s.to);
+  return i < 0 ? 8 : i + 1;
 }
 export function cropDossier(id) {
   const c = typeof id === 'number' ? CROPS[id] : CROPS.find(x => x.id === id);
@@ -335,7 +336,7 @@ export function cropDossier(id) {
     id: s.id, name: s.name, from: s.from, to: s.to, days: s.to - s.from, color: s.color,
     machine: s.machine, machineAt: s.machineAt, effect: s.effect,
   }));
-  const recipe = c.id === 'potato' ? recipeById('potato-field') : null;
+  const recipe = FIELD_RECIPE[c.id] ? recipeById(FIELD_RECIPE[c.id]) : null;
   const inputs = [];
   const outputs = [];
   if (recipe) {
@@ -358,53 +359,103 @@ export function cropDossier(id) {
     inputs, outputs,
   };
 }
-const JOB_ORDER = ['planter', 'hiller', 'topper', 'lifter'];
-const ACT = { planter: '播种', hiller: '培土', topper: '杀秧', lifter: '起薯' };
-function blankJobs() { return { planter: 0, hiller: 0, topper: 0, lifter: 0 }; }
-function ensureJobs(f) { if (!f.jobS) f.jobS = blankJobs(); }
-// 田面上的作业前沿是这台机器真正走过的距离，不是钟点推出来的。没做完就停在那儿。
+function cropOf(f) {
+  if (!f || f.crop < 0) return null;
+  return cropDef(CROPS[f.crop]?.id);
+}
+function fieldDay(f) {
+  if (!f || f.plantedAt == null) return 0;
+  return Math.max(0, worldDay - f.plantedAt);
+}
+function blankJobs(f) {
+  const jobs = {};
+  const def = f ? cropOf(f) : null;
+  if (def) for (const j of def.jobs) jobs[j.id] = 0;
+  return jobs;
+}
+function ensureJobs(f) {
+  if (!f.jobS) f.jobS = blankJobs(f);
+  const def = cropOf(f);
+  if (!def) return;
+  for (const j of def.jobs) if (f.jobS[j.id] == null) f.jobS[j.id] = 0;
+}
+function jobDone(f, id) {
+  return (f?.jobS?.[id] || 0) >= L.LANES - 1e-3;
+}
+function plantJob(f) {
+  return cropOf(f)?.jobs.find(j => j.plant) || null;
+}
+function plantJobDone(f) {
+  const job = plantJob(f);
+  if (!job) return true;
+  return jobDone(f, job.id);
+}
+// 作业前沿只跟着真正在走的那一趟。灌溉和水网不算，免得整块被涂成已收。
 function visualFront(f) {
   if (f.plantedAt == null) return 0;
-  const day = Math.max(0, worldDay - f.plantedAt);
+  const def = cropOf(f);
+  if (!def) return 0;
   ensureJobs(f);
+  const day = fieldDay(f);
   let front = 0;
-  for (const kind of JOB_ORDER) {
-    if (day < JOBS[kind].at) break;
-    front = f.jobS[kind];
+  for (const job of def.jobs) {
+    if (job.auto || job.spray || job.drone) continue;
+    if (job.afterHarvest) {
+      if (!f.harvested) break;
+    } else if (day < job.from) break;
+    const prog = f.jobS[job.id] || 0;
+    if (prog < L.LANES - 1e-3) return prog;
+    front = prog;
   }
   return front;
 }
-function stageBlend(day) {
-  const st = stageNum(day);
-  const row = POTATO_STAGES[st - 1];
-  if (!row || row.to <= row.from) return st;
+function stageBlend(def, day) {
+  const row = def.stages.find(s => day < s.to) || def.stages[def.stages.length - 1];
+  const st = def.stages.indexOf(row) + 1;
+  if (!row || row.to <= row.from || day >= def.rotAt) return day >= def.rotAt ? 8 : st;
   const frac = Math.min(0.999, Math.max(0, (day - row.from) / (row.to - row.from)));
   return st + frac;
 }
 export function fieldVisual(f) {
-  if (f?.failed === 'rot' && f.crop >= 0 && CROPS[f.crop]?.id === 'potato') {
-    return { crop: f.crop, g: 8.05, s: 0, dir: f.dir };
+  const id = f && f.crop >= 0 ? CROPS[f.crop]?.id : null;
+  const potato = id === 'potato';
+  if (f?.failed === 'rot') {
+    return { crop: f.crop, g: potato ? 8.05 : 0, s: 0, dir: f.dir };
   }
-  if (f && f.live && !f.paid && f.crop >= 0 && CROPS[f.crop].id === 'potato') {
+  const def = cropOf(f);
+  if (f && f.live && !f.paid && def) {
     if (f.plantedAt == null) return { crop: f.crop, g: 0, s: 0, dir: f.dir };
-    const day = Math.max(0, worldDay - f.plantedAt);
-    return { crop: f.crop, g: stageBlend(day), s: visualFront(f), dir: f.dir };
+    // 播种或移栽没走完：整块保持裸土。机器走过的垄仍由 s 画出来。
+    if (!plantJobDone(f)) return { crop: f.crop, g: potato ? 1 : 0, s: visualFront(f), dir: f.dir };
+    const day = fieldDay(f);
+    if (potato) return { crop: f.crop, g: stageBlend(def, day), s: visualFront(f), dir: f.dir };
+    const g = Math.min(0.95, def.maturity > 0 ? day / def.maturity : 0.5);
+    return { crop: f.crop, g, s: visualFront(f), dir: f.dir };
   }
   return { crop: f.crop, g: f.state === 0 ? 0 : f.g, s: (f.state === 3 || f.state === 4) ? f.s : 0, dir: f.dir };
 }
 export function cropWatch(f) {
-  if (f?.failed === 'rot') return { day: POTATO_ROT_AT, phase: 'rot', label: '烂在地里', front: 0, days: POTATO_ROT_AT, waiting: false, failed: true };
-  if (!f?.live || f.paid || f.crop < 0 || CROPS[f.crop].id !== 'potato') return null;
-  if (f.plantedAt == null) return { day: 0, phase: 'plan', label: '待播种', front: 0, days: POTATO_ROT_AT, waiting: true };
-  const day = Math.max(0, worldDay - f.plantedAt);
-  const phase = potatoPhase(day);
-  return { day, phase, label: PHASE_LABEL[phase], front: visualFront(f), days: POTATO_ROT_AT, waiting: false };
+  const def = cropOf(f);
+  if (f?.failed === 'rot') {
+    const days = def?.rotAt || POTATO_ROT_AT;
+    return { day: days, phase: 'rot', label: '烂在地里', front: 0, days, waiting: false, failed: true };
+  }
+  if (!f?.live || f.paid || !def) return null;
+  const days = def.rotAt;
+  if (f.plantedAt == null) return { day: 0, phase: 'plan', label: '待播种', front: 0, days, waiting: true };
+  const day = fieldDay(f);
+  let phase = 'rot';
+  if (day < def.rotAt) {
+    const row = def.stages.find(s => day < s.to);
+    phase = row ? row.id : 'rot';
+  }
+  return { day, phase, label: PHASE_LABEL[phase] || phase, front: visualFront(f), days, waiting: false, planted: plantJobDone(f) };
 }
 // 农时。这一站没有季节，播种窗口始终开着。以后接到地球历，在这里按日拦住。
 export function seasonAllowsSow(_field, _day = worldDay) {
   return true;
 }
-// 中耕弃作、改土这一季没做。裸地仍只能规划种薯。
+// 中耕弃作、改土这一季没做。
 export function fieldOps() {
   return { cultivate: false, amend: false, note: '中耕弃作和改土还没接上' };
 }
@@ -479,65 +530,101 @@ function headlandSample(f, lane, a) {
 const potatoLive = [];
 function syncPotatoLive() {
   potatoLive.length = 0;
-  for (const f of fields) if (f.live && !f.paid && f.crop >= 0 && CROPS[f.crop].id === 'potato') potatoLive.push(f);
+  for (const f of fields) if (f.live && !f.paid && cropOf(f)) potatoLive.push(f);
 }
 function trackPotato(f) { if (!potatoLive.includes(f)) potatoLive.push(f); }
 function dropPotato(f) {
   const i = potatoLive.indexOf(f);
   if (i >= 0) potatoLive.splice(i, 1);
 }
-function jobReady(f, kind) {
-  if (!f || !f.live || f.paid || f.crop < 0 || CROPS[f.crop].id !== 'potato') return false;
+function jobOpen(f, job) {
+  if (!f?.live || f.paid || f.failed === 'rot' || !job) return false;
   ensureJobs(f);
-  if (f.jobS[kind] >= L.LANES - 1e-3) return false;
-  if (kind !== 'planter') {
-    if (f.plantedAt == null) return false;
-    if (worldDay - f.plantedAt < JOBS[kind].at) return false;
-  }
-  return true;
+  if (jobDone(f, job.id)) return false;
+  if (job.afterHarvest) return !!f.harvested;
+  if (job.from <= 0) return true;
+  if (f.plantedAt == null) return false;
+  const day = fieldDay(f);
+  return day >= job.from && day < job.to;
 }
-function fieldRank(f) {
-  const seq = f.planSeq ?? f.idx;
-  if (f.plantedAt == null) return [1, seq, f.idx];
-  return [0, f.plantedAt, f.idx];
-}
-function fieldClaimed(f, kind, self) {
-  for (const r of rigs) {
-    if (r === self || r.kind !== kind || r.f !== f) continue;
-    if (r.mode === 'work' || r.mode === 'turn' || r.mode === 'travel') return true;
+function rankBetter(a, b) {
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] < b[i]) return true;
+    if (a[i] > b[i]) return false;
   }
   return false;
 }
-function pickField(kind, self) {
-  if (!JOBS[kind]) return null;
+function fieldBusy(f, self) {
+  for (const r of rigs) {
+    if (r === self || r.f !== f) continue;
+    if (r.intent === 'unload' || r.intent === 'deliver') continue;
+    if (r.mode === 'work' || r.mode === 'turn' || r.mode === 'travel' || r.mode === 'need_unload' || r.mode === 'unload') return true;
+  }
+  return false;
+}
+function pickAssignment(r) {
+  if (!rigProfile(r.kind)) return null;
   let best = null;
+  let bestKey = null;
   for (const f of potatoLive) {
-    if (!jobReady(f, kind) || fieldClaimed(f, kind, self)) continue;
-    if (!best) { best = f; continue; }
-    const ra = fieldRank(f), rb = fieldRank(best);
-    if (ra[0] < rb[0] || (ra[0] === rb[0] && (ra[1] < rb[1] || (ra[1] === rb[1] && ra[2] < rb[2])))) best = f;
+    if (fieldBusy(f, r)) continue;
+    const def = cropOf(f);
+    if (!def) continue;
+    for (const job of def.jobs) {
+      if (!jobOpen(f, job) || !rigCan(r.kind, job)) continue;
+      if (job.spray && f.boomBusy) continue;
+      const plan = hitchPlan(r.kind, r.hitch, job);
+      if (!plan) continue;
+      const key = [
+        r.f === f ? 0 : 1,
+        f.plantedAt == null ? 1 : 0,
+        f.plantedAt == null ? (f.planSeq || f.idx) : f.plantedAt,
+        job.from,
+        job.required ? 0 : 1,
+        job.order,
+        f.idx,
+        plan.swap || (job.load && r.load !== job.load) ? 1 : 0,
+        Math.hypot((f.x0 + L.FIELD / 2) - r.x, (f.z0 + L.FIELD / 2) - r.z),
+      ];
+      if (!best || rankBetter(key, bestKey)) { best = { f, job }; bestKey = key; }
+    }
   }
   return best;
 }
+function bootRig(r) {
+  const profile = rigProfile(r.kind);
+  r.hitch = profile?.defaultHitch || null;
+  r.load = profile?.defaultLoad || null;
+  r.modeParam = profile?.defaultMode || null;
+  r.tank = null;
+  r.pending = null;
+  r.serviceT = 0;
+  r.switchT = 0;
+}
 function parkRig(r, refill = false) {
-  r.busy = false; r.f = null; r.intent = null; r.route = null; r.ri = 0;
+  r.busy = false; r.f = null; r.intent = null; r.route = null; r.ri = 0; r.partner = null;
   r.x = r.parkX; r.z = r.parkZ; r.ang = -Math.PI / 2;
   if (refill || r.charge == null) r.charge = 1;
+  if (refill) bootRig(r);
   r.mode = r.charge < 1 ? 'charge' : 'park';
 }
-function workTarget(f, kind) {
+function workTarget(f, jobId) {
   ensureJobs(f);
-  const s = Math.min(Math.max(f.jobS[kind], 0), L.LANES - 1e-4);
+  const s = Math.min(Math.max(f.jobS[jobId] || 0, 0), L.LANES - 1e-4);
   const lane = Math.floor(s);
   const frac = s - lane;
   const dirp = lane % 2 === 0;
   const u = dirp ? frac * L.FIELD : (1 - frac) * L.FIELD;
   return workPose(f, lane, u);
 }
-function beginJob(r, f) {
+function beginJob(r, f, job) {
+  const def = cropOf(f);
+  job = job || def?.jobs.find(j => j.id === r.job);
+  if (!f || !job) { goHome(r); return; }
   ensureJobs(f);
-  if (r.kind === 'planter' && f.plantedAt == null) f.plantedAt = worldDay;
-  const s = Math.min(Math.max(f.jobS[r.kind], 0), L.LANES - 1e-4);
+  r.job = job.id;
+  if (f.plantedAt == null) f.plantedAt = worldDay;
+  const s = Math.min(Math.max(f.jobS[job.id] || 0, 0), L.LANES - 1e-4);
   const lane = Math.floor(s);
   const frac = s - lane;
   const dirp = lane % 2 === 0;
@@ -547,7 +634,6 @@ function beginJob(r, f) {
   r.x = pose.x; r.z = pose.z; r.ang = pose.ang;
   r.route = null; r.ri = 0;
 }
-// 先贴上最近的地表道路，再沿路拐到终点附近，最后才进田或进库。
 function roadRoute(x, z, ex, ez) {
   const sx = nearestRoad(x), sz = nearestRoad(z);
   const startVert = Math.abs(sx - x) <= Math.abs(sz - z);
@@ -572,7 +658,6 @@ function roadRoute(x, z, ex, ez) {
   return out;
 }
 function shiftRoute(r, pts) {
-  // 6 m 路面内错开，终点仍落在作业点或车位上。
   const bias = ((r.id % 5) - 2) * 1.15;
   if (!pts || pts.length < 2 || Math.abs(bias) < 0.1) return pts;
   const out = [];
@@ -591,15 +676,61 @@ function routeTo(r, ex, ez, intent, f) {
   r.busy = true;
   r.mode = 'travel';
   const dist = Math.hypot(r.x - ex, r.z - ez);
-  // 已经在作业点旁边就直接开过去。从机库或另一块田过来才绕地表道路。
-  // 路点按车号横移，终点仍是作业点或车位，两台车不会叠在同一条线的同一个点上。
   const route = dist < 36 ? [[ex, ez]] : roadRoute(r.x, r.z, ex, ez);
   r.route = shiftRoute(r, route);
   r.ri = 0;
 }
-function routeToJob(r, f) {
-  const pose = workTarget(f, r.kind);
+function routeToJob(r, f, job) {
+  r.job = job.id;
+  const pose = workTarget(f, job.id);
   routeTo(r, pose.x, pose.z, 'job', f);
+}
+function dispatchJob(r, f, job) {
+  const plan = hitchPlan(r.kind, r.hitch, job);
+  if (!plan) return false;
+  const reload = !!(job.load && r.load !== job.load);
+  const tankBlock = !!(job.tank && r.tank && r.tank !== job.tank && (r.bin || 0) > 0);
+  if (tankBlock) {
+    enterNeedUnload(r);
+    return true;
+  }
+  if (plan.swap || reload) {
+    r.pending = { f, job: job.id, hitch: plan.hitch, load: job.load || r.load || null, mode: job.mode || null, tank: job.tank || null };
+    r.job = job.id;
+    r.serviceKind = plan.swap ? 'hitch' : 'reload';
+    routeTo(r, r.parkX, r.parkZ, 'service', f);
+    return true;
+  }
+  if (job.tank) r.tank = job.tank;
+  routeToJob(r, f, job);
+  return true;
+}
+function dispatchUnload(r, waiting) {
+  if (r.hitch !== 'impl_trailer') {
+    r.pending = { f: waiting.f, job: null, hitch: 'impl_trailer', load: r.load || null, mode: null, tank: null, unload: waiting.id };
+    r.partner = waiting.id;
+    r.serviceKind = 'hitch';
+    r.job = null;
+    routeTo(r, r.parkX, r.parkZ, 'service', waiting.f);
+    return;
+  }
+  r.partner = waiting.id;
+  const p = sidePoint(waiting);
+  routeTo(r, p.x, p.z, 'unload', waiting.f);
+}
+function considerUnload(r) {
+  if (!rigHas(r.kind, 'impl_trailer')) return false;
+  const waiting = waitingHarvester();
+  if (!waiting || waiting === r) return false;
+  dispatchUnload(r, waiting);
+  return true;
+}
+function afterWork(r) {
+  if (considerUnload(r)) return;
+  if ((r.charge ?? 1) <= 0) { goHome(r); return; }
+  const nxt = pickAssignment(r);
+  if (!nxt) { goHome(r); return; }
+  dispatchJob(r, nxt.f, nxt.job);
 }
 function goHome(r) {
   const dist = Math.hypot(r.x - r.parkX, r.z - r.parkZ);
@@ -608,66 +739,130 @@ function goHome(r) {
 }
 function useCharge(r, meters) {
   r.charge = Math.max(0, (r.charge ?? 1) - meters / BATT_RANGE);
-  return r.intent !== 'home' && r.charge <= 0;
+  return r.intent !== 'home' && r.intent !== 'deliver' && r.charge <= 0;
 }
 function atGarage(r) {
   return Math.hypot(r.x - r.parkX, r.z - r.parkZ) < 2;
 }
+function sidePoint(h) {
+  const side = h.ang + Math.PI / 2;
+  return { x: h.x + Math.cos(side) * 7, z: h.z + Math.sin(side) * 7 };
+}
+function waitingHarvester() {
+  return rigs.find(h => h.mode === 'need_unload' && !rigs.some(t => t.partner === h.id && (t.mode === 'unload' || t.intent === 'unload')));
+}
+function deliverTrailer(r) {
+  routeTo(r, r.parkX, r.parkZ, 'deliver', null);
+}
 function assignIdleRigs() {
   for (const r of rigs) {
-    if (r.mode === 'work' || r.mode === 'turn' || r.mode === 'travel') continue;
+    if (r.mode === 'work' || r.mode === 'turn' || r.mode === 'travel' || r.mode === 'need_unload' || r.mode === 'unload' || r.mode === 'service' || r.mode === 'switch') continue;
     const home = atGarage(r);
-    // 充满再出库。人已经在田上、电还大于零，就接着派，不回库补到满。
     if (home && (r.charge ?? 1) < BATT_LEAVE) {
       r.mode = 'charge'; r.busy = false; r.f = null; r.intent = null;
       continue;
     }
-    const f = pickField(r.kind, r);
-    if (!f) {
+    if (rigHas(r.kind, 'impl_trailer') && (r.cargo || 0) >= TRAILER_CARGO_CAP) {
+      deliverTrailer(r);
+      continue;
+    }
+    if (considerUnload(r)) continue;
+    const next = pickAssignment(r);
+    if (!next) {
       if (!home) goHome(r);
       else r.mode = (r.charge ?? 1) < 1 ? 'charge' : 'park';
       continue;
     }
-    routeToJob(r, f);
+    dispatchJob(r, next.f, next.job);
   }
+}
+function enterNeedUnload(r) {
+  r.mode = 'need_unload';
+  r.busy = true;
+  r.intent = 'unload_wait';
+  r.route = null;
+}
+function resumeHarvest(r) {
+  r.bin = 0;
+  r.partner = null;
+  const f = r.f;
+  const key = r.job;
+  if (!f || !key || !f.live) { goHome(r); return; }
+  if (jobDone(f, key)) {
+    storeHarvest(f);
+    maybeRelease(f);
+    if (!f.live) { goHome(r); return; }
+    afterWork(r);
+    return;
+  }
+  const s = f.jobS[key] || 0;
+  const lane = Math.min(L.LANES - 1, Math.floor(s + 1e-6));
+  const dirp = lane % 2 === 0;
+  r.lane = lane;
+  r.u = dirp ? 0 : L.FIELD;
+  r.mode = 'work';
+  r.intent = 'job';
+  r.busy = true;
+  const pose = workPose(f, lane, r.u);
+  r.x = pose.x; r.z = pose.z; r.ang = pose.ang;
 }
 function finishPass(r) {
   const f = r.f;
-  if (f?.jobS) f.jobS[r.kind] = L.LANES;
-  if (r.kind === 'lifter') completeHarvest(f);
-  if ((r.charge ?? 1) <= 0) { goHome(r); return; }
-  const nxt = pickField(r.kind, r);
-  if (!nxt) { goHome(r); return; }
-  routeToJob(r, nxt);
+  const key = r.job;
+  const job = f && key ? cropOf(f)?.jobs.find(j => j.id === key) : null;
+  if (f?.jobS && key) f.jobS[key] = L.LANES;
+  if (job?.spray && f && !f.sprayed) {
+    f.sprayed = true;
+    if (stores.spray > 0) stores.spray -= 1;
+  }
+  if (job?.harvest) {
+    if ((r.bin || 0) > 0 && !UNLOAD_WHILE_MOVING) { enterNeedUnload(r); return; }
+    storeHarvest(f);
+    maybeRelease(f);
+  }
+  if (job?.afterHarvest) releaseField(f);
+  if (!f?.live) { goHome(r); return; }
+  afterWork(r);
 }
 function stepWork(r, dt) {
   const f = r.f;
-  if (!f || !f.live || f.paid) { goHome(r); return; }
+  const key = r.job;
+  if (!f || !key || !f.live || f.paid) { goHome(r); return; }
   if ((r.charge ?? 1) <= 0) { goHome(r); return; }
   ensureJobs(f);
-  let rem = MACHINE_MPS * dt;
+  const job = cropOf(f)?.jobs.find(j => j.id === key);
+  const pace = hitchPlan(r.kind, r.hitch, job)?.speed || 1;
+  let rem = MACHINE_MPS * pace * dt;
   const dirp = r.lane % 2 === 0;
   const dest = dirp ? L.FIELD : 0;
   const room = Math.abs(dest - r.u);
   const leg = Math.min(rem, room);
-  if (useCharge(r, leg)) {
-    r.u += (dirp ? 1 : -1) * leg;
-    f.jobS[r.kind] = r.lane + (dirp ? r.u / L.FIELD : (L.FIELD - r.u) / L.FIELD);
+  const write = () => {
+    f.jobS[key] = r.lane + (dirp ? r.u / L.FIELD : (L.FIELD - r.u) / L.FIELD);
     const pose = workPose(f, r.lane, r.u);
     r.x = pose.x; r.z = pose.z; r.ang = pose.ang;
+  };
+  if (useCharge(r, leg)) {
+    r.u += (dirp ? 1 : -1) * leg;
+    write();
     goHome(r);
     return;
   }
   if (rem < room - 1e-8) {
     r.u += (dirp ? 1 : -1) * rem;
-    f.jobS[r.kind] = r.lane + (dirp ? r.u / L.FIELD : (L.FIELD - r.u) / L.FIELD);
-    const pose = workPose(f, r.lane, r.u);
-    r.x = pose.x; r.z = pose.z; r.ang = pose.ang;
+    write();
     return;
   }
   r.u = dest;
-  f.jobS[r.kind] = r.lane + 1;
+  f.jobS[key] = r.lane + 1;
   rem -= room;
+  if (job?.harvest && !UNLOAD_WHILE_MOVING) {
+    r.bin = (r.bin || 0) + 1;
+    if (r.bin >= BIN_LANES || r.lane + 1 >= L.LANES) {
+      enterNeedUnload(r);
+      return;
+    }
+  }
   if (r.lane + 1 >= L.LANES) {
     finishPass(r);
     if (r.mode === 'travel' && rem > 0) stepTravel(r, rem / MACHINE_MPS);
@@ -680,7 +875,8 @@ function stepWork(r, dt) {
 }
 function stepTurn(r, dt) {
   const f = r.f;
-  if (!f || !f.live || f.paid) { goHome(r); return; }
+  const key = r.job;
+  if (!f || !key || !f.live || f.paid) { goHome(r); return; }
   if ((r.charge ?? 1) <= 0) { goHome(r); return; }
   let rem = MACHINE_MPS * dt;
   const left = r.turnLen - r.turnDist;
@@ -697,7 +893,7 @@ function stepTurn(r, dt) {
   const dirp = r.lane % 2 === 0;
   r.u = dirp ? 0 : L.FIELD;
   r.mode = 'work';
-  f.jobS[r.kind] = r.lane;
+  f.jobS[key] = r.lane;
   const pose = workPose(f, r.lane, r.u);
   r.x = pose.x; r.z = pose.z; r.ang = pose.ang;
   if (rem > 0) stepWork(r, rem / MACHINE_MPS);
@@ -710,21 +906,79 @@ function crowded(r) {
   }
   return false;
 }
+function arriveTravel(r) {
+  if (r.intent === 'home') { parkRig(r, false); return; }
+  if (r.intent === 'deliver') { r.cargo = 0; parkRig(r, false); return; }
+  if (r.intent === 'service') {
+    const pending = r.pending || {};
+    const swap = !!(pending.hitch && pending.hitch !== r.hitch);
+    const reload = !!(pending.load && pending.load !== r.load);
+    r.mode = 'service';
+    r.serviceT = (swap ? HITCH_SWAP_S : 0) + (reload ? RELOAD_S : 0);
+    if (r.serviceT <= 0) r.serviceT = HITCH_SWAP_S;
+    r.x = r.parkX; r.z = r.parkZ; r.ang = -Math.PI / 2;
+    r.busy = true;
+    r.route = null;
+    return;
+  }
+  if (r.intent === 'unload') {
+    const h = rigs.find(x => x.id === r.partner);
+    if (!h || h.mode !== 'need_unload') { r.partner = null; goHome(r); return; }
+    r.mode = 'unload';
+    r.unloadT = UNLOAD_SECONDS;
+    r.ang = h.ang;
+    h.mode = 'unload';
+    h.unloadT = UNLOAD_SECONDS;
+    h.partner = r.id;
+    return;
+  }
+  const job = r.f && cropOf(r.f)?.jobs.find(j => j.id === r.job);
+  if (job?.mode && hitchHasModes(r.hitch) && r.modeParam !== job.mode) {
+    r.mode = 'switch';
+    r.switchT = MODE_SWITCH_S;
+    r.busy = true;
+    return;
+  }
+  if (job?.tank) r.tank = job.tank;
+  beginJob(r, r.f);
+}
+function stepService(r, dt) {
+  r.serviceT = (r.serviceT || 0) - dt;
+  r.x = r.parkX; r.z = r.parkZ; r.ang = -Math.PI / 2;
+  if (r.serviceT > 0) return;
+  const pending = r.pending;
+  if (pending?.hitch) r.hitch = pending.hitch;
+  if (pending?.load) r.load = pending.load;
+  if (pending?.mode && hitchHasModes(r.hitch)) r.modeParam = pending.mode;
+  if (pending?.tank) r.tank = pending.tank;
+  r.pending = null;
+  r.mode = 'park';
+  r.busy = false;
+  r.intent = null;
+  r.route = null;
+  r.job = null;
+  r.f = null;
+  r.partner = null;
+}
+function stepSwitch(r, dt) {
+  r.switchT = (r.switchT || 0) - dt;
+  if (r.switchT > 0) return;
+  const job = r.f && cropOf(r.f)?.jobs.find(j => j.id === r.job);
+  if (job?.mode) r.modeParam = job.mode;
+  beginJob(r, r.f);
+}
 function stepTravel(r, dt) {
   if (crowded(r)) return;
   if (r.intent === 'job') {
-    if (!r.f || !jobReady(r.f, r.kind)) {
-      const nxt = (r.charge ?? 1) > 0 ? pickField(r.kind, r) : null;
+    const job = r.f && cropOf(r.f)?.jobs.find(j => j.id === r.job);
+    if (!r.f || !job || !jobOpen(r.f, job)) {
+      const nxt = (r.charge ?? 1) > 0 ? pickAssignment(r) : null;
       if (!nxt) { goHome(r); return; }
-      if (nxt !== r.f) routeToJob(r, nxt);
+      if (nxt.f !== r.f || nxt.job.id !== r.job) routeToJob(r, nxt.f, nxt.job);
     }
   }
-  if ((r.charge ?? 1) <= 0 && r.intent !== 'home') { goHome(r); return; }
-  if (!r.route || r.ri >= r.route.length) {
-    if (r.intent === 'home') { parkRig(r, false); return; }
-    beginJob(r, r.f);
-    return;
-  }
+  if ((r.charge ?? 1) <= 0 && r.intent !== 'home' && r.intent !== 'deliver') { goHome(r); return; }
+  if (!r.route || r.ri >= r.route.length) { arriveTravel(r); return; }
   const [tx, tz] = r.route[r.ri];
   const dx = tx - r.x, dz = tz - r.z;
   const dist = Math.hypot(dx, dz);
@@ -741,8 +995,7 @@ function stepTravel(r, dt) {
     r.x = tx; r.z = tz; r.ri++;
     const extra = step > dist ? (step - dist) / MACHINE_MPS : 0;
     if (r.ri >= r.route.length) {
-      if (r.intent === 'home') { parkRig(r, false); return; }
-      beginJob(r, r.f);
+      arriveTravel(r);
       if (extra > 0 && r.mode === 'work') stepWork(r, extra);
       return;
     }
@@ -750,6 +1003,242 @@ function stepTravel(r, dt) {
     return;
   }
   r.x += dx / dist * step; r.z += dz / dist * step; r.ang = Math.atan2(dz, dx);
+}
+function stepUnload(r, dt) {
+  if (r.unloadT == null) return;
+  r.unloadT -= dt;
+  if (r.unloadT > 0) return;
+  if (!rigHas(r.kind, 'impl_trailer')) return;
+  const h = rigs.find(x => x.id === r.partner);
+  r.cargo = (r.cargo || 0) + 1;
+  r.partner = null;
+  r.unloadT = 0;
+  log.push({ type: 'unload', pay: 0, name: '侧卸', i: h?.f?.i ?? null, j: h?.f?.j ?? null, t: worldDay });
+  if (h) resumeHarvest(h);
+  if (r.cargo >= TRAILER_CARGO_CAP) deliverTrailer(r);
+  else {
+    const more = waitingHarvester();
+    if (more) {
+      r.partner = more.id;
+      const p = sidePoint(more);
+      routeTo(r, p.x, p.z, 'unload', more.f);
+    } else goHome(r);
+  }
+}
+let boom = null;
+function stepBoom(dt) {
+  for (const f of potatoLive) if (!boom || f !== boom.f) f.boomBusy = false;
+  if (boom) {
+    const still = boom.f.live && jobOpen(boom.f, boom.job);
+    if (!still) { boom.f.boomBusy = false; boom = null; }
+    else if (fieldBusy(boom.f, null)) { boom.f.boomBusy = false; return; }
+  }
+  if (!boom) {
+    for (const f of potatoLive) {
+      if (fieldBusy(f, null)) continue;
+      const job = cropOf(f)?.jobs.find(j => j.spray && jobOpen(f, j) && !rigs.some(r => r.f === f && r.job === j.id && (r.mode === 'work' || r.mode === 'turn' || r.mode === 'travel')));
+      if (job) { boom = { f, job }; break; }
+    }
+  }
+  if (!boom) return;
+  boom.f.boomBusy = true;
+  const key = boom.job.id;
+  boom.f.jobS[key] = Math.min(L.LANES, (boom.f.jobS[key] || 0) + (MACHINE_MPS * dt) / L.FIELD);
+  if (boom.f.jobS[key] >= L.LANES - 1e-3) {
+    boom.f.jobS[key] = L.LANES;
+    boom.f.boomBusy = false;
+    if (!boom.f.sprayed) {
+      boom.f.sprayed = true;
+      if (stores.spray > 0) stores.spray -= 1;
+    }
+    boom = null;
+  }
+}
+export function boomWatch() {
+  if (!boom?.f) return null;
+  const key = boom.job?.id;
+  const s = key ? (boom.f.jobS?.[key] || 0) : 0;
+  const lane = Math.min(L.LANES - 1, Math.max(0, Math.floor(s)));
+  const frac = Math.max(0, s - lane);
+  const pose = workPose(boom.f, lane, frac * L.FIELD);
+  return { x: pose.x, z: pose.z, ang: pose.ang, f: boom.f };
+}
+function dronePad(d) {
+  const base = droneBase();
+  const i = Math.max(0, workDrones.indexOf(d));
+  if (base) return { x: base.x - 6 + (i % 4) * 4, z: base.z + 5 };
+  return { x: d.homeX ?? d.x, z: d.homeZ ?? d.z };
+}
+function parkDrone(d) {
+  const pad = dronePad(d);
+  d.homeX = pad.x; d.homeZ = pad.z;
+  d.x = pad.x; d.z = pad.z; d.y = 1.5; d.ang = 0;
+  d.mode = 'park'; d.busy = false; d.f = null; d.job = null; d.intent = null;
+}
+export function buyDrone(kind) {
+  const item = DRONE_SHOP.find(s => s.id === kind);
+  if (!item) return { ok: false, reason: 'kind' };
+  if (!droneBase()) return { ok: false, reason: 'base' };
+  if (workDrones.length >= 8) return { ok: false, reason: 'full' };
+  if (!(economy.revenue >= item.price)) return { ok: false, reason: 'money', cost: item.price };
+  economy.revenue -= item.price;
+  const d = {
+    id: nextDroneId++, kind, label: item.name, logicId: kind,
+    load: kind === 'drone_spray' ? 'pest' : null,
+    mode: 'park', busy: false, f: null, job: null, intent: null,
+    lane: 0, u: 0, x: 0, y: 1.5, z: 0, ang: 0, charge: 1,
+  };
+  workDrones.push(d);
+  parkDrone(d);
+  return { ok: true, cost: item.price, name: item.name, drone: d };
+}
+function restoreWorkDrones(list) {
+  workDrones.length = 0;
+  nextDroneId = 1;
+  if (!Array.isArray(list)) return;
+  for (const item of list) {
+    if (!DRONE_SHOP.some(s => s.id === item?.kind)) continue;
+    const spec = DRONE_SHOP.find(s => s.id === item.kind);
+    const d = {
+      id: nextDroneId++, kind: spec.id, label: spec.name, logicId: spec.id,
+      load: spec.id === 'drone_spray' ? 'pest' : null,
+      mode: 'park', busy: false, f: null, job: null, intent: null,
+      lane: 0, u: 0, x: 0, y: 1.5, z: 0, ang: 0, charge: 1,
+    };
+    workDrones.push(d);
+    parkDrone(d);
+  }
+}
+function droneFieldBusy(f, self) {
+  return workDrones.some(o => o !== self && o.f === f && (o.mode === 'work' || o.mode === 'travel' || o.mode === 'reload'));
+}
+function pickDroneAssignment(d) {
+  let best = null;
+  let bestKey = null;
+  for (const f of potatoLive) {
+    if (droneFieldBusy(f, d)) continue;
+    const def = cropOf(f);
+    if (!def) continue;
+    for (const job of def.jobs) {
+      if (!job.drone || !jobOpen(f, job) || !droneCan(d.kind, job)) continue;
+      const key = [d.f === f ? 0 : 1, job.order, f.idx];
+      if (!best || rankBetter(key, bestKey)) { best = { f, job }; bestKey = key; }
+    }
+  }
+  return best;
+}
+function launchDrone(d, f, job) {
+  d.f = f;
+  d.job = job.id;
+  d.busy = true;
+  d.mode = 'travel';
+  if (job.load && d.load !== job.load) {
+    d.intent = 'reload';
+    d.pendingLoad = job.load;
+    return;
+  }
+  d.intent = 'job';
+  const pose = workTarget(f, job.id);
+  d.tx = pose.x; d.tz = pose.z;
+}
+function stepDroneFly(d, dt, x, z) {
+  const dx = x - d.x, dz = z - d.z;
+  const dist = Math.hypot(dx, dz);
+  const leg = DRONE_MPS * dt;
+  d.y = dist < 4 && (d.intent === 'reload' || d.intent === 'home') ? 1.5 : 12;
+  if (dist < 1.4 || leg >= dist - 1e-6) {
+    d.x = x; d.z = z;
+    if (dist > 0.2) d.ang = Math.atan2(dz, dx);
+    return true;
+  }
+  d.x += dx / dist * leg;
+  d.z += dz / dist * leg;
+  d.ang = Math.atan2(dz, dx);
+  return false;
+}
+function beginDronePass(d) {
+  const f = d.f;
+  const job = f && cropOf(f)?.jobs.find(j => j.id === d.job);
+  if (!f || !job || !jobOpen(f, job)) { d.intent = 'home'; d.mode = 'travel'; return; }
+  const s = Math.min(Math.max(f.jobS[job.id] || 0, 0), L.LANES - 1e-4);
+  d.lane = Math.floor(s);
+  const frac = s - d.lane;
+  const dirp = d.lane % 2 === 0;
+  d.u = dirp ? frac * L.FIELD : (1 - frac) * L.FIELD;
+  d.mode = 'work';
+  d.intent = 'job';
+  const pose = workPose(f, d.lane, d.u);
+  d.x = pose.x; d.z = pose.z; d.ang = pose.ang; d.y = 8;
+}
+// 田块是齐的模块，机具幅宽盖得住，不做地边地角补喷。
+function stepDroneWork(d, dt) {
+  const f = d.f;
+  const key = d.job;
+  const job = f && cropOf(f)?.jobs.find(j => j.id === key);
+  if (!f || !job || !jobOpen(f, job)) { d.mode = 'travel'; d.intent = 'home'; return; }
+  ensureJobs(f);
+  const dirp = d.lane % 2 === 0;
+  const dest = dirp ? L.FIELD : 0;
+  const room = Math.abs(dest - d.u);
+  const leg = Math.min(DRONE_MPS * dt, room);
+  d.u += (dirp ? 1 : -1) * leg;
+  const pose = workPose(f, d.lane, d.u);
+  d.x = pose.x; d.z = pose.z; d.ang = pose.ang; d.y = 8;
+  f.jobS[key] = d.lane + (dirp ? d.u / L.FIELD : (L.FIELD - d.u) / L.FIELD);
+  if (leg < room - 1e-6) return;
+  f.jobS[key] = d.lane + 1;
+  if (d.lane + 1 >= L.LANES) {
+    f.jobS[key] = L.LANES;
+    d.mode = 'travel';
+    d.intent = 'home';
+    return;
+  }
+  d.lane += 1;
+  d.u = d.lane % 2 === 0 ? 0 : L.FIELD;
+  const next = workPose(f, d.lane, d.u);
+  d.x = next.x; d.z = next.z; d.ang = next.ang;
+}
+function stepWorkDrones(dt) {
+  if (!droneBase()) {
+    for (const d of workDrones) if (d.mode !== 'park') parkDrone(d);
+    return;
+  }
+  for (const d of workDrones) {
+    if (d.mode !== 'park') continue;
+    const next = pickDroneAssignment(d);
+    if (next) launchDrone(d, next.f, next.job);
+  }
+  for (const d of workDrones) {
+    if (d.mode === 'reload') {
+      d.serviceT -= dt;
+      d.y = 1.5;
+      const pad = dronePad(d);
+      d.x = pad.x; d.z = pad.z;
+      if (d.serviceT > 0) continue;
+      if (d.pendingLoad) d.load = d.pendingLoad;
+      d.mode = 'travel';
+      d.intent = 'job';
+      const pose = d.f && d.job ? workTarget(d.f, d.job) : null;
+      if (!pose) { d.intent = 'home'; continue; }
+      d.tx = pose.x; d.tz = pose.z;
+    } else if (d.mode === 'travel') {
+      if (d.intent === 'job' && d.tx == null && d.f && d.job) {
+        const pose = workTarget(d.f, d.job);
+        d.tx = pose.x; d.tz = pose.z;
+      }
+      const pad = dronePad(d);
+      const dest = d.intent === 'job' ? { x: d.tx, z: d.tz } : pad;
+      if (!stepDroneFly(d, dt, dest.x, dest.z)) continue;
+      if (d.intent === 'reload') { d.mode = 'reload'; d.serviceT = RELOAD_S; continue; }
+      if (d.intent === 'home') {
+        const nxt = pickDroneAssignment(d);
+        if (nxt && (!nxt.job.load || d.load === nxt.job.load)) launchDrone(d, nxt.f, nxt.job);
+        else parkDrone(d);
+        continue;
+      }
+      beginDronePass(d);
+    } else if (d.mode === 'work') stepDroneWork(d, dt);
+  }
 }
 function stepRigs(dt) {
   for (const r of rigs) {
@@ -765,36 +1254,72 @@ function stepRigs(dt) {
     if (r.mode === 'work') stepWork(r, dt);
     else if (r.mode === 'turn') stepTurn(r, dt);
     else if (r.mode === 'travel') stepTravel(r, dt);
+    else if (r.mode === 'service') stepService(r, dt);
+    else if (r.mode === 'switch') stepSwitch(r, dt);
+    else if (r.mode === 'unload' && rigHas(r.kind, 'impl_trailer')) stepUnload(r, dt);
   }
+  stepBoom(dt);
+  stepWorkDrones(dt);
 }
 function settlePotatoCalendar() {
   for (let i = potatoLive.length - 1; i >= 0; i--) {
     const f = potatoLive[i];
     if (!f.live || f.paid) { potatoLive.splice(i, 1); continue; }
-    if (f.plantedAt == null) continue;
-    const day = worldDay - f.plantedAt;
-    if (!f.sprayed && day >= JOBS.topper.at) {
-      f.sprayed = true;
-      if (stores.spray > 0) stores.spray -= 1;
+    const def = cropOf(f);
+    if (!def || f.plantedAt == null) continue;
+    ensureJobs(f);
+    if (!f.penalized) f.penalized = {};
+    if (f.yieldFactor == null) f.yieldFactor = 1;
+    const day = fieldDay(f);
+    for (const job of def.jobs) {
+      if (job.auto && day >= job.from) f.jobS[job.id] = L.LANES;
     }
-    // 自然阶段自己往前走。入仓只在收获机走完这一趟。窗口过了还没收，整块烂掉。
-    if (day >= POTATO_ROT_AT && (f.jobS?.lifter ?? 0) < L.LANES - 1e-3) {
+    for (const job of def.jobs) {
+      if (!job.required || job.auto || f.penalized[job.id]) continue;
+      const due = job.afterHarvest ? (f.harvested && day >= job.to) : day >= job.to;
+      if (!due) continue;
+      f.penalized[job.id] = true;
+      if (!jobDone(f, job.id)) f.yieldFactor = Math.max(0, f.yieldFactor - (job.penalty || JOB_PENALTY));
+    }
+    if (!f.queued) f.queued = {};
+    for (const job of def.jobs) {
+    if (job.auto || job.spray || !jobOpen(f, job) || f.queued[job.id]) continue;
+    const covered = job.drone ? workDrones.some(d => droneCan(d.kind, job)) : rigs.some(r => rigCan(r.kind, job));
+    if (covered) continue;
+      f.queued[job.id] = true;
+      log.push({ type: 'queue', pay: 0, name: job.name, i: f.i, j: f.j, t: worldDay });
+    }
+    const harvest = def.jobs.find(j => j.harvest);
+    if (!f.harvested && harvest && day >= def.rotAt && !jobDone(f, harvest.id)) {
       markRot(f);
       potatoLive.splice(i, 1);
     }
   }
 }
-function storePotato(f) {
+function maybeRelease(f) {
+  if (!f?.live || !f.stored || f.failed === 'rot') return;
+  const def = cropOf(f);
+  if (!def) return;
+  if (def.jobs.some(j => j.afterHarvest && !jobDone(f, j.id))) return;
+  releaseField(f);
+}
+function storeHarvest(f) {
+  if (!f?.live || f.failed === 'rot' || f.stored) return;
+  const def = cropOf(f);
+  if (def && fieldDay(f) >= def.rotAt) { markRot(f); dropPotato(f); return; }
   const crop = CROPS[f.crop];
+  const factor = f.yieldFactor == null ? 1 : f.yieldFactor;
   const lot = {
     id: nextLot++, crop: crop.id, name: crop.name,
-    liters: Math.round(FIELD_HA * crop.yieldL),
-    listPrice: quote(f.crop),
+    liters: Math.max(0, Math.round(FIELD_HA * crop.yieldL * factor)),
+    listPrice: Math.max(0, Math.round(quote(f.crop) * factor)),
+    quality: factor,
     i: f.i, j: f.j, t: worldDay,
   };
   warehouse.push(lot);
   log.push({ type: 'store', pay: 0, listPrice: lot.listPrice, crop: crop.id, name: crop.name, i: f.i, j: f.j, t: worldDay });
-  return lot;
+  f.stored = true;
+  f.harvested = true;
 }
 function markRot(f) {
   f.paid = false;
@@ -810,21 +1335,22 @@ function markRot(f) {
   delete f.jobS;
   log.push({ type: 'rot', pay: 0, name: '烂在地里', i: f.i, j: f.j, t: worldDay });
 }
-function fillCycleSupplies(autoBuy) {
-  const seedNeed = Math.max(0, SEED_PER_FIELD - stores.seed);
+function fillCycleSupplies(f, autoBuy) {
+  const def = (f && cropOf(f)) || cropDef('potato');
+  const seedId = def?.seed || 'seed';
+  const qty = def?.seedQty || SEED_PER_FIELD;
+  const seedNeed = Math.max(0, qty - (stores[seedId] || 0));
   const fertNeed = Math.max(0, Math.ceil(fertPlan().fromFert - stores.fertilizer - 1e-9));
   if ((seedNeed > 0 || fertNeed > 0) && !autoBuy) return false;
-  if (seedNeed > 0 && !buyItem('seed', seedNeed).ok) return false;
+  if (seedNeed > 0 && !buyItem(seedId, seedNeed).ok) return false;
   if (fertNeed > 0 && !buyItem('fertilizer', fertNeed).ok) return false;
-  return stores.seed >= SEED_PER_FIELD && stores.fertilizer + 1e-9 >= fertPlan().fromFert;
+  return (stores[seedId] || 0) >= qty && stores.fertilizer + 1e-9 >= fertPlan().fromFert;
 }
-function completeHarvest(f) {
-  if (!f?.live || f.failed === 'rot' || f.paid) return;
-  const day = f.plantedAt == null ? 0 : worldDay - f.plantedAt;
-  if (day >= POTATO_ROT_AT) { markRot(f); dropPotato(f); return; }
+function releaseField(f) {
+  if (!f?.live || f.failed === 'rot') return;
   const cycle = !!f.cycle;
   const autoBuy = !!f.autoBuy;
-  storePotato(f);
+  const cropId = CROPS[f.crop]?.id || 'potato';
   f.paid = true;
   f.live = false;
   f.hold = true;
@@ -834,27 +1360,44 @@ function completeHarvest(f) {
   f.claimed = false;
   f.plantedAt = null;
   f.failed = null;
+  f.harvested = false;
+  f.stored = false;
   delete f.jobS;
   dropPotato(f);
   f.cycle = cycle;
   f.autoBuy = autoBuy;
   if (cycle && seasonAllowsSow(f)) {
-    if (!fillCycleSupplies(autoBuy)) return;
-    plantField(f, 'potato', { cycle, autoBuy });
+    if (!fillCycleSupplies(f, autoBuy)) return;
+    plantField(f, cropId, { cycle, autoBuy });
   }
 }
 export function rigReadout(r) {
   if (!r) return null;
+  const aerial = r.kind === 'drone_scout' || r.kind === 'drone_spray';
   const moving = !paused && (r.mode === 'work' || r.mode === 'turn' || r.mode === 'travel');
-  const speed = moving ? MACHINE_MPS * economy.timeScale : 0;
-  let doing = '停在机库';
-  if (r.mode === 'turn') doing = '地头转弯';
-  else if (r.mode === 'travel') doing = r.intent === 'home' ? '返回机库' : '开往田块';
-  else if (r.mode === 'charge') doing = '充电';
-  else if (r.mode === 'work') doing = ACT[r.kind] || '作业';
+  const speed = moving ? (aerial ? DRONE_MPS : MACHINE_MPS) * economy.timeScale : 0;
+  let doing = aerial ? '停在基站' : '停在机库';
+  if (aerial && r.mode === 'reload') doing = '在基站装药';
+  else if (r.mode === 'turn') doing = '地头转弯';
+  else if (r.mode === 'need_unload') doing = '等侧卸';
+  else if (r.mode === 'unload') doing = '侧卸';
+  else if (r.mode === 'service') doing = r.serviceKind === 'reload' ? '装料' : '换挂具';
+  else if (r.mode === 'switch') doing = '换模式';
+  else if (r.mode === 'travel') {
+    if (r.intent === 'home') doing = aerial ? '返回基站' : '返回机库';
+    else if (r.intent === 'reload') doing = '回基站装药';
+    else if (r.intent === 'service') doing = '回库换装';
+    else if (r.intent === 'unload') doing = '去侧卸';
+    else if (r.intent === 'deliver') doing = '运往机库';
+    else doing = '开往田块';
+  } else if (r.mode === 'charge') doing = '充电';
+  else if (r.mode === 'work') {
+    const job = r.f && cropOf(r.f)?.jobs.find(j => j.id === r.job);
+    doing = job?.name || '作业';
+  }
   let frac = 0;
-  if (r.f?.jobS && JOBS[r.kind]) frac = Math.max(0, Math.min(1, r.f.jobS[r.kind] / L.LANES));
-  return { speed, doing, frac, charge: r.charge ?? 1 };
+  if (r.f?.jobS && r.job) frac = Math.max(0, Math.min(1, (r.f.jobS[r.job] || 0) / L.LANES));
+  return { speed, doing, frac, charge: r.charge ?? 1, job: r.job || null };
 }
 
 // 镜头落在中枢旁一块可播种的裸地上。远处留一台不入账的收割机，近景镜头仍有机器可读。
@@ -879,7 +1422,10 @@ export function rigReadout(r) {
   garageOrigin = { x: garageAt.x, z: garageAt.z };
   ['planter', 'hiller', 'topper', 'lifter'].forEach((kind, n) => {
     const x = garageAt.x - 18 + n * 12, z = garageAt.z + 22;
-    rigs.push({ id: n, kind, label: JOBS[kind].label, busy: false, f: null, mode: 'park', intent: null, route: null, ri: 0, charge: 1, lane: 0, u: 0, parkX: x, parkZ: z, x, z, ang: -Math.PI / 2 });
+    const profile = rigProfile(kind);
+    const rig = { id: n, kind, label: profile.label, logicId: profile.logicId, busy: false, f: null, job: null, mode: 'park', intent: null, route: null, ri: 0, charge: 1, lane: 0, u: 0, bin: 0, cargo: 0, parkX: x, parkZ: z, x, z, ang: -Math.PI / 2 };
+    bootRig(rig);
+    rigs.push(rig);
   });
   nextRigId = rigs.length;
   for (const [di, dj, kind] of [[3, 1, 'warehouse'], [3, 2, 'garage'], [3, 3, 'process']]) {
@@ -1152,9 +1698,13 @@ export function placeBuilding(x, z, kind = 'process') {
   if (!inPlayerPlot(x, z)) return { ok: false, reason: 'plot' };
   if (!onHubParcel(x, z)) return { ok: false, reason: 'field' };
   const spec = BUILDING_KINDS[kind] || BUILDING_KINDS.process;
+  const cost = spec.price || 0;
+  if (cost && !(economy.revenue >= cost)) return { ok: false, reason: 'money', cost };
+  if (cost) economy.revenue -= cost;
   const b = { id: nextBuilding++, kind: spec.id, name: spec.name, x, z, ang: 0 };
   buildings.push(b);
-  return { ok: true, building: b };
+  if (spec.id === 'drone_base') for (const d of workDrones) if (d.mode === 'park') parkDrone(d);
+  return { ok: true, building: b, cost };
 }
 export function removeBuilding(id) {
   const i = buildings.findIndex(b => b.id === id);
@@ -1237,7 +1787,13 @@ export function resetGame() {
     f.cycle = false;
     f.autoBuy = false;
     f.failed = null;
+    f.harvested = false;
+    f.stored = false;
+    f.yieldFactor = 1;
+    f.boomBusy = false;
     delete f.jobS;
+    delete f.penalized;
+    delete f.queued;
   }
   warehouse.length = 0;
   log.length = 0;
@@ -1252,13 +1808,19 @@ export function resetGame() {
   stores.feed = START_FEED;
   stores.peel = 0;
   stores.frass = 0;
+  stores.seed_soy = 0;
+  stores.seed_barley = 0;
+  stores.seedling_cabbage = 0;
+  boom = null;
+  workDrones.length = 0;
+  nextDroneId = 1;
   devices.length = 0;
   nextLot = 1;
   nextDevice = 1;
   blankTanks();
   restoreStarters();
   restoreFleet();
-  for (const r of rigs) parkRig(r, true);
+  for (const r of rigs) { r.bin = 0; r.cargo = 0; r.job = null; parkRig(r, true); }
   syncPotatoLive();
   rebuildDemo();
   assignIdleRigs();
@@ -1276,10 +1838,11 @@ function addRig(kind) {
   if (!spec) return null;
   const spot = parkSpot(rigs.length);
   const r = {
-    id: nextRigId++, kind, label: JOBS[kind]?.label || spec.name,
-    busy: false, f: null, mode: 'park', intent: null, route: null, ri: 0,
-    charge: 1, lane: 0, u: 0, parkX: spot.x, parkZ: spot.z, x: spot.x, z: spot.z, ang: -Math.PI / 2,
+    id: nextRigId++, kind, label: rigProfile(kind)?.label || spec.name, logicId: rigProfile(kind)?.logicId || kind,
+    busy: false, f: null, job: null, mode: 'park', intent: null, route: null, ri: 0,
+    charge: 1, lane: 0, u: 0, bin: 0, cargo: 0, parkX: spot.x, parkZ: spot.z, x: spot.x, z: spot.z, ang: -Math.PI / 2,
   };
+  bootRig(r);
   rigs.push(r);
   return r;
 }
@@ -1388,22 +1951,30 @@ export function plantField(f, cropId, opts = {}) {
   if (f.state === 3 || f.live) return { ok: false, reason: 'busy' };
   const crop = typeof cropId === 'number' ? cropId : CROPS.findIndex(c => c.id === cropId);
   if (crop < 0 || !CROPS[crop].plantable) return { ok: false, reason: 'crop' };
-  if (stores.seed < SEED_PER_FIELD) return { ok: false, reason: 'seed' };
+  const def = cropDef(CROPS[crop].id);
+  const seedId = def?.seed || 'seed';
+  const seedQty = def?.seedQty || SEED_PER_FIELD;
+  if ((stores[seedId] || 0) < seedQty) return { ok: false, reason: 'seed' };
   const fert = fertPlan();
   if (stores.fertilizer + 1e-9 < fert.fromFert) return { ok: false, reason: 'fertilizer' };
-  // 田面水费在产品表里（potato-field.utilities.water）。stub 为真时不扣，开局营收是 0 仍能播种。
-  if (!fieldRecipe.stub) payUtility(fieldRecipe.utilities, false);
-  stores.seed -= SEED_PER_FIELD;
+  const recipe = recipeById(FIELD_RECIPE[CROPS[crop].id] || '');
+  if (recipe && !recipe.stub) payUtility(recipe.utilities, false);
+  stores[seedId] -= seedQty;
   stores.fertilizer -= fert.fromFert;
   stores.frass -= fert.frass;
   f.crop = crop; f.state = 1; f.g = 0; f.s = 0; f.timer = 0;
   f.live = true; f.hold = false; f.frozen = false;
-  // 点种薯只是规划。120 日从播种机真正开始这一趟才计。
+  // 规划不算钟。第一趟作业开工才记 plantedAt。出苗要等播种走完。
   f.plantedAt = null; f.paid = false; f.sprayed = false; f.claimed = false; f.failed = null;
   f.cycle = !!opts.cycle;
   f.autoBuy = !!opts.autoBuy;
   f.planSeq = planSeq++;
-  f.jobS = blankJobs();
+  f.yieldFactor = 1;
+  f.penalized = {};
+  f.harvested = false;
+  f.stored = false;
+  f.boomBusy = false;
+  f.jobS = blankJobs(f);
   trackPotato(f);
   assignIdleRigs();
   return { ok: true, payout: quote(crop), name: CROPS[crop].name, day: worldDay };
@@ -1417,7 +1988,7 @@ export function exportSnapshot() {
     worldDay,
     revenue: economy.revenue,
     timeScale: economy.timeScale,
-    stores: { seed: stores.seed, fertilizer: stores.fertilizer, spray: stores.spray, feed: stores.feed, peel: stores.peel, frass: stores.frass },
+    stores: { seed: stores.seed, fertilizer: stores.fertilizer, spray: stores.spray, feed: stores.feed, peel: stores.peel, frass: stores.frass, seed_soy: stores.seed_soy || 0, seed_barley: stores.seed_barley || 0, seedling_cabbage: stores.seedling_cabbage || 0 },
     warehouse: warehouse.map(lot => ({ ...lot })),
     keepBuildings: true,
     buildings: buildings.map(b => ({ id: b.id, kind: b.kind, name: b.name, x: +b.x.toFixed(2), z: +b.z.toFixed(2), ang: b.ang || 0 })),
@@ -1436,9 +2007,11 @@ export function exportSnapshot() {
       growT: f.growT, live: !!f.live, hold: !!f.hold, plantedAt: f.plantedAt == null ? null : f.plantedAt, planSeq: f.planSeq || 0,
       paid: !!f.paid, sprayed: !!f.sprayed,
       cycle: !!f.cycle, autoBuy: !!f.autoBuy, failed: f.failed || null,
-      jobs: f.jobS ? { planter: +f.jobS.planter || 0, hiller: +f.jobS.hiller || 0, topper: +f.jobS.topper || 0, lifter: +f.jobS.lifter || 0 } : undefined,
+      harvested: !!f.harvested, stored: !!f.stored, yieldFactor: f.yieldFactor == null ? 1 : f.yieldFactor,
+      jobs: f.jobS ? Object.fromEntries(Object.entries(f.jobS).map(([k, v]) => [k, +v || 0])) : undefined,
     })),
     fleet: rigs.slice(4).map(r => ({ kind: r.kind })),
+    workDrones: workDrones.map(d => ({ kind: d.kind })),
     harvesters: harvesters.map(h => ({
       id: h.id, mode: h.mode, lane: h.lane, u: +h.u.toFixed(2),
       x: +h.x.toFixed(2), z: +h.z.toFixed(2), ang: +h.ang.toFixed(4),
@@ -1470,13 +2043,14 @@ export function applySnapshot(data) {
     if (s.planSeq) f.planSeq = +s.planSeq;
     f.paid = !!s.paid; f.sprayed = !!s.sprayed;
     f.cycle = !!s.cycle; f.autoBuy = !!s.autoBuy; f.failed = s.failed || null;
+    f.harvested = !!s.harvested; f.stored = !!s.stored;
+    f.yieldFactor = Number.isFinite(+s.yieldFactor) ? +s.yieldFactor : 1;
     f.claimed = false; f.frozen = false; f.owned = true;
-    if (s.jobs) {
-      f.jobS = {
-        planter: +s.jobs.planter || 0, hiller: +s.jobs.hiller || 0,
-        topper: +s.jobs.topper || 0, lifter: +s.jobs.lifter || 0,
-      };
-    } else if (f.live) f.jobS = blankJobs();
+    if (s.jobs && typeof s.jobs === 'object') {
+      f.jobS = {};
+      for (const k of Object.keys(s.jobs)) f.jobS[k] = +s.jobs[k] || 0;
+      ensureJobs(f);
+    } else if (f.live) f.jobS = blankJobs(f);
   }
   economy.revenue = +data.revenue || 0;
   if (data.stores) {
@@ -1486,7 +2060,11 @@ export function applySnapshot(data) {
     stores.feed = Number.isFinite(+data.stores.feed) ? +data.stores.feed : START_FEED;
     stores.peel = Number.isFinite(+data.stores.peel) ? +data.stores.peel : 0;
     stores.frass = Number.isFinite(+data.stores.frass) ? +data.stores.frass : 0;
+    stores.seed_soy = Number.isFinite(+data.stores.seed_soy) ? +data.stores.seed_soy : 0;
+    stores.seed_barley = Number.isFinite(+data.stores.seed_barley) ? +data.stores.seed_barley : 0;
+    stores.seedling_cabbage = Number.isFinite(+data.stores.seedling_cabbage) ? +data.stores.seedling_cabbage : 0;
   }
+  boom = null;
   if (data.timeScale) setTimeScale(data.timeScale);
   warehouse.length = 0;
   for (const lot of data.warehouse || []) {
@@ -1531,7 +2109,8 @@ export function applySnapshot(data) {
   simTime = worldDay;
   rebuildDemo();
   restoreFleet(data.fleet);
-  for (const r of rigs) parkRig(r, true);
+  restoreWorkDrones(data.workDrones);
+  for (const r of rigs) { r.bin = 0; r.cargo = 0; r.job = null; parkRig(r, true); }
   syncPotatoLive();
   assignIdleRigs();
   return true;
