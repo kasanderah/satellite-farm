@@ -14,7 +14,7 @@ import { VerticalTiltShiftShader } from 'three/addons/shaders/VerticalTiltShiftS
 import { PALETTE, CROPS, TEX_ID, L, fields, harvesters, haulers, drones, step, TRUNKS_X, TRUNKS_Z, depots, inCrater, ROADS, RING, LAYERS, CUT, wrapX, PLOT, economy, focus, signals, log, plantField, quote, setTimeScale, setPaused, paused, exportSnapshot, applySnapshot, fieldAtWorld, fieldAt, fieldOrigin, simTime, worldDay, stores, rigs, fieldVisual, cropWatch, POTATO_DAYS, POTATO_STAGES, warehouse, buildings, sellLot, sellStack, warehouseStacks, warehouseCapacity, placeBuilding, removeBuilding, rigReadout, SHOP, buySeed, buyItem, SEED_PER_FIELD, FERT_PER_FIELD, resetGame, CULTURES, DECK_CLIMATE, tanks, cultureWatch, startCulture, tendCulture, harvestCulture, BUILDING_KINDS, CULTURE_CELLS, tankSite, devices, potatoStock, fertPlan, cultureFeedPlan, millWatch, startMill, removeMill, orderProcess, HUB_SITES, cropDossier, MACHINE_SHOP, buyMachine, cropDef, boomWatch, rigProfile, DRONE_SHOP, workDrones, buyDrone, sectorLight, sectorWord, dayCenter, setWorldDay, RING_OMEGA } from './_shared.js';
 import { productById } from './products.js';
 import { NOISE, FARM, CURVE_DECL, CURVE_PROJECT } from './glsl.js';
-import { harvesterKit, haulerKit, droneKit, personKit, conveyorKit, depotKit, hubKit, plantGeometry, mastKit, irrigatorKit, growRackKit, tankKit, pumpKit, pipeRackKit, shedKit, warehouseKit, garageKit, processKit, cultureTankKit, armKit, deckLightKit, droneBaseKit } from './prefabs.js';
+import { harvesterKit, haulerKit, droneKit, personKit, conveyorKit, depotKit, hubKit, plantGeometry, mastKit, irrigatorKit, growRackKit, tankKit, pumpKit, pipeRackKit, shedKit, warehouseKit, garageKit, processKit, cultureTankKit, armKit, deckLightKit } from './prefabs.js';
 import { surfaceKits, hitchOffset } from './surface-kits.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CULT_EMPTY } from './lab-catalog.js';
@@ -761,9 +761,10 @@ const HV = harvesterKit();
 const H_NEAR = 80, PARKED = 14;
 const harvSet = instanced(HV, H_NEAR + PARKED);
 const RIG_CAP = 8;
+const RIG_SKIP = new Set(['orbit_boom', 'drone_scout', 'drone_treat', 'device_drone_base']);
 const rigMesh = {};
 for (const id of Object.keys(surfaceKits)) {
-  if (id === 'orbit_boom') continue;
+  if (RIG_SKIP.has(id)) continue;
   rigMesh[id] = instanced(surfaceKits[id], RIG_CAP);
 }
 const boomSet = instanced(surfaceKits.orbit_boom, 1);
@@ -778,13 +779,16 @@ const buildingSets = {
   garage: instanced(garageKit(), 8),
   process: instanced(processKit(), 8),
   shed: instanced(shedKit(), 8),
-  drone_base: instanced(droneBaseKit(), 4),
+  drone_base: instanced(surfaceKits.device_drone_base, 4),
 };
 const millSet = instanced(processKit(), 2);
 const parked = Array.from({ length: PARKED }, (_, n) => ({ x: HUBC + 85 + (n % 7) * 14.6, z: HUBC + 150 + Math.floor(n / 7) * 22, ang: -Math.PI / 2 }));
 const haulSet = instanced(haulerKit(), haulers.length);
 const droneSet = instanced(droneKit(), drones.length, false);
-const workDroneSet = instanced(droneKit(), 8, false);
+const workDroneMesh = {
+  drone_scout: instanced(surfaceKits.drone_scout, 8, false),
+  drone_treat: instanced(surfaceKits.drone_treat, 8, false),
+};
 // 小人：在中枢场地上散步
 const people = Array.from({ length: 46 }, (_, n) => ({ x: HUBC - 120 + hr() * 260, z: HUBC - 60 + hr() * 200, a: hr() * 6.28, sp: 0.6 + hr() * 0.8 }));
 const peopleSet = instanced(personKit(), people.length);
@@ -1344,7 +1348,7 @@ function applyDeckView() {
   setShown(millSet, grow);
   for (const k in rigMesh) setShown(rigMesh[k], !on);
   setShown(boomSet, !on);
-  setShown(workDroneSet, !on);
+  setShown(workDroneMesh, !on);
   setShown(edgeMesh, !on);
   if (netMesh) netMesh.visible = !on;
   icons.visible = !on;
@@ -1685,7 +1689,7 @@ function rigTitle(r) {
 }
 function rigLine(r) {
   const info = rigReadout(r);
-  const aerial = r.kind === 'drone_scout' || r.kind === 'drone_spray';
+  const aerial = r.kind === 'drone_scout' || r.kind === 'drone_treat';
   if (aerial) {
     const where = r.f ? ' · ' + fieldCode(r.f) : '';
     const band = info.light == null ? '' : ` · ${info.light > 0.82 ? '昼' : info.light < 0.18 ? '夜' : '晨昏'}`;
@@ -1825,7 +1829,7 @@ function paintSheet() {
         ? '通用拖拉机。按作业自动换挂：旋耕、施肥、薯播、精播、作畦、运输挂车。喷雾挂具留到病害。'
         : item.id === 'drone_scout'
           ? '从无人机基站起飞，只做田间侦察。没有基站不能买，也不进机库。'
-          : item.id === 'drone_spray'
+          : item.id === 'drone_treat'
             ? '从基站起飞，只做虫害防治。病害以后才用地喷和轨道喷杆。田是齐模块，不补边角。'
         : item.id === 'harvester_combine' || item.id === 'harvester_cabbage' || item.id === 'transplanter'
           ? '工坊锁定的低模剪影，买来就能按能力派单。'
@@ -2590,6 +2594,7 @@ function buildViewer() {
     tractor_gen: '通用拖拉机', harvester_combine: '联合收割机', harvester_potato: '薯类收获机', harvester_cabbage: '结球收获机', transplanter: '移栽机',
     impl_rotavator: '旋耕机', impl_subsoiler: '深松机', impl_cultivator: '中耕机', impl_fertilizer: '施肥机', impl_sprayer: '喷雾机',
     impl_seeder: '精量播种机', impl_potato_planter: '薯类播种机', impl_haulm: '打秧机', impl_trailer: '运输挂车', impl_bedder: '作畦机', orbit_boom: '轨道喷杆',
+    device_drone_base: '无人机基站', drone_scout: '侦察无人机', drone_treat: '植保无人机',
   };
   for (const id of Object.keys(kitName)) {
     const el = assetCard(kitName[id]); $('view-machines').appendChild(el);
@@ -2717,12 +2722,15 @@ function frame(now) {
     }
     if (r.busy && d < 700) for (let e = 0; e < 2; e++) emitDust(r.x, r.z, r.va);
   }
-  let wd = 0;
-  if (rigShown) for (const d of workDrones) {
-    if (wd >= 8 || inCut(d.x, d.z, 6)) continue;
-    setInst(workDroneSet, wd++, d.x, d.y || 1.5, d.z, d.ang || 0, 2.2);
+  const workCounts = { drone_scout: 0, drone_treat: 0 };
+  if (rigShown) for (const unit of workDrones) {
+    const id = unit.kind === 'drone_treat' ? 'drone_treat' : 'drone_scout';
+    const i = workCounts[id];
+    if (i >= 8 || inCut(unit.x, unit.z, 6)) continue;
+    setInst(workDroneMesh[id], i, unit.x, unit.y, unit.z, unit.ang || 0, 1);
+    workCounts[id] = i + 1;
   }
-  setCount(workDroneSet, rigShown ? wd : 0);
+  for (const id of Object.keys(workDroneMesh)) setCount(workDroneMesh[id], rigShown ? workCounts[id] : 0);
   const boomNow = rigShown ? boomWatch() : null;
   if (boomNow) setInst(boomSet, 0, boomNow.x, 0, boomNow.z, boomNow.ang + Math.PI / 2, 1);
   for (const k in rigMesh) setCount(rigMesh[k], rigShown ? (rigCounts[k] || 0) : 0);

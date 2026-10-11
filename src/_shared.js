@@ -225,7 +225,9 @@ export const WAREHOUSE_CAP = { maxSlots: null, maxLiters: null };
 export function passWorldDays() {
   return (L.LANES * L.FIELD) / (MACHINE_MPS * DAY_SECONDS);
 }
-export const economy = { revenue: 0, timeScale: 1 };
+// 重开和没有存档的新局都从这一笔营收开始，早期买得起基站和无人机。
+export const START_REVENUE = 1000000;
+export const economy = { revenue: START_REVENUE, timeScale: 1 };
 // 一块田用一份种薯、一份肥料。新游戏只带这一份，之后到商店买。价格是占位，和营收同一记账单位。
 const fieldRecipe = recipeById('potato-field');
 export const SEED_PER_FIELD = fieldRecipe.inputs.find(i => i.id === 'seed').qty;
@@ -352,9 +354,12 @@ export const MACHINE_SHOP = [
 // 无人机不进机库。基站在中枢买下之后，侦察和植保从基站起飞。
 export const DRONE_SHOP = [
   { id: 'drone_scout', name: '侦察无人机', price: 4500 },
-  { id: 'drone_spray', name: '植保无人机', price: 5200 },
+  { id: 'drone_treat', name: '植保无人机', price: 5200 },
 ];
 export const DRONE_MPS = 18;
+export const DRONE_PARK_Y = 0.28;
+export const DRONE_WORK_Y = 8;
+export const DRONE_CRUISE_Y = 12;
 export const workDrones = [];
 let nextDroneId = 1;
 export function droneBase() {
@@ -1105,16 +1110,24 @@ export function boomWatch() {
   const pose = workPose(boom.f, lane, frac * L.FIELD);
   return { x: pose.x, z: pose.z, ang: pose.ang, f: boom.f };
 }
+const DRONE_MARKS = [[-2.15, 0.45], [2.15, 0.45], [-2.15, 1.55], [2.15, 1.55], [0, 1.55], [0, 0.45], [-3.2, 0.45], [3.2, 0.45]];
+function canonDroneKind(kind) {
+  return kind === 'drone_spray' ? 'drone_treat' : kind;
+}
 function dronePad(d) {
   const base = droneBase();
   const i = Math.max(0, workDrones.indexOf(d));
-  if (base) return { x: base.x - 6 + (i % 4) * 4, z: base.z + 5 };
-  return { x: d.homeX ?? d.x, z: d.homeZ ?? d.z };
+  if (!base) return { x: d.homeX ?? d.x, z: d.homeZ ?? d.z };
+  const [ox, oz] = DRONE_MARKS[i % DRONE_MARKS.length];
+  const ang = base.ang || 0;
+  const c = Math.cos(ang);
+  const s = Math.sin(ang);
+  return { x: base.x + ox * c - oz * s, z: base.z + ox * s + oz * c };
 }
 function parkDrone(d) {
   const pad = dronePad(d);
   d.homeX = pad.x; d.homeZ = pad.z;
-  d.x = pad.x; d.z = pad.z; d.y = 1.5; d.ang = 0;
+  d.x = pad.x; d.z = pad.z; d.y = DRONE_PARK_Y; d.ang = d.kind === 'drone_treat' ? -0.35 : 0.4;
   d.mode = 'park'; d.busy = false; d.f = null; d.job = null; d.intent = null;
 }
 export function buyDrone(kind) {
@@ -1126,9 +1139,9 @@ export function buyDrone(kind) {
   economy.revenue -= item.price;
   const d = {
     id: nextDroneId++, kind, label: item.name, logicId: kind,
-    load: kind === 'drone_spray' ? 'pest' : null,
+    load: kind === 'drone_treat' ? 'pest' : null,
     mode: 'park', busy: false, f: null, job: null, intent: null,
-    lane: 0, u: 0, x: 0, y: 1.5, z: 0, ang: 0, charge: 1,
+    lane: 0, u: 0, x: 0, y: DRONE_PARK_Y, z: 0, ang: 0, charge: 1,
   };
   workDrones.push(d);
   parkDrone(d);
@@ -1139,13 +1152,14 @@ function restoreWorkDrones(list) {
   nextDroneId = 1;
   if (!Array.isArray(list)) return;
   for (const item of list) {
-    if (!DRONE_SHOP.some(s => s.id === item?.kind)) continue;
-    const spec = DRONE_SHOP.find(s => s.id === item.kind);
+    const kind = canonDroneKind(item?.kind);
+    if (!DRONE_SHOP.some(s => s.id === kind)) continue;
+    const spec = DRONE_SHOP.find(s => s.id === kind);
     const d = {
       id: nextDroneId++, kind: spec.id, label: spec.name, logicId: spec.id,
-      load: spec.id === 'drone_spray' ? 'pest' : null,
+      load: spec.id === 'drone_treat' ? 'pest' : null,
       mode: 'park', busy: false, f: null, job: null, intent: null,
-      lane: 0, u: 0, x: 0, y: 1.5, z: 0, ang: 0, charge: 1,
+      lane: 0, u: 0, x: 0, y: DRONE_PARK_Y, z: 0, ang: 0, charge: 1,
     };
     workDrones.push(d);
     parkDrone(d);
@@ -1187,7 +1201,7 @@ function stepDroneFly(d, dt, x, z) {
   const dx = x - d.x, dz = z - d.z;
   const dist = Math.hypot(dx, dz);
   const leg = DRONE_MPS * dt;
-  d.y = dist < 4 && (d.intent === 'reload' || d.intent === 'home') ? 1.5 : 12;
+  d.y = dist < 4 && (d.intent === 'reload' || d.intent === 'home') ? DRONE_PARK_Y : DRONE_CRUISE_Y;
   if (dist < 1.4 || leg >= dist - 1e-6) {
     d.x = x; d.z = z;
     if (dist > 0.2) d.ang = Math.atan2(dz, dx);
@@ -1210,7 +1224,7 @@ function beginDronePass(d) {
   d.mode = 'work';
   d.intent = 'job';
   const pose = workPose(f, d.lane, d.u);
-  d.x = pose.x; d.z = pose.z; d.ang = pose.ang; d.y = 8;
+  d.x = pose.x; d.z = pose.z; d.ang = pose.ang; d.y = DRONE_WORK_Y;
 }
 // 田块是齐的模块，机具幅宽盖得住，不做地边地角补喷。
 function stepDroneWork(d, dt) {
@@ -1225,7 +1239,7 @@ function stepDroneWork(d, dt) {
   const leg = Math.min(DRONE_MPS * dt, room);
   d.u += (dirp ? 1 : -1) * leg;
   const pose = workPose(f, d.lane, d.u);
-  d.x = pose.x; d.z = pose.z; d.ang = pose.ang; d.y = 8;
+  d.x = pose.x; d.z = pose.z; d.ang = pose.ang; d.y = DRONE_WORK_Y;
   f.jobS[key] = d.lane + (dirp ? d.u / L.FIELD : (L.FIELD - d.u) / L.FIELD);
   if (leg < room - 1e-6) return;
   f.jobS[key] = d.lane + 1;
@@ -1253,7 +1267,7 @@ function stepWorkDrones(dt) {
   for (const d of workDrones) {
     if (d.mode === 'reload') {
       d.serviceT -= dt;
-      d.y = 1.5;
+      d.y = DRONE_PARK_Y;
       const pad = dronePad(d);
       d.x = pad.x; d.z = pad.z;
       if (d.serviceT > 0) continue;
@@ -1415,7 +1429,7 @@ function releaseField(f) {
 }
 export function rigReadout(r) {
   if (!r) return null;
-  const aerial = r.kind === 'drone_scout' || r.kind === 'drone_spray';
+  const aerial = r.kind === 'drone_scout' || r.kind === 'drone_treat';
   const light = aerial ? sectorLight(r.x, worldDay) : null;
   const moving = !paused && (r.mode === 'work' || r.mode === 'turn' || r.mode === 'travel');
   const speed = moving ? (aerial ? DRONE_MPS : MACHINE_MPS) * economy.timeScale : 0;
@@ -1840,7 +1854,7 @@ export function resetGame() {
   }
   warehouse.length = 0;
   log.length = 0;
-  economy.revenue = 0;
+  economy.revenue = START_REVENUE;
   paused = false;
   worldDay = 0;
   simTime = 0;

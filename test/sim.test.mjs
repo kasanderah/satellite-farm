@@ -8,7 +8,7 @@ import {
   DAY_SECONDS, MACHINE_MPS, WORLD_MIN_PER_REAL_MIN, warehouse, sellLot, sellStack, warehouseCapacity, placeBuilding, removeBuilding, buildings, rigReadout,
   SHOP, buySeed, buyItem, SEED_PER_FIELD, resetGame, paused, onHubParcel, HUB_SITES, POTATO_STAGES, POTATO_ROT_AT, POTATO_DAYS, cropDef, cropDossier,
   seasonAllowsSow, fieldOps,
-  BATT_RANGE, BATT_LEAVE, MACHINE_SHOP, buyMachine, DRONE_SHOP, workDrones, buyDrone, droneBase, BUILDING_KINDS,
+  BATT_RANGE, BATT_LEAVE, MACHINE_SHOP, buyMachine, DRONE_SHOP, workDrones, buyDrone, droneBase, BUILDING_KINDS, START_REVENUE, DRONE_PARK_Y,
   sectorLight, dayCenter, RING_RPM, DAY_SECTOR, PENUMBRA, setWorldDay,
   CULTURES, tanks, startCulture, harvestCulture, CULTURE_CELLS, inPlotBlock, fieldOrigin,
   devices, potatoStock, fertPlan, cultureFeedPlan, millWatch, startMill, orderProcess, removeMill,
@@ -112,7 +112,7 @@ test('a potato follows one 120-day clock through ridges, vines, vine-kill, and p
   jump(85);
   assert.equal(cropWatch(bare).phase, 'potato_harvest');
   assert.equal(cropWatch(bare).label, '成熟待收');
-  assert.equal(economy.revenue, 0);
+  assert.equal(economy.revenue, START_REVENUE);
   assert.equal(warehouse.length, 0, 'maturity does not store the field');
   assert.equal(bare.live, true);
   assert.ok(fieldVisual(bare).g > 7 && fieldVisual(bare).g < 8, fieldVisual(bare).g);
@@ -127,12 +127,12 @@ test('a potato follows one 120-day clock through ridges, vines, vine-kill, and p
   let lifted = 0;
   while (warehouse.length < 1 && lifted < 8000) { step(0.5, 0, 1); lifted++; }
   const pay = quote(CROPS.findIndex(c => c.id === 'potato'));
-  assert.equal(economy.revenue, 0, 'harvest stores the potatoes');
+  assert.equal(economy.revenue, START_REVENUE, 'harvest stores the potatoes');
   assert.equal(warehouse.length, 1);
   assert.equal(warehouse[0].listPrice, pay);
   assert.equal(warehouse[0].crop, 'potato');
   assert.equal(sellLot(warehouse[0].id).listPrice, pay);
-  assert.equal(economy.revenue, pay);
+  assert.equal(economy.revenue, START_REVENUE + pay);
   assert.equal(warehouse.length, 0);
   assert.equal(sellLot(99), null);
   assert.equal(log.some(e => e.type === 'store' && e.i === bare.i), true);
@@ -355,7 +355,8 @@ test('reset drops the shed and returns a field that can be planted', () => {
   resetGame();
   assert.equal(paused, false);
   assert.equal(economy.timeScale, 1);
-  assert.equal(economy.revenue, 0);
+  assert.equal(economy.revenue, START_REVENUE);
+  assert.equal(START_REVENUE, 1000000);
   assert.equal(worldDay, 0);
   assert.equal(stores.seed, 1);
   assert.equal(stores.fertilizer, 1);
@@ -1060,7 +1061,7 @@ test('drones scout and treat from a base, not the machine garage', () => {
   resetGame();
   setPaused(false);
   assert.equal(BUILDING_KINDS.drone_base.name, '无人机基站');
-  assert.equal(DRONE_SHOP.map(d => d.id).join(','), 'drone_scout,drone_spray');
+  assert.equal(DRONE_SHOP.map(d => d.id).join(','), 'drone_scout,drone_treat');
   assert.equal(buyDrone('drone_scout').reason, 'base');
   assert.equal(workDrones.length, 0);
   assert.equal(rigs.length, 4);
@@ -1073,12 +1074,20 @@ test('drones scout and treat from a base, not the machine garage', () => {
   assert.equal(placed.cost, 8000);
   assert.equal(droneBase().kind, 'drone_base');
   assert.equal(buyDrone('drone_scout').ok, true);
-  assert.equal(buyDrone('drone_spray').ok, true);
+  assert.equal(buyDrone('drone_treat').ok, true);
+  assert.equal(buyDrone('drone_spray').reason, 'kind');
   assert.equal(workDrones.length, 2);
   assert.equal(rigs.length, 4);
-  assert.ok(workDrones.every(d => Math.hypot(d.x - droneBase().x, d.z - droneBase().z) < 20));
+  assert.ok(workDrones.every(d => Math.hypot(d.x - droneBase().x, d.z - droneBase().z) < 4));
+  assert.ok(workDrones.every(d => Math.abs(d.y - DRONE_PARK_Y) < 1e-6));
+  const legacy = exportSnapshot();
+  legacy.workDrones = [{ kind: 'drone_scout' }, { kind: 'drone_spray' }];
+  assert.equal(applySnapshot(legacy), true);
+  assert.deepEqual(workDrones.map(d => d.kind), ['drone_scout', 'drone_treat']);
+  assert.equal(workDrones[1].load, 'pest');
+  assert.ok(workDrones.every(d => Math.hypot(d.x - droneBase().x, d.z - droneBase().z) < 4));
   const scout = workDrones.find(d => d.kind === 'drone_scout');
-  const spray = workDrones.find(d => d.kind === 'drone_spray');
+  const spray = workDrones.find(d => d.kind === 'drone_treat');
   stores.seed = 2;
   stores.fertilizer = 2;
   const f = fieldAt(focus.i, focus.j);

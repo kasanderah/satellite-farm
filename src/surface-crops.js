@@ -333,7 +333,7 @@ export function rigProfile(kind) {
 // 侦察和虫害防治不进机库。病害喷雾以后才交给 impl_sprayer / orbit_boom。
 export const DRONE_PROFILE = {
   drone_scout: { logicId: 'drone_scout', label: '侦察无人机', caps: [{ id: 'scout' }] },
-  drone_spray: { logicId: 'drone_spray', label: '植保无人机', caps: [{ id: 'pest_treat' }] },
+  drone_treat: { logicId: 'drone_treat', label: '植保无人机', caps: [{ id: 'pest_treat' }] },
 };
 
 export function droneCan(kind, job) {

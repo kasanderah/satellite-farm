@@ -8,6 +8,7 @@ const IDS = [
   'tractor_gen', 'harvester_combine', 'harvester_potato', 'harvester_cabbage', 'transplanter',
   'impl_rotavator', 'impl_subsoiler', 'impl_cultivator', 'impl_fertilizer', 'impl_sprayer',
   'impl_seeder', 'impl_potato_planter', 'impl_haulm', 'impl_trailer', 'impl_bedder', 'orbit_boom',
+  'drone_scout', 'drone_treat', 'device_drone_base',
 ];
 
 function studioApi() {
@@ -42,8 +43,20 @@ function colorOf(material, role) {
   return material.color.clone();
 }
 
-function bakeOne(build) {
+function stripCraft(group) {
+  const doomed = [];
+  group.traverse(obj => { if (obj.userData?.kind) doomed.push(obj); });
+  for (const obj of doomed) {
+    obj.parent?.remove(obj);
+    obj.traverse(child => {
+      if (child.geometry && !child.geometry.userData.shared) child.geometry.dispose();
+    });
+  }
+}
+
+function bakeOne(build, opts = {}) {
   const made = build();
+  if (opts.stripCraft) stripCraft(made.group);
   if (made.ring?.parent) made.ring.parent.remove(made.ring);
   made.group.updateMatrixWorld(true);
   const kit = new Kit();
@@ -83,7 +96,7 @@ const builders = createSurfaceBuilders(studioApi());
 export const surfaceKits = {};
 const span = {};
 for (const id of IDS) {
-  surfaceKits[id] = bakeOne(builders[id]);
+  surfaceKits[id] = bakeOne(builders[id], { stripCraft: id === 'device_drone_base' });
   span[id] = spanOf(surfaceKits[id]);
 }
 
