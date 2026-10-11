@@ -9,6 +9,7 @@ import {
   SHOP, buySeed, buyItem, SEED_PER_FIELD, resetGame, paused, onHubParcel, HUB_SITES, POTATO_STAGES, POTATO_ROT_AT, POTATO_DAYS, cropDef, cropDossier,
   seasonAllowsSow, fieldOps,
   BATT_RANGE, BATT_LEAVE, MACHINE_SHOP, buyMachine, DRONE_SHOP, workDrones, buyDrone, droneBase, BUILDING_KINDS,
+  sectorLight, dayCenter, RING_RPM, DAY_SECTOR, PENUMBRA, setWorldDay,
   CULTURES, tanks, startCulture, harvestCulture, CULTURE_CELLS, inPlotBlock, fieldOrigin,
   devices, potatoStock, fertPlan, cultureFeedPlan, millWatch, startMill, orderProcess, removeMill,
 } from '../src/_shared.js';
@@ -1102,4 +1103,19 @@ test('drones scout and treat from a base, not the machine garage', () => {
     rigs.slice(0, 4).forEach((r, i) => { r.kind = starterKinds[i]; });
     resetGame();
   }
+});
+
+test('sector mirrors sweep a 180 degree day around the ring', () => {
+  assert.ok(Math.abs(RING.R - 10618.8) < 1, RING.R);
+  assert.equal(RING_RPM, 0.29);
+  assert.equal(DAY_SECTOR, Math.PI);
+  assert.ok(Math.abs(PENUMBRA - 8 * Math.PI / 180) < 1e-9);
+  assert.ok(sectorLight(0, 0) > 0.99);
+  assert.ok(sectorLight(RING.CIRC / 2, 0) < 0.02);
+  assert.ok(sectorLight(0, 0.5) < 0.02);
+  assert.ok(sectorLight(RING.CIRC / 2, 0.5) > 0.99);
+  const terminator = RING.CIRC * 0.25;
+  assert.ok(Math.abs(sectorLight(terminator, 0) - 0.5) < 0.02);
+  assert.equal(dayCenter(1.25), dayCenter(0.25));
+  setWorldDay(0);
 });

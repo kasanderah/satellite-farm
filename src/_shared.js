@@ -78,6 +78,13 @@ RING.Z_IN = L.Z0 - L.TRUNK;                              // 农田区 z 下界
 RING.Z_OUT = L.Z0 + L.NBZ * L.BP;                         // 农田区 z 上界
 RING.WALL_A = RING.Z_IN - RING.APRON; RING.WALL_B = RING.Z_OUT + RING.APRON;   // 两侧环壁内表面
 RING.W = RING.WALL_B - RING.WALL_A;
+// 1g 自旋。镜头钉在环架上，所以转的是星空和轴端太阳，不是脚下的田。
+// ω²R ≈ g：0.29 rpm × RING.R。一天的日照不靠这次自旋，靠下面的扇区镜。
+export const RING_RPM = 0.29;
+export const RING_OMEGA = RING_RPM * 2 * Math.PI / 60;
+// 南极轴端镜组相对环带一天扫一圈。昼区 180°，晨昏各 8°（落在 5–10° 半影里）。
+export const DAY_SECTOR = Math.PI;
+export const PENUMBRA = 8 * Math.PI / 180;
 L.CURVE_R = RING.R;
 // 这一切片只经营一个人的田区：环带宽约 4 km，沿环再取 7 个区 ≈ 3.9 km。
 // 中枢落在这片田区里。环上其余田块是邻区的冻结快照（不生长、不入账），留给以后的异步多人。
@@ -258,6 +265,41 @@ export let paused = false;
 export function setPaused(v) { paused = !!v; }
 export let simTime = 0;
 export let worldDay = 0;
+export function setWorldDay(day) {
+  worldDay = +day || 0;
+  simTime = worldDay;
+}
+// 昼区中心在环向上的角。一世界日走一整圈，加速时跟这口钟，不跟墙钟。
+export function dayCenter(day = worldDay) {
+  const tau = Math.PI * 2;
+  let a = (day % 1) * tau;
+  if (a < 0) a += tau;
+  return a;
+}
+// 地块日照 0–1。圆心角 DAY_SECTOR 为昼，边界两侧各 PENUMBRA 是晨昏。
+export function sectorLight(x, day = worldDay) {
+  const tau = Math.PI * 2;
+  const circ = RING.CIRC;
+  let u = x % circ;
+  if (u < 0) u += circ;
+  const ang = (u / circ) * tau;
+  let d = Math.abs(ang - dayCenter(day));
+  if (d > Math.PI) d = tau - d;
+  const half = DAY_SECTOR * 0.5;
+  const inner = half - PENUMBRA;
+  const outer = half + PENUMBRA;
+  if (d <= inner) return 1;
+  if (d >= outer) return 0;
+  const t = (d - inner) / (outer - inner);
+  const s = t * t * (3 - 2 * t);
+  return 1 - s;
+}
+export function sectorWord(x, day = worldDay) {
+  const light = sectorLight(x, day);
+  if (light > 0.82) return '昼';
+  if (light < 0.18) return '夜';
+  return '晨昏';
+}
 export const log = [];
 export const focus = { x: 0, z: 0, i: 0, j: 0 };
 export const signals = [];
@@ -1374,6 +1416,7 @@ function releaseField(f) {
 export function rigReadout(r) {
   if (!r) return null;
   const aerial = r.kind === 'drone_scout' || r.kind === 'drone_spray';
+  const light = aerial ? sectorLight(r.x, worldDay) : null;
   const moving = !paused && (r.mode === 'work' || r.mode === 'turn' || r.mode === 'travel');
   const speed = moving ? (aerial ? DRONE_MPS : MACHINE_MPS) * economy.timeScale : 0;
   let doing = aerial ? '停在基站' : '停在机库';
@@ -1397,7 +1440,7 @@ export function rigReadout(r) {
   }
   let frac = 0;
   if (r.f?.jobS && r.job) frac = Math.max(0, Math.min(1, (r.f.jobS[r.job] || 0) / L.LANES));
-  return { speed, doing, frac, charge: r.charge ?? 1, job: r.job || null };
+  return { speed, doing, frac, charge: r.charge ?? 1, job: r.job || null, light };
 }
 
 // 镜头落在中枢旁一块可播种的裸地上。远处留一台不入账的收割机，近景镜头仍有机器可读。

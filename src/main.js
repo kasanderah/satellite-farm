@@ -11,7 +11,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { HorizontalTiltShiftShader } from 'three/addons/shaders/HorizontalTiltShiftShader.js';
 import { VerticalTiltShiftShader } from 'three/addons/shaders/VerticalTiltShiftShader.js';
-import { PALETTE, CROPS, TEX_ID, L, fields, harvesters, haulers, drones, step, TRUNKS_X, TRUNKS_Z, depots, inCrater, ROADS, RING, LAYERS, CUT, wrapX, PLOT, economy, focus, signals, log, plantField, quote, setTimeScale, setPaused, paused, exportSnapshot, applySnapshot, fieldAtWorld, fieldAt, fieldOrigin, simTime, worldDay, stores, rigs, fieldVisual, cropWatch, POTATO_DAYS, POTATO_STAGES, warehouse, buildings, sellLot, sellStack, warehouseStacks, warehouseCapacity, placeBuilding, removeBuilding, rigReadout, SHOP, buySeed, buyItem, SEED_PER_FIELD, FERT_PER_FIELD, resetGame, CULTURES, DECK_CLIMATE, tanks, cultureWatch, startCulture, tendCulture, harvestCulture, BUILDING_KINDS, CULTURE_CELLS, tankSite, devices, potatoStock, fertPlan, cultureFeedPlan, millWatch, startMill, removeMill, orderProcess, HUB_SITES, cropDossier, MACHINE_SHOP, buyMachine, cropDef, boomWatch, rigProfile, DRONE_SHOP, workDrones, buyDrone } from './_shared.js';
+import { PALETTE, CROPS, TEX_ID, L, fields, harvesters, haulers, drones, step, TRUNKS_X, TRUNKS_Z, depots, inCrater, ROADS, RING, LAYERS, CUT, wrapX, PLOT, economy, focus, signals, log, plantField, quote, setTimeScale, setPaused, paused, exportSnapshot, applySnapshot, fieldAtWorld, fieldAt, fieldOrigin, simTime, worldDay, stores, rigs, fieldVisual, cropWatch, POTATO_DAYS, POTATO_STAGES, warehouse, buildings, sellLot, sellStack, warehouseStacks, warehouseCapacity, placeBuilding, removeBuilding, rigReadout, SHOP, buySeed, buyItem, SEED_PER_FIELD, FERT_PER_FIELD, resetGame, CULTURES, DECK_CLIMATE, tanks, cultureWatch, startCulture, tendCulture, harvestCulture, BUILDING_KINDS, CULTURE_CELLS, tankSite, devices, potatoStock, fertPlan, cultureFeedPlan, millWatch, startMill, removeMill, orderProcess, HUB_SITES, cropDossier, MACHINE_SHOP, buyMachine, cropDef, boomWatch, rigProfile, DRONE_SHOP, workDrones, buyDrone, sectorLight, sectorWord, dayCenter, setWorldDay, RING_OMEGA } from './_shared.js';
 import { productById } from './products.js';
 import { NOISE, FARM, CURVE_DECL, CURVE_PROJECT } from './glsl.js';
 import { harvesterKit, haulerKit, droneKit, personKit, conveyorKit, depotKit, hubKit, plantGeometry, mastKit, irrigatorKit, growRackKit, tankKit, pumpKit, pipeRackKit, shedKit, warehouseKit, garageKit, processKit, cultureTankKit, armKit, deckLightKit, droneBaseKit } from './prefabs.js';
@@ -59,6 +59,12 @@ const U = {
   uSelOn: { value: 0 },
   uOpen: { value: 0 },
   uPlot: { value: new THREE.Vector4(PLOT.x0, PLOT.x1, PLOT.z0, PLOT.z1) },
+  uDayCenter: { value: 0 },
+  uCirc: { value: RING.CIRC },
+  uHalfDay: { value: Math.PI / 2 },
+  uPenumbra: { value: 8 * DEG },
+  uLocalDay: { value: 1 },
+  uMirrorOn: { value: 1 },
 };
 // 按期望法线确定三角形绕序（正面朝外，避免被背面剔除 / 双面材质翻转法线）
 function pushQuad(pos, A, B, Cc, D, n) {
@@ -117,15 +123,18 @@ MAT.ground = new THREE.MeshStandardMaterial({ roughness: 0.92, metalness: 0, env
 MAT.crop = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8, metalness: 0, side: THREE.DoubleSide, envMapIntensity: 0.35 });
 
 // ---------------- 天空 + 气态巨行星（压低彩度的背景天体） ----------------
-const SUN_EL = 21 * DEG, SUN_AZ = -38 * DEG; // 方位：镜头默认朝 -z，太阳在左前方 38°
+// 田间补光来自南极镜组，方向钉在环架上，不跟自旋走。低角度是为了垄沟还有影子。
+const SUN_EL = 21 * DEG, SUN_AZ = -38 * DEG;
 const sunDir = new THREE.Vector3(Math.sin(SUN_AZ) * Math.cos(SUN_EL), Math.sin(SUN_EL), -Math.cos(SUN_AZ) * Math.cos(SUN_EL)).normalize();
 U.uSunXZ.value.set(sunDir.x, sunDir.z).normalize(); U.uSunTan.value = Math.tan(SUN_EL);
+// 轮轴大致朝日：太阳离北极约 28°，环一转它绕轴画一小圈。星星走满圈。
+const AXIS_SUN = new THREE.Vector3(-Math.sin(28 * DEG), 0.12, Math.cos(28 * DEG)).normalize();
 const FOG_DAY = new THREE.Color('#868d8f'), FOG_FAR = new THREE.Color('#b4babb'), FOG_NIGHT = new THREE.Color('#1b1f27'), FOG_DECK = new THREE.Color('#2a3138');
 scene.fog = new THREE.FogExp2(FOG_DAY.clone(), 0.0002);
 const sky = new THREE.Mesh(new THREE.SphereGeometry(1, 48, 24), new THREE.ShaderMaterial({
   side: THREE.BackSide, depthWrite: false, depthTest: false, fog: false,
   uniforms: {
-    uSun: { value: sunDir }, uFog: { value: scene.fog.color }, uNight: U.uNight,
+    uSun: { value: AXIS_SUN }, uSpin: { value: 0 }, uFog: { value: scene.fog.color }, uNight: U.uNight,
     uZen: { value: C('deep') }, uVoid: { value: C('void') },
     // 母星（气态巨行星）：挂在左侧环壁上方，环带拱顶的旁边
     uPDir: { value: new THREE.Vector3(-0.80, 0.30, 0.52).normalize() },
@@ -133,35 +142,38 @@ const sky = new THREE.Mesh(new THREE.SphereGeometry(1, 48, 24), new THREE.Shader
   },
   vertexShader: /* glsl */`varying vec3 vDir; void main(){ vDir = position; vec4 p = projectionMatrix * vec4(mat3(viewMatrix) * position, 1.0); gl_Position = p.xyww; }`,
   fragmentShader: /* glsl */`
-    varying vec3 vDir; uniform vec3 uSun, uFog, uZen, uVoid, uPDir, uPA, uPB, uRim; uniform float uPRad, uNight;
+    varying vec3 vDir; uniform vec3 uSun, uFog, uZen, uVoid, uPDir, uPA, uPB, uRim; uniform float uPRad, uNight, uSpin;
     ${NOISE}
+    vec3 inertial(vec3 p){ float c = cos(uSpin), s = sin(uSpin); return vec3(c * p.x - s * p.y, s * p.x + c * p.y, p.z); }
     void main(){
       vec3 v = normalize(vDir);
+      vec3 iv = inertial(v);
       float el = asin(clamp(v.y, -1., 1.));
       // 环带内看出去就是太空：深色背景，只在环带平面附近有一层很淡的大气辉光（不再是一条白色地平线带）
       vec3 col = mix(uZen * 1.15, uVoid, smoothstep(0.0, 0.55, abs(el)));
       col += uFog * 0.16 * exp(-abs(el) * 7.);
-      float sd = max(dot(v, uSun), 0.);
+      // 太阳和星星在惯性系里。环架自转时，它们相对田面转，地平线辉光留在环上。
+      float sd = max(dot(iv, uSun), 0.);
       col += vec3(1.0, 0.72, 0.5) * (pow(sd, 14.) * 0.28 + pow(sd, 900.) * 6.0) * (1. - uNight * 0.85);
-      // 星星：很淡，环带下方（环壁外）也有
-      vec2 sp = vec2(atan(v.z, v.x) * 260., el * 260.);
+      float iel = asin(clamp(iv.y, -1., 1.));
+      vec2 sp = vec2(atan(iv.z, iv.x) * 260., iel * 260.);
       float st = step(0.9972, hash12(floor(sp))) * (0.5 + 0.5 * hash12(floor(sp) + 3.));
       col += st * (0.16 + uNight * 0.8) * (1. - pow(sd, 6.));
       // 母星：不透明的实心球体（受光面 + 明暗交界 + 低彩度条纹），不再是半透明的白色剪影
       float D = 1.0, r = sin(uPRad);
-      float b = dot(v, uPDir), h2 = b * b - (D * D - r * r);
+      float b = dot(iv, uPDir), h2 = b * b - (D * D - r * r);
       float tP = 1e9;
       vec3 pc = uPDir * D;
       vec3 axis = normalize(vec3(0.3, 1.0, 0.18));
       if (h2 > 0.) {
         tP = b - sqrt(h2);
-        vec3 n = normalize(v * tP - pc);
+        vec3 n = normalize(iv * tP - pc);
         float lat = dot(n, axis);
         float band = fbm(vec2(lat * 8.0, lat * 2.0 + 3.1)) * 0.7 + 0.3 * (0.5 + 0.5 * sin(lat * 29.));
         vec3 pcol = mix(uPA * 0.62, uPB * 0.82, band);
         float ndl = dot(n, uSun);
         float lit = smoothstep(-0.06, 0.45, ndl);
-        float limb = 1. - max(dot(n, -v), 0.);
+        float limb = 1. - max(dot(n, -iv), 0.);
         vec3 pl = pcol * (0.018 + 0.62 * lit) * (1. - 0.45 * limb * limb) + uRim * pow(limb, 3.) * 0.22 * smoothstep(-0.25, 0.25, ndl);
         // 环在星体上的影子：一条细暗带
         float rs = abs(dot(n * r, axis) / max(abs(dot(uSun, axis)), 0.2));
@@ -170,9 +182,9 @@ const sky = new THREE.Mesh(new THREE.SphereGeometry(1, 48, 24), new THREE.Shader
         col = mix(col, pl * (1. - uNight * 0.6) + uFog * 0.03, edge);
       }
       // 环：与赤道面求交；受光强度随太阳与环面的夹角，被星体挡住的部分在阴影里
-      float tR = dot(pc, axis) / dot(v, axis);
+      float tR = dot(pc, axis) / dot(iv, axis);
       if (tR > 0. && tR < tP) {
-        vec3 rp = v * tR - pc; float rr = length(rp) / r;
+        vec3 rp = iv * tR - pc; float rr = length(rp) / r;
         float ring = smoothstep(1.42, 1.48, rr) * (1. - smoothstep(2.1, 2.2, rr)) * (0.35 + 0.65 * fbm(vec2(rr * 22., 1.)));
         ring *= 1. - 0.75 * smoothstep(1.72, 1.75, rr) * (1. - smoothstep(1.81, 1.84, rr));   // 卡西尼缝
         float shd = 1.; float ad = dot(rp, uSun); if (ad < 0.) shd = smoothstep(r * 0.92, r * 1.08, length(rp - uSun * ad));
@@ -268,12 +280,21 @@ MAT.ground.onBeforeCompile = (s) => {
   s.fragmentShader = s.fragmentShader
     .replace('#include <common>', `#include <common>
 varying vec3 vWP;
-uniform float uTime, uSunTan, uCarto, uMap, uNight, uCamDist, uCutOn, uSelOn, uOpen; uniform vec2 uSunXZ; uniform vec4 uPlantWin, uCut, uSel, uPlot;
+uniform float uTime, uSunTan, uCarto, uMap, uNight, uCamDist, uCutOn, uSelOn, uOpen, uDayCenter, uCirc, uHalfDay, uPenumbra, uLocalDay, uMirrorOn; uniform vec2 uSunXZ; uniform vec4 uPlantWin, uCut, uSel, uPlot;
 ${Object.keys(GC).map(k => 'uniform vec3 g_' + k + ';').join('\n')}
 ${NOISE}
 ${FARM}
 float gShadow = 1.0, gRough = 0.92; vec2 gTilt = vec2(0.); vec3 gOv = vec3(0.); float gOvA = 0.;
 float aaLine(float x, float w){ float fw = fwidth(x); return 1. - smoothstep(w - fw, w + fw, abs(x)); }
+float mirrorDay(float x){
+  float ang = mod(x, uCirc) / uCirc * 6.2831853;
+  if (ang < 0.0) ang += 6.2831853;
+  float d = abs(ang - uDayCenter); d = min(d, 6.2831853 - d);
+  float inner = uHalfDay - uPenumbra, outer = uHalfDay + uPenumbra;
+  float t = clamp((d - inner) / max(outer - inner, 1e-4), 0.0, 1.0);
+  t = t * t * (3.0 - 2.0 * t);
+  return 1.0 - t;
+}
 // 作物冠层颜色（随生长度沿明度渐变：幼苗 → 成熟）
 vec3 cropCol(int c, float g){ return mix(uCropYoung[c], uCropRipe[c], smoothstep(0.45, 1.0, g)); }
 vec3 farmAlbedo(vec2 p){
@@ -538,7 +559,12 @@ vec3 farmAlbedo(vec2 p){
     .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = gRough;')
     .replace('#include <normal_fragment_begin>', '#include <normal_fragment_begin>\n normal = normalize(normal + (viewMatrix * vec4(gTilt.x, 0., gTilt.y, 0.)).xyz);')
     .replace('#include <lights_fragment_begin>', THREE.ShaderChunk.lights_fragment_begin.replace('getDirectionalLightInfo( directionalLight, directLight );', 'getDirectionalLightInfo( directionalLight, directLight );\n directLight.color *= gShadow;'))
-    .replace('#include <opaque_fragment>', 'outgoingLight = mix(outgoingLight, gOv, gOvA);\n#include <opaque_fragment>');
+    .replace('#include <opaque_fragment>', `outgoingLight = mix(outgoingLight, gOv, gOvA);
+ if (uMirrorOn > 0.5) {
+   float band = mix(0.1, 1.0, mirrorDay(vWP.x));
+   outgoingLight *= band / max(uLocalDay, 0.1);
+ }
+#include <opaque_fragment>`);
 };
 
 // ---------------- 环壁：两侧各一道，随环带卷曲（内侧面板 + 扶壁节奏 + 顶部悬挑灯带；外侧面能看到地下各层的窗带） ----------------
@@ -1662,8 +1688,9 @@ function rigLine(r) {
   const aerial = r.kind === 'drone_scout' || r.kind === 'drone_spray';
   if (aerial) {
     const where = r.f ? ' · ' + fieldCode(r.f) : '';
-    if (!r.busy) return '停在基站';
-    return `${info.doing}${where}`;
+    const band = info.light == null ? '' : ` · ${info.light > 0.82 ? '昼' : info.light < 0.18 ? '夜' : '晨昏'}`;
+    if (!r.busy) return `停在基站${band}`;
+    return `${info.doing}${where}${band}`;
   }
   const pct = Math.round((info.charge ?? 1) * 100);
   if (!r.busy && r.mode !== 'charge') return `停在机库 · 电 ${pct}%`;
@@ -2278,7 +2305,10 @@ function paintWorldClock() {
   if (hour) hour.style.transform = `rotate(${((c.hh % 12) + c.mm / 60) * 30}deg)`;
   if (minute) minute.style.transform = `rotate(${c.mm * 6}deg)`;
   const clock = $('clock');
-  if (clock) clock.textContent = paused ? `第 ${c.day} 日 · ${c.hm} · 暂停` : `第 ${c.day} 日 · ${c.hm}`;
+  if (clock) {
+    const band = viewLayer === 'surface' && !camS.deck ? ` · ${sectorWord(camS.x, worldDay)}` : '';
+    clock.textContent = paused ? `第 ${c.day} 日 · ${c.hm}${band} · 暂停` : `第 ${c.day} 日 · ${c.hm}${band}`;
+  }
 }
 function updateDock() {
   const el = $('dock');
@@ -2606,13 +2636,21 @@ function frame(now) {
   U.uCurve.value.set(cam.position.x, 0, RING.R);
   { const gx = Math.round(cam.position.x / (RING.CIRC / 760)) * (RING.CIRC / 760); ground.position.set(gx, 0, 0); walls.position.set(gx, 0, 0); }
   sky.position.copy(cam.position); sky.scale.setScalar(cam.far * 0.9);
-  // 昼夜 / 地图模式过渡
-  U.uNight.value += (nightT - U.uNight.value) * Math.min(1, dt * 2); U.uMap.value += (mapT - U.uMap.value) * Math.min(1, dt * 3);
-  const nt = U.uNight.value;
-  sun.color.set('#ffd9b0').lerp(new THREE.Color('#9fb4d0'), nt); sun.intensity = 3.6 * (1 - nt) + 0.35 * nt;
-  hemi.color.set('#5f7480'); hemi.groundColor.set('#2a2622');
-  hemi.intensity = 0.42 * (1 - nt) + 0.22 * nt; scene.environmentIntensity = 0.45 * (1 - nt) + 0.12 * nt;
+  // 环架自旋只转天空。扇区镜的明带跟世界钟走，培育层不跟。
+  sky.material.uniforms.uSpin.value = t * RING_OMEGA;
   const insideDeck = camS.deck && cam.position.y < 2;
+  const mirrorOn = viewLayer === 'surface' && !insideDeck;
+  const dayAmt = mirrorOn ? ((nightT > 0.5) ? 0 : sectorLight(camS.x, worldDay)) : 1;
+  U.uDayCenter.value = dayCenter(worldDay);
+  U.uMirrorOn.value = mirrorOn ? 1 : 0;
+  U.uNight.value += ((mirrorOn ? 1 - dayAmt : 0) - U.uNight.value) * Math.min(1, dt * 2);
+  U.uMap.value += (mapT - U.uMap.value) * Math.min(1, dt * 3);
+  const nt = U.uNight.value;
+  const lit = mirrorOn ? (1 - nt) : 1;
+  U.uLocalDay.value = Math.max(0.1, lit);
+  sun.color.set('#ffd9b0').lerp(new THREE.Color('#9fb4d0'), nt); sun.intensity = 0.22 + 3.38 * lit;
+  hemi.color.set('#5f7480'); hemi.groundColor.set('#2a2622');
+  hemi.intensity = 0.14 + 0.28 * lit; scene.environmentIntensity = 0.12 + 0.33 * lit;
   if (insideDeck) {
     sun.color.lerp(new THREE.Color('#d5dee8'), 0.8);
     sun.intensity = 1.7;
@@ -2828,6 +2866,9 @@ window.__farm = {
   setTimeScale, setPaused,
   get selected() { return selected; },
   get worldDay() { return worldDay; },
+  setWorldDay,
+  sectorLight: (x) => sectorLight(x == null ? camS.x : x, worldDay),
+  get spin() { return t * RING_OMEGA; },
   get mode() { return mode; },
   get camera() { return { x: camS.x, z: camS.z, y: cam.position.y, d: camS.d, yaw: camS.yaw, pOff: camS.pOff, deck: !!camS.deck, ground: ground.visible, layer: viewLayer }; },
   get layer() { return viewLayer; },
