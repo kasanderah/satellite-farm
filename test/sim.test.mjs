@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import * as THREE from 'three';
 import { LAB_CLASSES, LAB_ENTRIES, CULT_EMPTY, CULT_EMPTY_NOTES, CULT_B_NOTES, GRUB_TROUGH_NOTES, planGrubColumns, GRUB_DEMO_GANTRIES, GRUB_WORK_MPS, GRUB_GANTRY_OPTIONS } from '../src/lab-catalog.js';
+import { createSurfaceBuilders } from '../src/lab-surface.js';
 import {
   CROPS, L, PLOT, FIELD_HA, fields, fieldAt, fieldAtWorld, focus, rigs,
   plantField, step, economy, quote, log, exportSnapshot, applySnapshot, RING,
@@ -449,6 +451,9 @@ test('asset lab lists the workshop classes and the live placeholders', () => {
     impl_trailer: ['hitch', '挂车'],
     impl_bedder: ['hitch', '起垄机'],
     orbit_boom: ['rail', '轨道喷洒桁架'],
+    drone_scout: ['machine', '巡视无人机'],
+    drone_treat: ['machine', '病虫处理无人机'],
+    device_drone_base: ['equip', '无人机基站'],
   };
   for (const [id, [clsName, name]] of Object.entries(surface)) {
     const e = LAB_ENTRIES.find(x => x.id === id);
@@ -468,6 +473,27 @@ test('asset lab lists the workshop classes and the live placeholders', () => {
   assert.match(LAB_ENTRIES.find(e => e.id === 'impl_seeder').notes, /谷物圆盘/);
   assert.match(LAB_ENTRIES.find(e => e.id === 'impl_potato_planter').notes, /不做自走/);
   assert.match(LAB_ENTRIES.find(e => e.id === 'impl_haulm').notes, /不做自走/);
+  for (const id of ['drone_scout', 'drone_treat', 'device_drone_base']) {
+    const notes = LAB_ENTRIES.find(e => e.id === id).notes;
+    assert.match(notes, /不进入机库/);
+    assert.match(notes, /不做田边补喷/);
+    assert.match(notes, /授粉/);
+    assert.match(notes, /驱鸟/);
+    assert.match(notes, /温度感知/);
+    assert.match(notes, /灯组/);
+    assert.match(notes, /空闲/);
+    assert.match(notes, /作业/);
+    assert.match(notes, /选中/);
+    assert.match(notes, /损坏/);
+  }
+  assert.match(LAB_ENTRIES.find(e => e.id === 'device_drone_base').notes, /可建造/);
+  assert.match(LAB_ENTRIES.find(e => e.id === 'device_drone_base').notes, /可购买/);
+  assert.match(LAB_ENTRIES.find(e => e.id === 'device_drone_base').notes, /坪灯/);
+  assert.match(LAB_ENTRIES.find(e => e.id === 'drone_scout').notes, /病虫害/);
+  assert.match(LAB_ENTRIES.find(e => e.id === 'drone_scout').notes, /不带药罐/);
+  assert.match(LAB_ENTRIES.find(e => e.id === 'drone_treat').notes, /点处理/);
+  assert.match(LAB_ENTRIES.find(e => e.id === 'drone_treat').notes, /处理灯/);
+  assert.match(LAB_ENTRIES.find(e => e.id === 'drone_treat').notes, /不展开喷杆/);
 });
 
 test('empty cultivation unit matches the 4 km plot grid', () => {
@@ -530,4 +556,71 @@ test('empty cultivation unit matches the 4 km plot grid', () => {
   assert.deepEqual(two.flat(), [...Array(17).keys()]);
   assert.deepEqual(four.flat(), [...Array(17).keys()]);
   for (const part of four) assert.ok(part.length >= 4);
+});
+
+test('drone placeholders build, light up, and sortie back to the pad', () => {
+  const padMat = new THREE.MeshStandardMaterial();
+  const builders = createSurfaceBuilders({
+    box(w, h, d, x, y, z, mat) {
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+      mesh.position.set(x, y, z);
+      return mesh;
+    },
+    salmonRing() {
+      const g = new THREE.Group();
+      g.visible = false;
+      return g;
+    },
+    padMat,
+    addHalo(parent, list) {
+      const sprite = new THREE.Sprite(new THREE.SpriteMaterial());
+      sprite.userData.halo = true;
+      sprite.userData.haloBase = 0.5;
+      parent.add(sprite);
+      if (list) list.push(sprite);
+      return [sprite];
+    },
+    fadeHalos() {},
+  });
+  const expectGroups = {
+    device_drone_base: ['坪灯', '信标'],
+    drone_scout: ['航行灯', '探头'],
+    drone_treat: ['航行灯', '处理灯'],
+  };
+  for (const [id, labels] of Object.entries(expectGroups)) {
+    const built = builders[id]();
+    assert.deepEqual(built.lightGroups.map(g => g.label), labels, id);
+    for (const g of built.lightGroups) assert.ok(g.meshes.length > 0, id + ' ' + g.id);
+    for (const st of ['idle', 'job', 'sel', 'break']) built.motion(0.4, st);
+  }
+  const base = builders.device_drone_base();
+  const roots = [];
+  base.group.traverse(obj => {
+    if (obj.userData.kind === 'scout' || obj.userData.kind === 'treat') roots.push(obj);
+  });
+  assert.equal(roots.length, 2);
+  base.motion(0, 'idle');
+  const home = roots.map(r => r.position.clone());
+  base.motion(0.45, 'job');
+  for (let i = 0; i < roots.length; i++) {
+    assert.ok(roots[i].position.distanceTo(home[i]) > 1.2, 'sortie');
+    assert.ok(roots[i].position.y > home[i].y + 0.8);
+  }
+  base.motion(0.99, 'job');
+  for (let i = 0; i < roots.length; i++) assert.ok(roots[i].position.distanceTo(home[i]) < 0.45, 'return');
+  base.motion(0.2, 'break');
+  for (let i = 0; i < roots.length; i++) {
+    assert.ok(roots[i].position.distanceTo(home[i]) < 0.05);
+    assert.ok(Math.abs(roots[i].rotation.x) > 0.1);
+  }
+  const solo = builders.drone_treat();
+  const treat = [];
+  solo.group.traverse(obj => { if (obj.userData.kind === 'treat') treat.push(obj); });
+  assert.equal(treat.length, 1);
+  solo.motion(0, 'idle');
+  const pad = treat[0].position.clone();
+  solo.motion(0.5, 'job');
+  assert.ok(treat[0].position.distanceTo(pad) > 1);
+  solo.motion(0, 'idle');
+  assert.ok(treat[0].position.distanceTo(pad) < 0.05);
 });

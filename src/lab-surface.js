@@ -25,6 +25,7 @@ export function createSurfaceBuilders(api) {
       lamp: mat({ color: '#3a3014', emissive: '#e2b15c', emissiveIntensity: 0.55, roughness: 0.42, metalness: 0 }),
       beacon: mat({ color: '#3a2414', emissive: '#e2b15c', emissiveIntensity: 1.05, roughness: 0.4, metalness: 0 }),
       nozzle: mat({ color: '#1c3332', emissive: '#c8fff4', emissiveIntensity: 0.25, roughness: 0.36, metalness: 0 }),
+      scan: mat({ color: '#1a2836', emissive: '#8fcaff', emissiveIntensity: 0.28, roughness: 0.34, metalness: 0 }),
       level: mat({ color: '#1c3332', emissive: '#9ad7cf', emissiveIntensity: 0.4, roughness: 0.4, metalness: 0 }),
     };
   }
@@ -133,6 +134,7 @@ export function createSurfaceBuilders(api) {
     M.beacon.emissiveIntensity = br ? 1.7 : job ? 3.2 : st === 'sel' ? 2.15 : 0.95;
     M.nozzle.emissiveIntensity = br ? 0.02 : job ? 2.35 : 0.22;
     M.level.emissiveIntensity = br ? 0.04 : job ? 1.9 : st === 'sel' ? 1.05 : 0.38;
+    if (M.scan) M.scan.emissiveIntensity = br ? 0.02 : job ? 2.4 : st === 'sel' ? 1.05 : 0.28;
     M.body.color.set(br ? '#6e7572' : '#9aa19e');
     for (const s of halos) if (s.material && s.material.color) s.material.color.set(col);
     fadeHalos(halos, br ? 0.25 : job ? 1 : st === 'sel' ? 0.72 : 0.42);
@@ -611,6 +613,255 @@ export function createSurfaceBuilders(api) {
     });
   }
 
+  // 无人机从坪面出击再落回。不进机库，也不做田边补喷。
+  function ease(t) {
+    const x = Math.max(0, Math.min(1, t));
+    return x * x * (3 - 2 * x);
+  }
+
+  function heading(x, z, x2, z2, fallback) {
+    const dx = x2 - x;
+    const dz = z2 - z;
+    if (dx * dx + dz * dz < 1e-8) return fallback;
+    return Math.atan2(dx, dz);
+  }
+
+  function rotor(parent, M, x, y, z, r) {
+    const hub = new THREE.Group();
+    hub.position.set(x, y, z);
+    const can = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.08, 0.06, 8), M.dark);
+    can.castShadow = true;
+    hub.add(can);
+    addBox(hub, r * 1.65, 0.016, 0.05, 0, 0.04, 0, M.steel);
+    addBox(hub, 0.05, 0.016, r * 1.65, 0, 0.046, 0, M.steel);
+    parent.add(hub);
+    return hub;
+  }
+
+  function makeDrone(M, kind, navList, bellyList) {
+    const treat = kind === 'treat';
+    const root = new THREE.Group();
+    root.userData.kind = kind;
+    const bodyW = treat ? 0.96 : 0.72;
+    const bodyH = treat ? 0.24 : 0.2;
+    const bodyD = treat ? 0.52 : 0.42;
+    const bodyY = treat ? 0.46 : 0.34;
+    const armR = treat ? 0.98 : 0.74;
+    const blade = treat ? 0.28 : 0.22;
+    for (const s of [-1, 1]) {
+      const z = s * (treat ? 0.24 : 0.18);
+      addBox(root, bodyW * 0.72, 0.04, 0.045, 0, 0.07, z, M.dark);
+      addBox(root, 0.04, 0.16, 0.04, bodyW * 0.22, 0.16, z, M.steel);
+      addBox(root, 0.04, 0.16, 0.04, -bodyW * 0.22, 0.16, z, M.steel);
+    }
+    addBox(root, bodyW, bodyH, bodyD, 0, bodyY, 0, M.body);
+    addBox(root, bodyW * 1.04, 0.03, bodyD * 1.06, 0, bodyY - bodyH * 0.46, 0, M.dark);
+    addBox(root, bodyW * 0.42, bodyH * 0.55, bodyD * 0.62, bodyW * 0.58, bodyY - 0.01, 0, M.body);
+    addBox(root, bodyW * 0.46, bodyH * 0.34, 0.04, 0.02, bodyY + 0.02, bodyD * 0.52, M.tick);
+    addBox(root, bodyW * 0.36, bodyH * 0.28, bodyD * 0.7, 0, bodyY + bodyH * 0.48, 0, M.glass);
+    addBox(root, 0.028, bodyH * 0.28, bodyD * 0.72, 0, bodyY + bodyH * 0.48, 0, M.dark);
+    addCyl(root, M.dark, 0.025, 0.03, 0.22, -bodyW * 0.08, bodyY + bodyH * 0.62, -bodyD * 0.12, null, 6);
+    const rotors = [];
+    const armNear = treat ? 0.34 : 0.26;
+    for (const [sx, sz] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+      const x = sx * armR * Math.SQRT1_2;
+      const z = sz * armR * Math.SQRT1_2;
+      const mid = (armR + armNear) / 2;
+      addBox(root, armR - armNear, 0.04, 0.055, sx * mid * Math.SQRT1_2, bodyY + 0.02, sz * mid * Math.SQRT1_2, M.dark, [0, -Math.atan2(sz, sx), 0]);
+      rotors.push(rotor(root, M, x, bodyY + 0.1, z, blade));
+    }
+    const navHalos = [];
+    navHalos.push(...addHalo(root, navList, '#e2b15c', 0.3, bodyW * 0.62, bodyY, 0));
+    navHalos.push(...addHalo(root, navList, '#e2b15c', 0.26, -bodyW * 0.5, bodyY, 0));
+    addBox(root, 0.06, 0.05, 0.07, bodyW * 0.62, bodyY, 0, M.beacon, null, navList, true);
+    addBox(root, 0.05, 0.045, 0.06, -bodyW * 0.5, bodyY, 0, M.beacon, null, navList, true);
+    const bellyHalos = [];
+    if (treat) {
+      addCyl(root, M.steel, 0.16, 0.18, 0.28, -0.04, 0.28, 0, null, 12);
+      addBox(root, 0.3, 0.04, 0.3, -0.04, 0.43, 0, M.dark);
+      addBox(root, 0.22, 0.025, 0.035, -0.04, 0.3, 0.16, M.tick);
+      const tip = addBox(root, 0.08, 0.1, 0.08, -0.04, 0.12, 0, M.nozzle, null, bellyList, true);
+      tip.castShadow = false;
+      bellyHalos.push(...addHalo(root, bellyList, '#c8fff4', 0.34, -0.04, 0.06, 0));
+    } else {
+      const eye = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.05, 0.09, 10), M.scan);
+      eye.position.set(0.12, 0.2, 0);
+      eye.castShadow = false;
+      root.add(eye);
+      if (bellyList) bellyList.push(eye);
+      addBox(root, 0.22, 0.04, 0.18, 0.12, 0.26, 0, M.dark);
+      bellyHalos.push(...addHalo(root, bellyList, '#8fcaff', 0.38, 0.12, 0.12, 0));
+    }
+    return { root, rotors, navHalos, bellyHalos };
+  }
+
+  function setDrone(drone, pose, spin) {
+    drone.root.position.set(pose.x, pose.y, pose.z);
+    drone.root.rotation.set(pose.roll || 0, pose.yaw, pose.pitch || 0);
+    for (const hub of drone.rotors) hub.rotation.y = spin;
+  }
+
+  function parkDrone(drone, st, home) {
+    if (st === 'break') setDrone(drone, { x: home.x, y: home.y, z: home.z, yaw: home.yaw + 0.4, roll: 0.22 }, 0.2);
+    else setDrone(drone, home, 0);
+  }
+
+  function scoutPose(u, home, reach) {
+    const liftEnd = 0.14;
+    const cruiseEnd = 0.84;
+    if (u < liftEnd) {
+      const e = ease(u / liftEnd);
+      return { x: home.x, y: home.y + e * home.hop, z: home.z, yaw: home.yaw, spin: e };
+    }
+    if (u < cruiseEnd) {
+      const t = (u - liftEnd) / (cruiseEnd - liftEnd);
+      const ang = t * Math.PI * 2;
+      const out = (1 - Math.cos(ang)) * 0.5;
+      const side = Math.sin(ang) * 0.38;
+      const x = home.x + Math.sin(home.phase) * reach * out + Math.cos(home.phase) * reach * side;
+      const z = home.z + Math.cos(home.phase) * reach * out - Math.sin(home.phase) * reach * side;
+      const ang2 = ang + 0.08;
+      const out2 = (1 - Math.cos(ang2)) * 0.5;
+      const side2 = Math.sin(ang2) * 0.38;
+      const x2 = home.x + Math.sin(home.phase) * reach * out2 + Math.cos(home.phase) * reach * side2;
+      const z2 = home.z + Math.cos(home.phase) * reach * out2 - Math.sin(home.phase) * reach * side2;
+      return { x, y: home.y + home.hop, z, yaw: heading(x, z, x2, z2, home.phase), spin: 1 };
+    }
+    const e = ease((u - cruiseEnd) / (1 - cruiseEnd));
+    return { x: home.x, y: home.y + (1 - e) * home.hop, z: home.z, yaw: home.yaw, spin: 1 - e };
+  }
+
+  function treatPose(u, home, reach) {
+    const depart = 0.24;
+    const dwell = 0.72;
+    const ox = Math.sin(home.phase) * reach;
+    const oz = Math.cos(home.phase) * reach;
+    if (u < depart) {
+      const e = ease(u / depart);
+      return { x: home.x + ox * e, y: home.y + home.hop * ease(Math.min(1, u / 0.16)), z: home.z + oz * e, yaw: home.phase, spin: 1 };
+    }
+    if (u < dwell) {
+      return { x: home.x + ox, y: home.y + home.hop, z: home.z + oz, yaw: home.phase, spin: 1, dwell: true };
+    }
+    const e = ease((u - dwell) / (1 - dwell));
+    const lift = 1 - ease(Math.max(0, (u - 0.88) / 0.12));
+    return { x: home.x + ox * (1 - e), y: home.y + home.hop * lift, z: home.z + oz * (1 - e), yaw: home.phase + Math.PI, spin: Math.max(lift, 0.15) };
+  }
+
+  function flyDrone(drone, st, p, home, reach, kind) {
+    if (st !== 'job') {
+      parkDrone(drone, st, home);
+      return null;
+    }
+    const pose = kind === 'treat' ? treatPose(p, home, reach) : scoutPose(p, home, reach);
+    setDrone(drone, pose, pose.spin * p * Math.PI * 26);
+    return pose;
+  }
+
+  function landingMark(parent, M, x, y, z, r) {
+    const disc = new THREE.Mesh(new THREE.CylinderGeometry(r, r, 0.03, 18), M.dark);
+    disc.position.set(x, y, z);
+    disc.receiveShadow = true;
+    parent.add(disc);
+    addBox(parent, r * 0.42, 0.012, 0.045, x - r * 0.16, y + 0.02, z + r * 0.28, M.tick, [0, 0.45, 0]);
+    addBox(parent, r * 0.42, 0.012, 0.045, x + r * 0.16, y + 0.02, z + r * 0.28, M.tick, [0, -0.45, 0]);
+  }
+
+  function droneScout() {
+    const M = palette();
+    const { g, body, ring } = stage(3.6, 3.6);
+    const G = lightGroups([['nav', '航行灯'], ['scan', '探头']]);
+    landingMark(g, M, 0, 0.02, 0, 0.85);
+    const drone = makeDrone(M, 'scout', G.nav.meshes, G.scan.meshes);
+    body.add(drone.root);
+    const home = { x: 0, y: 0.03, z: 0, yaw: 0.55, hop: 1.55, phase: 0.7 };
+    return finish(g, ring, G, (p, st) => {
+      paint(M, drone.navHalos, st);
+      const pose = flyDrone(drone, st, p, home, 2.15, 'scout');
+      const pulse = st === 'break' ? 0.04 : st === 'job' ? 0.7 + Math.sin(p * Math.PI * 8) * 0.3 : st === 'sel' ? 0.72 : 0.34;
+      if (pose && !pose.dwell) M.scan.emissiveIntensity = 1.5 + Math.sin(p * Math.PI * 10) * 0.9;
+      fadeHalos(drone.bellyHalos, pulse);
+    });
+  }
+
+  function droneTreat() {
+    const M = palette();
+    const { g, body, ring } = stage(4.2, 4.2);
+    const G = lightGroups([['nav', '航行灯'], ['treat', '处理灯']]);
+    landingMark(g, M, 0, 0.02, 0, 1.05);
+    const drone = makeDrone(M, 'treat', G.nav.meshes, G.treat.meshes);
+    body.add(drone.root);
+    const home = { x: 0, y: 0.03, z: 0, yaw: 0.45, hop: 1.45, phase: 0.55 };
+    return finish(g, ring, G, (p, st) => {
+      paint(M, drone.navHalos, st);
+      const pose = flyDrone(drone, st, p, home, 2.35, 'treat');
+      if (pose && pose.dwell) M.nozzle.emissiveIntensity = 1.3 + Math.sin(p * Math.PI * 16) * 1.15;
+      fadeHalos(drone.bellyHalos, st === 'break' ? 0.04 : st === 'job' ? (pose && pose.dwell ? 1 : 0.28) : st === 'sel' ? 0.6 : 0.22);
+    });
+  }
+
+  function droneBase() {
+    const M = palette();
+    const g = new THREE.Group();
+    const ground = new THREE.Mesh(new THREE.CircleGeometry(9.4, 48), padMat);
+    ground.rotation.x = -Math.PI / 2;
+    ground.position.y = -0.02;
+    ground.receiveShadow = true;
+    g.add(ground);
+    const deck = new THREE.Group();
+    g.add(deck);
+    addBox(deck, 7.4, 0.08, 0.18, 0, 0.05, -2.05, M.dark);
+    addBox(deck, 7.4, 0.08, 0.18, 0, 0.05, 2.35, M.dark);
+    addBox(deck, 8.4, 0.14, 5.6, 0, 0.16, 0.2, M.body);
+    addBox(deck, 8.55, 0.035, 5.75, 0, 0.07, 0.2, M.dark);
+    addBox(deck, 6.4, 0.02, 0.05, 0, 0.25, 2.88, M.tick);
+    landingMark(deck, M, -2.15, 0.25, 0.45, 1.05);
+    landingMark(deck, M, 2.15, 0.25, 0.45, 1.05);
+    const cabinet = new THREE.Group();
+    deck.add(cabinet);
+    addBox(cabinet, 1.7, 1.28, 0.82, 0, 0.92, -1.85, M.body);
+    addBox(cabinet, 1.78, 0.06, 0.9, 0, 1.58, -1.85, M.dark);
+    addBox(cabinet, 1.74, 0.045, 0.86, 0, 0.32, -1.85, M.dark);
+    addBox(cabinet, 0.06, 0.38, 0.52, 0.86, 1.12, -1.85, M.glass);
+    addBox(cabinet, 0.72, 0.04, 0.035, 0, 1.02, -1.43, M.tick);
+    addBox(cabinet, 0.48, 0.62, 0.02, -0.28, 0.9, -1.43, M.dark);
+    addCyl(cabinet, M.steel, 0.035, 0.045, 0.7, 0.42, 1.95, -1.85, null, 6);
+    const G = lightGroups([['pad', '坪灯'], ['beacon', '信标']]);
+    for (const [x, z] of [[-3.85, 2.65], [3.85, 2.65], [-3.85, -2.15], [3.85, -2.15]]) {
+      addBox(deck, 0.1, 0.06, 0.1, x, 0.28, z, M.lamp, null, G.pad.meshes, true);
+      addHalo(deck, G.pad.meshes, '#e2b15c', 0.42, x, 0.3, z);
+    }
+    for (const x of [-2.15, 2.15]) {
+      addBox(deck, 0.07, 0.42, 0.07, x, 0.5, -0.7, M.steel);
+      addBox(deck, 0.12, 0.045, 0.12, x, 0.74, -0.7, M.lamp, null, G.pad.meshes, true);
+      addHalo(deck, G.pad.meshes, '#e2b15c', 0.3, x, 0.76, -0.7);
+    }
+    const beaconHalos = beaconMast(cabinet, G, M, 0.42, 2.42, -1.85);
+    const scout = makeDrone(M, 'scout');
+    const treat = makeDrone(M, 'treat');
+    deck.add(scout.root, treat.root);
+    const homes = {
+      scout: { x: -2.15, y: 0.28, z: 0.45, yaw: 0.4, hop: 1.65, phase: -0.85 },
+      treat: { x: 2.15, y: 0.28, z: 0.45, yaw: -0.35, hop: 1.5, phase: 0.85 },
+    };
+    const ring = salmonRing(10.6, 8.2, 0.12);
+    g.add(ring);
+    const navHalos = beaconHalos.concat(scout.navHalos, treat.navHalos);
+    return finish(g, ring, G, (p, st) => {
+      paint(M, navHalos, st);
+      cabinet.rotation.z = st === 'break' ? 0.08 : 0;
+      cabinet.position.x = st === 'break' ? 0.1 : 0;
+      const scoutPoseNow = flyDrone(scout, st, p, homes.scout, 3.5, 'scout');
+      const treatPoseNow = flyDrone(treat, st, p, homes.treat, 3.3, 'treat');
+      if (st === 'job') {
+        M.scan.emissiveIntensity = scoutPoseNow ? 1.6 + Math.sin(p * Math.PI * 10) * 0.8 : 0.28;
+        M.nozzle.emissiveIntensity = treatPoseNow && treatPoseNow.dwell ? 1.4 + Math.sin(p * Math.PI * 16) * 1.1 : 0.45;
+      }
+      fadeHalos(scout.bellyHalos, st === 'break' ? 0.04 : st === 'job' ? 0.85 : 0.3);
+      fadeHalos(treat.bellyHalos, st === 'break' ? 0.04 : st === 'job' && treatPoseNow && treatPoseNow.dwell ? 1 : 0.24);
+    });
+  }
+
   return {
     tractor_gen: tractorGen,
     harvester_combine: combine,
@@ -628,5 +879,8 @@ export function createSurfaceBuilders(api) {
     impl_trailer: trailer,
     impl_bedder: bedder,
     orbit_boom: orbitBoom,
+    drone_scout: droneScout,
+    drone_treat: droneTreat,
+    device_drone_base: droneBase,
   };
 }
