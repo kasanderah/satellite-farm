@@ -60,7 +60,7 @@ Press **V**, or open 管理 and click **资产**. The viewer shows the current p
 
 The game writes the snapshot to `localStorage` (`ringsheaf.nongshen8.v1`) after you plant, change the clock, or harvest. `?fresh=1` starts from the seeded plot again.
 
-Open `asset-lab.html` and choose 田间 → 阶段编辑器 to preview a crop's field stages. That page does not change the playable clock. Durations, the ridge section, and the stage graph are saved in this browser and can be downloaded as JSON. The shape of that file is `data/field-stages/README.md`. A potato example is `data/field-stages/potato.json`. The main game does not read it yet; `parseFieldStageDoc` in `src/field-stages.js` is the loader.
+Open `asset-lab.html` and choose 田间 → 阶段编辑器 to preview a crop's field stages. That page does not change the playable clock. Durations, the ridge section, and the stage graph are saved in this browser and can be downloaded as JSON. The shape of that file is `data/field-stages/README.md`. A potato example is `data/field-stages/potato.json`. The surface-calendar potato is `data/field-stages/potato-b.json` (`logicId` `crop_potato`). The main game does not read it yet; `parseFieldStageDoc` in `src/field-stages.js` is the loader.
 
 ## Snapshot
 

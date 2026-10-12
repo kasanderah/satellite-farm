@@ -10,6 +10,7 @@ import {
   createSim, stepSim, startJob, cancelWorkOrder, sampleRidge, appearanceOf,
   stageById, setGrowthChain, insertGrowthStage, removeGrowthStage, dominant, tally,
 } from './field-stages.js';
+import potatoBRaw from '../data/field-stages/potato-b.json';
 
 const PREVIEW = { width: 36, length: 28 };
 // 一条垄至少这么多段，陡壁和平顶才不会被 10 来个顶点收成圆丘。行数最多 16。
@@ -38,6 +39,10 @@ const HELP = `打开：左侧「田间 / 阶段编辑器」。
 边：收获后默认清田回 O。E→A 留着，默认关。翻地、清田可以拆蒙版。取消扫田只停这一趟，不派单。
 
 存：保存进这台浏览器。下载得到 field-stage-<作物>.json。主进程用 parseFieldStageDoc 读同一结构，说明在 data/field-stages/README.md。`;
+
+function potatoDoc() {
+  return parseFieldStageDoc(structuredClone(potatoBRaw));
+}
 
 function cropVisual(crop) {
   const hex = (key) => PALETTE[key] || key || '#6f6a61';
@@ -176,7 +181,7 @@ function makeMachine() {
 export function createFieldWorkshop(els) {
   const { viewEl, briefForm, panel, bar, statesEl, hintEl, mainEl } = els;
   const builtin = CROPS.filter(c => c.plantable).map(cropVisual);
-  let docs = {};
+  let docs = { potato: potatoDoc() };
   let cropId = 'potato';
   let sim = null;
   let playing = false;
@@ -197,8 +202,11 @@ export function createFieldWorkshop(els) {
 
   function current() {
     if (!docs[cropId]) {
-      const seed = builtin.find(c => c.id === cropId) || { id: cropId, name: cropId, shape: 'bush', height: 0.5, row: 0.8, along: 0.4, young: PALETTE.oliveDp, ripe: PALETTE.ochre, stub: PALETTE.rust };
-      docs[cropId] = placeholderFieldDoc(seed);
+      if (cropId === 'potato') docs.potato = potatoDoc();
+      else {
+        const seed = builtin.find(c => c.id === cropId) || { id: cropId, name: cropId, shape: 'bush', height: 0.5, row: 0.8, along: 0.4, young: PALETTE.oliveDp, ripe: PALETTE.ochre, stub: PALETTE.rust };
+        docs[cropId] = placeholderFieldDoc(seed);
+      }
     }
     return docs[cropId];
   }
@@ -262,15 +270,26 @@ export function createFieldWorkshop(els) {
       else demo.step = step;
       dirty = true;
     };
+    const findOp = (pred) => doc.ops.find(pred);
+    const till = findOp(op => op.via === 'till') || findOp(op => op.kind === 'special' && op.breaksMask);
+    const sow = findOp(op => op.writesMask);
+    const touch = findOp(op => op.kind === 'optional' && op.requiresMask);
+    const harvest = findOp(op => op.via === 'harvest');
+    const clear = findOp(op => op.via === 'clear');
     if (demo.step === 'o3') {
-      if ((info.variants['O/O3'] || 0) > info.total * 0.55) go('till', 1, 'till');
-    } else if (demo.step === 'till') go('sow', 0.5, 'sow');
-    else if (demo.step === 'sow') go('water', 1, 'water');
-    else if (demo.step === 'water') demo.step = 'grow';
+      if ((info.variants['O/O3'] || 0) > info.total * 0.55 && till) go(till.id, 1, 'till');
+    } else if (demo.step === 'till') {
+      if (sow) go(sow.id, 0.5, 'sow');
+    } else if (demo.step === 'sow') {
+      if (touch) go(touch.id, 1, 'water');
+      else demo.step = 'grow';
+    } else if (demo.step === 'water') demo.step = 'grow';
     else if (demo.step === 'grow') {
       const ripe = (info.variants['D/D1'] || 0) + (info.variants['D/D2'] || 0);
-      if (info.mask > 0 && ripe > info.mask * 0.4) go('harvest', 1, 'harvest');
-    } else if (demo.step === 'harvest') go('clear', 1, 'clear');
+      if (info.mask > 0 && ripe > info.mask * 0.4 && harvest) go(harvest.id, 1, 'harvest');
+    } else if (demo.step === 'harvest') {
+      if (clear) go(clear.id, 1, 'clear');
+    }
     else if (demo.step === 'clear') {
       demo = null;
       playing = false;
@@ -329,13 +348,7 @@ export function createFieldWorkshop(els) {
 <button type="button" data-act="pause">暂停</button>
 <button type="button" data-act="reset">重置</button>
 <button type="button" data-act="demo">整链演示</button>${speeds}`;
-    const ops = [
-      ['sow', '播种', 1], ['sow', '半田', 0.5], ['water', '喷水', 1], ['fertilize', '施肥', 1],
-      ['spray', '喷药', 1], ['harvest', '收割', 1], ['cultivate', '中耕', 1], ['lime', '石灰', 1],
-      ['till', '翻地', 1], ['clear', '清田', 1], ['resow', '复播', 1],
-    ];
-    bar.querySelector('#fs-opbar').innerHTML = ops.map(([id, name, cov]) => `<button type="button" data-op="${id}" data-cov="${cov}">${name}</button>`).join('')
-      + '<button type="button" data-act="cancel">取消扫田</button>';
+    paintOps();
 
     panel.querySelector('#fs-crop').addEventListener('change', (e) => {
       cropId = e.target.value;
@@ -382,8 +395,11 @@ export function createFieldWorkshop(els) {
     panel.querySelector('#fs-save').addEventListener('click', persist);
     panel.querySelector('#fs-dl').addEventListener('click', download);
     panel.querySelector('#fs-reset-doc').addEventListener('click', () => {
-      const seed = builtin.find(c => c.id === cropId) || cropVisual({ id: cropId, name: current().cropName, shape: current().plant.shape, height: current().plant.height, row: current().plant.row, along: current().plant.along, young: current().plant.young, ripe: current().plant.ripe, stub: current().plant.stub });
-      docs[cropId] = placeholderFieldDoc({ ...seed, id: cropId, name: seed.name || current().cropName });
+      if (cropId === 'potato') docs.potato = potatoDoc();
+      else {
+        const seed = builtin.find(c => c.id === cropId) || cropVisual({ id: cropId, name: current().cropName, shape: current().plant.shape, height: current().plant.height, row: current().plant.row, along: current().plant.along, young: current().plant.young, ripe: current().plant.ripe, stub: current().plant.stub });
+        docs[cropId] = placeholderFieldDoc({ ...seed, id: cropId, name: seed.name || current().cropName });
+      }
       resetSim();
       paintDynamic(true);
       persist();
@@ -507,9 +523,23 @@ export function createFieldWorkshop(els) {
     bar.querySelectorAll('[data-act="play"]').forEach(b => b.classList.toggle('on', playing));
     bar.querySelectorAll('[data-act="pause"]').forEach(b => b.classList.toggle('on', !playing));
     bar.querySelectorAll('[data-speed]').forEach(b => b.classList.toggle('on', Number(b.dataset.speed) === speed));
-    const resow = current().edges.find(e => e.via === 'resow');
-    const resowBtn = bar.querySelector('[data-op="resow"]');
-    if (resowBtn) resowBtn.hidden = !(resow && resow.enabled);
+    paintOps();
+  }
+
+  function paintOps() {
+    const host = bar.querySelector('#fs-opbar');
+    if (!host) return;
+    const doc = current();
+    const buttons = [];
+    for (const op of doc.ops) {
+      if (op.reserved) {
+        const edge = doc.edges.find(e => e.enabled && e.via === op.via);
+        if (!edge) continue;
+      }
+      buttons.push(`<button type="button" data-op="${op.id}" data-cov="1">${op.name}</button>`);
+      if (op.writesMask) buttons.push(`<button type="button" data-op="${op.id}" data-cov="0.5">半田</button>`);
+    }
+    host.innerHTML = buttons.join('') + '<button type="button" data-act="cancel">取消扫田</button>';
   }
 
   function paintGantt() {
@@ -649,7 +679,8 @@ ${variants}
         persist();
       });
     });
-    const mach = doc.machines[doc.ops.find(op => op.id === 'sow').machine];
+    const sowOp = doc.ops.find(op => op.writesMask || op.via === 'sow');
+    const mach = sowOp && doc.machines[sowOp.machine];
     panel.querySelector('#fs-mach').textContent = mach
       ? `播种机 ${mach.id}：车头 ${mach.sweepHead} m，车尾 ${mach.sweepTail} m。改面点写在 machines 上，扫过以车头为准。`
       : '';

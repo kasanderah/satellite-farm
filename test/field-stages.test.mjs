@@ -1,10 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'fs';
 import {
   FIELD_STAGE_SCHEMA, placeholderFieldDoc, parseFieldStageDoc, createSim, stepSim,
   startJob, cancelWorkOrder, sampleRidge, setGrowthChain, insertGrowthStage,
   removeGrowthStage, tally, appearanceOf,
 } from '../src/field-stages.js';
+import { span, SURFACE_CROPS } from '../src/surface-crops.js';
 
 const potato = {
   id: 'potato', name: '中熟商品薯', shape: 'bush',
@@ -235,4 +237,69 @@ test('scatter opens some cells before the stage ends and all of them at the end'
   const done = tally(sim);
   assert.equal(done.phases.B, sim.cells.length);
   assert.ok(!done.phases.C);
+});
+
+test('potato B maps the surface calendar into the field-stage graph', () => {
+  const raw = JSON.parse(fs.readFileSync(new URL('../data/field-stages/potato-b.json', import.meta.url)));
+  const d = parseFieldStageDoc(raw);
+  assert.equal(d.profile, 'potato-b');
+  assert.equal(d.logicId, 'crop_potato');
+  assert.equal(d.cropId, 'potato');
+  assert.deepEqual(d.chain, ['A', 'emerg', 'hill', 'bulk', 'haulm', 'D']);
+  const days = Object.fromEntries(d.stages.map(s => [s.legacyId || s.id, s.days]));
+  const windows = [
+    ['potato_till', 3, 5], ['potato_plant', 2, 4], ['potato_emerg', 12, 18], ['potato_hill', 10, 14],
+    ['potato_bulk', 35, 45], ['potato_haulm', 5, 8], ['potato_harvest', 8, 14], ['potato_clear', 2, 4],
+  ];
+  for (const [id, lo, hi] of windows) {
+    const old = SURFACE_CROPS.potato.stages.find(s => s.id === id);
+    assert.equal(old.days, span(lo, hi));
+    assert.equal(days[id], old.days);
+  }
+  assert.equal(d.stages.find(s => s.id === 'O').days, 4);
+  assert.equal(d.stages.find(s => s.id === 'D').days, 11);
+  assert.equal(d.stages.find(s => s.id === 'E').days, 3);
+  const beforeD = ['A', 'emerg', 'hill', 'bulk', 'haulm'].reduce((sum, id) => sum + d.stages.find(s => s.id === id).days, 0);
+  assert.equal(beforeD, 77);
+  assert.equal(beforeD, SURFACE_CROPS.potato.maturity - 4);
+  const ids = d.ops.map(op => op.extensions.legacyJob).filter(Boolean);
+  for (const job of SURFACE_CROPS.potato.jobs) assert.ok(ids.includes(job.id), job.id);
+  const harvest = d.ops.find(op => op.id === 'potato_harvest');
+  assert.match(harvest.extensions.note, /收获机侧/);
+  assert.match(harvest.extensions.note, /侧卸/);
+  assert.equal(harvest.extensions.harvest, true);
+  assert.equal(harvest.extensions.self, 'harvester_potato');
+  assert.ok(!d.stages.some(s => /侧卸|unload/i.test(s.id + s.name)));
+  const scout = d.ops.find(op => op.id === 'potato_scout');
+  const treat = d.ops.find(op => op.id === 'potato_treat');
+  const water = d.ops.find(op => op.id === 'potato_irrigate');
+  assert.equal(scout.extensions.drone, true);
+  assert.equal(scout.extensions.required, false);
+  assert.equal(scout.extensions.cap, 'scout');
+  assert.equal(treat.extensions.drone, true);
+  assert.equal(treat.extensions.load, 'pest');
+  assert.equal(water.extensions.auto, true);
+  assert.equal(d.ops.find(op => op.id === 'potato_plant').extensions.plant, true);
+  assert.equal(d.ops.find(op => op.id === 'potato_clear').extensions.afterHarvest, true);
+  assert.equal(d.ops.find(op => op.id === 'potato_rotavate').extensions.implAny.length, 2);
+  assert.equal(d.edges.find(e => e.via === 'clear' && e.from === 'E' && e.to === 'O').enabled, true);
+  assert.equal(d.edges.find(e => e.via === 'resow' && e.from === 'E' && e.to === 'A').enabled, false);
+  assert.ok(d.edges.some(e => e.when === 'natural' && e.from === 'haulm' && e.to === 'D'));
+  assert.ok(d.edges.some(e => e.when === 'auto' && e.toVariant === 'O3'));
+  assert.ok(d.edges.some(e => e.when === 'auto' && e.toVariant === 'D2'));
+  assert.ok(d.stages.find(s => s.id === 'O').variants.some(v => v.id === 'O1'));
+  assert.ok(d.stages.find(s => s.id === 'O').variants.some(v => v.id === 'O2'));
+  assert.ok(d.stages.find(s => s.id === 'O').variants.some(v => v.id === 'O3'));
+
+  d.transition = { template: 'instant', span: 'window', windowDays: 0.5 };
+  const sim = createSim(d);
+  const sow = d.ops.find(op => op.id === 'potato_plant');
+  sow.sweepDays = 0.2;
+  finish(sim, d, 'potato_plant');
+  assert.equal(tally(sim).phases.A, sim.cells.length);
+  stepSim(sim, d, d.stages.find(s => s.id === 'A').days);
+  assert.equal(tally(sim).phases.emerg, sim.cells.length);
+  stepSim(sim, d, d.stages.find(s => s.id === 'emerg').days);
+  assert.equal(tally(sim).phases.hill, sim.cells.length);
+  assert.equal(sim.cells.every(c => !c.variant), true);
 });
