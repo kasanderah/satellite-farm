@@ -1,0 +1,631 @@
+{
+  "schema": "ringsheaf.field-stage/1",
+  "readme": "主进程：import { parseFieldStageDoc } from \"./src/field-stages.js\"，或读取这份 JSON。字段说明见 data/field-stages/README.md。edges 决定阶段怎么走，不要写死 E→O。hooks.cancelWorkOrder 只是函数名，工坊不派单。",
+  "cropId": "potato",
+  "logicId": "crop_potato",
+  "cropName": "中熟商品薯",
+  "timeUnit": "gameDay",
+  "secondsPerDayAt1x": 1,
+  "rows": 8,
+  "grid": {
+    "along": 14
+  },
+  "plant": {
+    "shape": "bush",
+    "height": 0.55,
+    "row": 0.9,
+    "along": 0.4,
+    "young": "#51542c",
+    "ripe": "#81683f",
+    "stub": "#9e543a"
+  },
+  "ridge": [
+    {
+      "x": 0,
+      "y": 0.04
+    },
+    {
+      "x": 0.18,
+      "y": 0.06
+    },
+    {
+      "x": 0.5,
+      "y": 0.28
+    },
+    {
+      "x": 0.82,
+      "y": 0.06
+    },
+    {
+      "x": 1,
+      "y": 0.04
+    }
+  ],
+  "transition": {
+    "template": "scatter",
+    "span": "window",
+    "windowDays": 1.2
+  },
+  "chain": [
+    "A",
+    "B",
+    "C",
+    "D"
+  ],
+  "stages": [
+    {
+      "rows": null,
+      "ridge": null,
+      "color": "#6f6a61",
+      "canopy": "#4a4844",
+      "roughness": 0.97,
+      "cover": 0,
+      "plantScale": 0,
+      "variants": [
+        {
+          "name": "中耕后",
+          "days": 0,
+          "auto": false,
+          "color": "#4a4844",
+          "canopy": null,
+          "roughness": 0.96,
+          "cover": 0,
+          "plantScale": 0,
+          "ridge": [
+            {
+              "x": 0,
+              "y": 0.013999999999999999
+            },
+            {
+              "x": 0.22,
+              "y": 0.034999999999999996
+            },
+            {
+              "x": 0.5,
+              "y": 0.322
+            },
+            {
+              "x": 0.78,
+              "y": 0.034999999999999996
+            },
+            {
+              "x": 1,
+              "y": 0.013999999999999999
+            }
+          ],
+          "id": "O1"
+        },
+        {
+          "name": "撒石灰",
+          "days": 0,
+          "auto": false,
+          "color": "#a2998a",
+          "canopy": "#bcc3c4",
+          "roughness": 0.9,
+          "cover": 0.08,
+          "plantScale": 0,
+          "ridge": null,
+          "id": "O2"
+        },
+        {
+          "name": "久置闲置",
+          "days": 0,
+          "auto": true,
+          "color": "#4a4844",
+          "canopy": null,
+          "roughness": 0.98,
+          "cover": 0,
+          "plantScale": 0,
+          "ridge": [
+            {
+              "x": 0,
+              "y": 0.03
+            },
+            {
+              "x": 0.5,
+              "y": 0.08
+            },
+            {
+              "x": 1,
+              "y": 0.03
+            }
+          ],
+          "id": "O3"
+        }
+      ],
+      "id": "O",
+      "name": "空地",
+      "kind": "idle",
+      "days": 5
+    },
+    {
+      "rows": null,
+      "ridge": [
+        {
+          "x": 0,
+          "y": 0.05
+        },
+        {
+          "x": 0.2,
+          "y": 0.07
+        },
+        {
+          "x": 0.5,
+          "y": 0.22
+        },
+        {
+          "x": 0.8,
+          "y": 0.07
+        },
+        {
+          "x": 1,
+          "y": 0.05
+        }
+      ],
+      "color": "#4a4844",
+      "canopy": "#51542c",
+      "roughness": 0.95,
+      "cover": 0.12,
+      "plantScale": 0.18,
+      "variants": [
+        {
+          "name": "喷水",
+          "days": 0,
+          "auto": false,
+          "color": "#52747e",
+          "canopy": "#8fbbad",
+          "roughness": 0.72,
+          "cover": 0.2,
+          "plantScale": 0.2,
+          "ridge": null,
+          "id": "A1"
+        },
+        {
+          "name": "施肥",
+          "days": 0,
+          "auto": false,
+          "color": "#81683f",
+          "canopy": "#b59a63",
+          "roughness": 0.9,
+          "cover": 0.16,
+          "plantScale": 0.22,
+          "ridge": null,
+          "id": "A2"
+        }
+      ],
+      "id": "A",
+      "name": "播种后",
+      "kind": "growth",
+      "days": 3
+    },
+    {
+      "rows": null,
+      "ridge": null,
+      "color": "#6f6a61",
+      "canopy": "#51542c",
+      "roughness": 0.84,
+      "cover": 0.48,
+      "plantScale": 0.42,
+      "variants": [],
+      "id": "B",
+      "name": "小植株",
+      "kind": "growth",
+      "days": 12,
+      "optional": true
+    },
+    {
+      "rows": null,
+      "ridge": [
+        {
+          "x": 0,
+          "y": 0.02
+        },
+        {
+          "x": 0.22,
+          "y": 0.05
+        },
+        {
+          "x": 0.5,
+          "y": 0.46
+        },
+        {
+          "x": 0.78,
+          "y": 0.05
+        },
+        {
+          "x": 1,
+          "y": 0.02
+        }
+      ],
+      "color": "#51542c",
+      "canopy": "#787c32",
+      "roughness": 0.68,
+      "cover": 0.86,
+      "plantScale": 0.92,
+      "variants": [
+        {
+          "name": "喷药",
+          "days": 0,
+          "auto": false,
+          "color": "#3e7a37",
+          "canopy": "#787c32",
+          "roughness": 0.6,
+          "cover": 0.9,
+          "plantScale": 0.94,
+          "ridge": null,
+          "id": "C1"
+        }
+      ],
+      "id": "C",
+      "name": "大植株",
+      "kind": "growth",
+      "days": 28,
+      "optional": true
+    },
+    {
+      "rows": null,
+      "ridge": null,
+      "color": "#81683f",
+      "canopy": "#81683f",
+      "roughness": 0.7,
+      "cover": 0.74,
+      "plantScale": 0.8,
+      "variants": [
+        {
+          "name": "过熟",
+          "days": 4,
+          "auto": true,
+          "color": "#b59a63",
+          "canopy": "#81683f",
+          "roughness": 0.78,
+          "cover": 0.5,
+          "plantScale": 0.62,
+          "ridge": null,
+          "id": "D1"
+        },
+        {
+          "name": "烂地",
+          "days": 4,
+          "auto": true,
+          "color": "#9e543a",
+          "canopy": "#4a4844",
+          "roughness": 0.96,
+          "cover": 0.22,
+          "plantScale": 0.16,
+          "ridge": [
+            {
+              "x": 0,
+              "y": 0.03
+            },
+            {
+              "x": 0.5,
+              "y": 0.08
+            },
+            {
+              "x": 1,
+              "y": 0.03
+            }
+          ],
+          "id": "D2"
+        }
+      ],
+      "id": "D",
+      "name": "待收获",
+      "kind": "growth",
+      "days": 8
+    },
+    {
+      "rows": null,
+      "ridge": [
+        {
+          "x": 0,
+          "y": 0.03
+        },
+        {
+          "x": 0.5,
+          "y": 0.08
+        },
+        {
+          "x": 1,
+          "y": 0.03
+        }
+      ],
+      "color": "#9e543a",
+      "canopy": "#6f6a61",
+      "roughness": 0.93,
+      "cover": 0.06,
+      "plantScale": 0.04,
+      "variants": [],
+      "id": "E",
+      "name": "收获后",
+      "kind": "post",
+      "days": 3
+    }
+  ],
+  "ops": [
+    {
+      "id": "sow",
+      "name": "播种",
+      "kind": "required",
+      "via": "sow",
+      "stage": "O",
+      "requiresMask": false,
+      "requiresUnlocked": true,
+      "writesMask": true,
+      "locksUnswept": true,
+      "sweepDays": 2,
+      "machine": "impl_potato_planter"
+    },
+    {
+      "id": "water",
+      "name": "喷水",
+      "kind": "optional",
+      "via": null,
+      "stage": "A",
+      "variant": "A1",
+      "requiresMask": true,
+      "requiresUnlocked": false,
+      "writesMask": false,
+      "locksUnswept": false,
+      "sweepDays": 1.4,
+      "machine": "impl_sprayer"
+    },
+    {
+      "id": "fertilize",
+      "name": "施肥",
+      "kind": "optional",
+      "via": null,
+      "stage": "A",
+      "variant": "A2",
+      "requiresMask": true,
+      "requiresUnlocked": false,
+      "writesMask": false,
+      "locksUnswept": false,
+      "sweepDays": 1.4,
+      "machine": "impl_fertilizer"
+    },
+    {
+      "id": "spray",
+      "name": "喷药",
+      "kind": "optional",
+      "via": null,
+      "stage": "C",
+      "variant": "C1",
+      "requiresMask": true,
+      "requiresUnlocked": false,
+      "writesMask": false,
+      "locksUnswept": false,
+      "sweepDays": 1.4,
+      "machine": "impl_sprayer"
+    },
+    {
+      "id": "harvest",
+      "name": "收割",
+      "kind": "required",
+      "via": "harvest",
+      "stage": "D",
+      "requiresMask": true,
+      "requiresUnlocked": false,
+      "writesMask": false,
+      "locksUnswept": false,
+      "sweepDays": 2.2,
+      "machine": "harvester_potato"
+    },
+    {
+      "id": "cultivate",
+      "name": "中耕",
+      "kind": "optional",
+      "via": null,
+      "stage": "O",
+      "variant": "O1",
+      "requiresMask": false,
+      "requiresUnlocked": false,
+      "writesMask": false,
+      "locksUnswept": false,
+      "sweepDays": 1.6,
+      "machine": "impl_cultivator"
+    },
+    {
+      "id": "lime",
+      "name": "撒石灰",
+      "kind": "optional",
+      "via": null,
+      "stage": "O",
+      "variant": "O2",
+      "requiresMask": false,
+      "requiresUnlocked": false,
+      "writesMask": false,
+      "locksUnswept": false,
+      "sweepDays": 1.6,
+      "machine": "impl_fertilizer"
+    },
+    {
+      "id": "till",
+      "name": "翻地",
+      "kind": "special",
+      "via": "till",
+      "stage": "*",
+      "requiresMask": false,
+      "requiresUnlocked": false,
+      "writesMask": false,
+      "locksUnswept": false,
+      "breaksMask": true,
+      "sweepDays": 2,
+      "machine": "impl_rotavator"
+    },
+    {
+      "id": "clear",
+      "name": "清田",
+      "kind": "special",
+      "via": "clear",
+      "stage": "E",
+      "requiresMask": false,
+      "requiresUnlocked": false,
+      "writesMask": false,
+      "locksUnswept": false,
+      "breaksMask": true,
+      "sweepDays": 1.8,
+      "machine": "impl_cultivator"
+    },
+    {
+      "id": "resow",
+      "name": "复播",
+      "kind": "special",
+      "via": "resow",
+      "stage": "E",
+      "requiresMask": false,
+      "requiresUnlocked": false,
+      "writesMask": false,
+      "locksUnswept": false,
+      "breaksMask": false,
+      "sweepDays": 2,
+      "machine": "impl_potato_planter",
+      "reserved": true
+    }
+  ],
+  "edges": [
+    {
+      "from": "O",
+      "fromVariant": "",
+      "to": "A",
+      "toVariant": "",
+      "via": "sow",
+      "when": "process",
+      "enabled": true
+    },
+    {
+      "from": "D",
+      "fromVariant": "",
+      "to": "E",
+      "toVariant": "",
+      "via": "harvest",
+      "when": "process",
+      "enabled": true
+    },
+    {
+      "from": "*",
+      "fromVariant": "",
+      "to": "O",
+      "toVariant": "O1",
+      "via": "till",
+      "when": "process",
+      "enabled": true,
+      "breaksMask": true
+    },
+    {
+      "from": "E",
+      "fromVariant": "",
+      "to": "O",
+      "toVariant": "",
+      "via": "clear",
+      "when": "process",
+      "enabled": true,
+      "breaksMask": true
+    },
+    {
+      "from": "E",
+      "fromVariant": "",
+      "to": "A",
+      "toVariant": "",
+      "via": "resow",
+      "when": "process",
+      "enabled": false,
+      "breaksMask": false
+    },
+    {
+      "from": "O",
+      "fromVariant": "*",
+      "to": "O",
+      "toVariant": "O3",
+      "via": "idle",
+      "when": "auto",
+      "enabled": true
+    },
+    {
+      "from": "D",
+      "fromVariant": "",
+      "to": "D",
+      "toVariant": "D1",
+      "via": "overstay",
+      "when": "auto",
+      "enabled": true
+    },
+    {
+      "from": "D",
+      "fromVariant": "D1",
+      "to": "D",
+      "toVariant": "D2",
+      "via": "overstay",
+      "when": "auto",
+      "enabled": true
+    },
+    {
+      "from": "A",
+      "fromVariant": "",
+      "to": "B",
+      "toVariant": "",
+      "via": "clock",
+      "when": "natural",
+      "enabled": true
+    },
+    {
+      "from": "B",
+      "fromVariant": "",
+      "to": "C",
+      "toVariant": "",
+      "via": "clock",
+      "when": "natural",
+      "enabled": true
+    },
+    {
+      "from": "C",
+      "fromVariant": "",
+      "to": "D",
+      "toVariant": "",
+      "via": "clock",
+      "when": "natural",
+      "enabled": true
+    }
+  ],
+  "machines": {
+    "impl_potato_planter": {
+      "id": "impl_potato_planter",
+      "name": "播种",
+      "sweepHead": 1.8,
+      "sweepTail": -1.7
+    },
+    "impl_sprayer": {
+      "id": "impl_sprayer",
+      "name": "喷雾",
+      "sweepHead": 1.4,
+      "sweepTail": -1.5
+    },
+    "impl_fertilizer": {
+      "id": "impl_fertilizer",
+      "name": "施肥",
+      "sweepHead": 1.2,
+      "sweepTail": -1.6
+    },
+    "impl_cultivator": {
+      "id": "impl_cultivator",
+      "name": "中耕",
+      "sweepHead": 1.5,
+      "sweepTail": -1.4
+    },
+    "impl_rotavator": {
+      "id": "impl_rotavator",
+      "name": "旋耕",
+      "sweepHead": 1.6,
+      "sweepTail": -1.3
+    },
+    "harvester_potato": {
+      "id": "harvester_potato",
+      "name": "收获",
+      "sweepHead": 2.4,
+      "sweepTail": -2.2
+    }
+  },
+  "hooks": {
+    "cancelWorkOrder": "cancelWorkOrder"
+  }
+}

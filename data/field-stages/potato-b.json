@@ -1,0 +1,1244 @@
+{
+  "schema": "ringsheaf.field-stage/1",
+  "profile": "potato-b",
+  "readme": "土豆B。逻辑 id 仍是 crop_potato，对齐主进度里的土豆。日历中点来自 SURFACE_CROPS.potato 的 span(lo,hi)。侧卸不在田面阶段里。主进程用 parseFieldStageDoc 读。字段见 data/field-stages/README.md。",
+  "source": "SURFACE_CROPS.potato",
+  "cropId": "potato",
+  "logicId": "crop_potato",
+  "cropName": "中熟商品薯",
+  "name": "中熟商品薯",
+  "timeUnit": "gameDay",
+  "secondsPerDayAt1x": 1,
+  "calendar": {
+    "method": "round((lo+hi)/2)",
+    "spans": {
+      "potato_till": 4,
+      "potato_plant": 3,
+      "potato_emerg": 15,
+      "potato_hill": 12,
+      "potato_bulk": 40,
+      "potato_haulm": 7,
+      "potato_harvest": 11,
+      "potato_clear": 3
+    },
+    "maskDaysBeforeHarvest": 77,
+    "note": "蒙版内 A 到 D 之前合计 77 日，等于旧 maturity 81 减去整地 4 日。D 的 11 日是旧 hold。O 的 4 日是整地窗口，不进蒙版链。E 的 3 日是清田窗口，碎残可以在入仓后提前做。"
+  },
+  "rows": 8,
+  "grid": {
+    "along": 14
+  },
+  "plant": {
+    "shape": "bush",
+    "height": 0.55,
+    "row": 0.9,
+    "along": 0.4,
+    "young": "#51542c",
+    "ripe": "#81683f",
+    "stub": "#9e543a"
+  },
+  "ridge": [
+    {
+      "x": 0,
+      "y": 0.04
+    },
+    {
+      "x": 0.18,
+      "y": 0.06
+    },
+    {
+      "x": 0.5,
+      "y": 0.28
+    },
+    {
+      "x": 0.82,
+      "y": 0.06
+    },
+    {
+      "x": 1,
+      "y": 0.04
+    }
+  ],
+  "transition": {
+    "template": "scatter",
+    "span": "window",
+    "windowDays": 1.2
+  },
+  "chain": [
+    "A",
+    "emerg",
+    "hill",
+    "bulk",
+    "haulm",
+    "D"
+  ],
+  "stages": [
+    {
+      "id": "O",
+      "legacyId": "potato_till",
+      "name": "空地",
+      "kind": "idle",
+      "days": 4,
+      "optional": false,
+      "color": "#6f6a61",
+      "canopy": "#4a4844",
+      "roughness": 0.97,
+      "cover": 0,
+      "plantScale": 0,
+      "ridge": null,
+      "effect": "基肥，加上旋耕或深松。这一段还是裸土。",
+      "variants": [
+        {
+          "id": "O1",
+          "name": "中耕后",
+          "auto": false,
+          "days": 0,
+          "color": "#4a4844",
+          "roughness": 0.96,
+          "cover": 0,
+          "plantScale": 0,
+          "ridge": [
+            {
+              "x": 0,
+              "y": 0.014
+            },
+            {
+              "x": 0.22,
+              "y": 0.035
+            },
+            {
+              "x": 0.5,
+              "y": 0.322
+            },
+            {
+              "x": 0.78,
+              "y": 0.035
+            },
+            {
+              "x": 1,
+              "y": 0.014
+            }
+          ]
+        },
+        {
+          "id": "O2",
+          "name": "撒石灰",
+          "auto": false,
+          "days": 0,
+          "color": "#a2998a",
+          "canopy": "#bcc3c4",
+          "roughness": 0.9,
+          "cover": 0.08,
+          "plantScale": 0
+        },
+        {
+          "id": "Ob",
+          "name": "基肥后",
+          "auto": false,
+          "days": 0,
+          "color": "#81683f",
+          "roughness": 0.9,
+          "cover": 0.05,
+          "plantScale": 0
+        },
+        {
+          "id": "O3",
+          "name": "久置闲置",
+          "auto": true,
+          "days": 4,
+          "color": "#4a4844",
+          "roughness": 0.98,
+          "cover": 0,
+          "plantScale": 0,
+          "ridge": [
+            {
+              "x": 0,
+              "y": 0.03
+            },
+            {
+              "x": 0.5,
+              "y": 0.08
+            },
+            {
+              "x": 1,
+              "y": 0.03
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "A",
+      "legacyId": "potato_plant",
+      "name": "播种后",
+      "kind": "growth",
+      "days": 3,
+      "optional": false,
+      "color": "#4a4844",
+      "canopy": "#51542c",
+      "roughness": 0.95,
+      "cover": 0.1,
+      "plantScale": 0.16,
+      "ridge": [
+        {
+          "x": 0,
+          "y": 0.05
+        },
+        {
+          "x": 0.2,
+          "y": 0.07
+        },
+        {
+          "x": 0.5,
+          "y": 0.22
+        },
+        {
+          "x": 0.8,
+          "y": 0.07
+        },
+        {
+          "x": 1,
+          "y": 0.05
+        }
+      ],
+      "effect": "薯播扫过之后的田。这 3 日是旧播种窗口的中点。不出苗以前保持刚播的垄。",
+      "variants": []
+    },
+    {
+      "id": "emerg",
+      "legacyId": "potato_emerg",
+      "name": "出苗",
+      "kind": "growth",
+      "days": 15,
+      "optional": true,
+      "color": "#51542c",
+      "canopy": "#51542c",
+      "roughness": 0.84,
+      "cover": 0.4,
+      "plantScale": 0.38,
+      "ridge": null,
+      "effect": "浅中耕。这一段不追肥。播种走完才开始出绿。",
+      "variants": [
+        {
+          "id": "Em1",
+          "name": "浅中耕",
+          "auto": false,
+          "days": 0,
+          "color": "#4a4844",
+          "canopy": "#787c32",
+          "roughness": 0.8,
+          "cover": 0.46,
+          "plantScale": 0.4
+        }
+      ]
+    },
+    {
+      "id": "hill",
+      "legacyId": "potato_hill",
+      "name": "培土",
+      "kind": "growth",
+      "days": 12,
+      "optional": true,
+      "color": "#6f6a61",
+      "canopy": "#787c32",
+      "roughness": 0.72,
+      "cover": 0.72,
+      "plantScale": 0.7,
+      "ridge": [
+        {
+          "x": 0,
+          "y": 0.02
+        },
+        {
+          "x": 0.22,
+          "y": 0.05
+        },
+        {
+          "x": 0.5,
+          "y": 0.46
+        },
+        {
+          "x": 0.78,
+          "y": 0.05
+        },
+        {
+          "x": 1,
+          "y": 0.02
+        }
+      ],
+      "effect": "培土，同时追肥。",
+      "variants": [
+        {
+          "id": "Hi1",
+          "name": "培土",
+          "auto": false,
+          "days": 0,
+          "color": "#6f6a61",
+          "canopy": "#787c32",
+          "roughness": 0.7,
+          "cover": 0.74,
+          "plantScale": 0.72,
+          "ridge": [
+            {
+              "x": 0,
+              "y": 0.02
+            },
+            {
+              "x": 0.22,
+              "y": 0.05
+            },
+            {
+              "x": 0.5,
+              "y": 0.46
+            },
+            {
+              "x": 0.78,
+              "y": 0.05
+            },
+            {
+              "x": 1,
+              "y": 0.02
+            }
+          ]
+        },
+        {
+          "id": "Hi2",
+          "name": "追肥",
+          "auto": false,
+          "days": 0,
+          "color": "#81683f",
+          "canopy": "#b59a63",
+          "roughness": 0.78,
+          "cover": 0.7,
+          "plantScale": 0.72
+        }
+      ]
+    },
+    {
+      "id": "bulk",
+      "legacyId": "potato_bulk",
+      "name": "膨大",
+      "kind": "growth",
+      "days": 40,
+      "optional": true,
+      "color": "#51542c",
+      "canopy": "#c4b0d4",
+      "roughness": 0.62,
+      "cover": 0.9,
+      "plantScale": 0.96,
+      "ridge": null,
+      "effect": "水网灌溉。侦察和虫害防治只派无人机，不追肥。",
+      "variants": [
+        {
+          "id": "Bu1",
+          "name": "灌溉",
+          "auto": false,
+          "days": 0,
+          "color": "#52747e",
+          "canopy": "#8fbbad",
+          "roughness": 0.55,
+          "cover": 0.92,
+          "plantScale": 0.98
+        },
+        {
+          "id": "Bu2",
+          "name": "侦察",
+          "auto": false,
+          "days": 0,
+          "color": "#51542c",
+          "canopy": "#c4b0d4",
+          "roughness": 0.6,
+          "cover": 0.9,
+          "plantScale": 0.96
+        },
+        {
+          "id": "Bu3",
+          "name": "植保",
+          "auto": false,
+          "days": 0,
+          "color": "#3e7a37",
+          "canopy": "#787c32",
+          "roughness": 0.58,
+          "cover": 0.92,
+          "plantScale": 0.96
+        }
+      ]
+    },
+    {
+      "id": "haulm",
+      "legacyId": "potato_haulm",
+      "name": "杀秧",
+      "kind": "growth",
+      "days": 7,
+      "optional": true,
+      "color": "#9e543a",
+      "canopy": "#9e543a",
+      "roughness": 0.84,
+      "cover": 0.28,
+      "plantScale": 0.22,
+      "ridge": null,
+      "effect": "后挂碎秧。",
+      "variants": [
+        {
+          "id": "Ha1",
+          "name": "打秧",
+          "auto": false,
+          "days": 0,
+          "color": "#9e543a",
+          "canopy": "#6f6a61",
+          "roughness": 0.9,
+          "cover": 0.16,
+          "plantScale": 0.12
+        }
+      ]
+    },
+    {
+      "id": "D",
+      "legacyId": "potato_harvest",
+      "name": "待收获",
+      "kind": "growth",
+      "days": 11,
+      "optional": false,
+      "color": "#81683f",
+      "canopy": "#81683f",
+      "roughness": 0.7,
+      "cover": 0.55,
+      "plantScale": 0.48,
+      "ridge": null,
+      "effect": "自走薯收。窗口结束还没收就进入过熟。侧卸不在这一段。",
+      "variants": [
+        {
+          "id": "D1",
+          "name": "过熟",
+          "auto": true,
+          "days": 4,
+          "color": "#b59a63",
+          "canopy": "#81683f",
+          "roughness": 0.78,
+          "cover": 0.4,
+          "plantScale": 0.36
+        },
+        {
+          "id": "D2",
+          "name": "烂地",
+          "auto": true,
+          "days": 4,
+          "color": "#9e543a",
+          "canopy": "#4a4844",
+          "roughness": 0.96,
+          "cover": 0.18,
+          "plantScale": 0.12,
+          "ridge": [
+            {
+              "x": 0,
+              "y": 0.03
+            },
+            {
+              "x": 0.5,
+              "y": 0.08
+            },
+            {
+              "x": 1,
+              "y": 0.03
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "E",
+      "legacyId": "potato_clear",
+      "name": "收获后",
+      "kind": "post",
+      "days": 3,
+      "optional": false,
+      "color": "#b59a63",
+      "canopy": "#6f6a61",
+      "roughness": 0.93,
+      "cover": 0.06,
+      "plantScale": 0.04,
+      "ridge": [
+        {
+          "x": 0,
+          "y": 0.03
+        },
+        {
+          "x": 0.5,
+          "y": 0.08
+        },
+        {
+          "x": 1,
+          "y": 0.03
+        }
+      ],
+      "effect": "碎残。收获入仓之后就能做，不等这 3 日走完。",
+      "variants": []
+    }
+  ],
+  "ops": [
+    {
+      "via": null,
+      "variant": "Ob",
+      "requiresMask": false,
+      "requiresUnlocked": false,
+      "writesMask": false,
+      "locksUnswept": false,
+      "breaksMask": false,
+      "reserved": false,
+      "sweepDays": 1.4,
+      "id": "potato_base_fert",
+      "name": "基肥",
+      "kind": "optional",
+      "stage": "O",
+      "machine": "impl_fertilizer",
+      "extensions": {
+        "legacyStage": "potato_till",
+        "legacyJob": "potato_base_fert",
+        "required": true,
+        "impl": "impl_fertilizer",
+        "implAny": null,
+        "self": null,
+        "mode": null,
+        "cap": "fertilize",
+        "caps": null,
+        "load": "fertilizer",
+        "drone": false,
+        "auto": false,
+        "plant": false,
+        "harvest": false,
+        "afterHarvest": false,
+        "penalty": 0.15,
+        "order": 0,
+        "framework": false,
+        "note": "整地窗口里的必要工单。时钟不等它。后一次作业盖住地面变体。"
+      }
+    },
+    {
+      "via": null,
+      "variant": "O1",
+      "requiresMask": false,
+      "requiresUnlocked": false,
+      "writesMask": false,
+      "locksUnswept": false,
+      "breaksMask": false,
+      "reserved": false,
+      "sweepDays": 1.4,
+      "id": "potato_rotavate",
+      "name": "旋耕",
+      "kind": "optional",
+      "stage": "O",
+      "machine": "impl_rotavator",
+      "extensions": {
+        "legacyStage": "potato_till",
+        "legacyJob": "potato_rotavate",
+        "required": true,
+        "impl": null,
+        "implAny": [
+          "impl_rotavator",
+          "impl_subsoiler"
+        ],
+        "self": null,
+        "mode": null,
+        "cap": null,
+        "caps": [
+          "till_rotary",
+          "till_subsoil"
+        ],
+        "load": null,
+        "drone": false,
+        "auto": false,
+        "plant": false,
+        "harvest": false,
+        "afterHarvest": false,
+        "penalty": 0.15,
+        "order": 1,
+        "framework": false,
+        "note": "旋耕或深松，二选一。预览用旋耕机。"
+      }
+    },
+    {
+      "via": null,
+      "variant": "O2",
+      "requiresMask": false,
+      "requiresUnlocked": false,
+      "writesMask": false,
+      "locksUnswept": false,
+      "breaksMask": false,
+      "reserved": false,
+      "sweepDays": 1.6,
+      "id": "lime",
+      "name": "撒石灰",
+      "kind": "optional",
+      "stage": "O",
+      "machine": "impl_fertilizer",
+      "extensions": {
+        "legacyStage": null,
+        "legacyJob": null,
+        "required": false,
+        "impl": "impl_fertilizer",
+        "implAny": null,
+        "self": null,
+        "mode": null,
+        "cap": null,
+        "caps": null,
+        "load": null,
+        "drone": false,
+        "auto": false,
+        "plant": false,
+        "harvest": false,
+        "afterHarvest": false,
+        "penalty": 0,
+        "order": 90,
+        "framework": true,
+        "note": "O2 变体仍留着。旧土豆日历没有这道工。"
+      }
+    },
+    {
+      "via": "till",
+      "variant": null,
+      "requiresMask": false,
+      "requiresUnlocked": false,
+      "writesMask": false,
+      "locksUnswept": false,
+      "breaksMask": true,
+      "reserved": false,
+      "sweepDays": 2,
+      "id": "till",
+      "name": "翻地",
+      "kind": "special",
+      "stage": "*",
+      "machine": "impl_rotavator",
+      "extensions": {
+        "legacyStage": null,
+        "legacyJob": null,
+        "required": false,
+        "impl": "impl_rotavator",
+        "implAny": null,
+        "self": null,
+        "mode": null,
+        "cap": null,
+        "caps": null,
+        "load": null,
+        "drone": false,
+        "auto": false,
+        "plant": false,
+        "harvest": false,
+        "afterHarvest": false,
+        "penalty": 0,
+        "order": 91,
+        "framework": true,
+        "note": "特殊流程，可拆蒙版。不是旧表里的旋耕。"
+      }
+    },
+    {
+      "via": "sow",
+      "variant": null,
+      "requiresMask": false,
+      "requiresUnlocked": true,
+      "writesMask": true,
+      "locksUnswept": true,
+      "breaksMask": false,
+      "reserved": false,
+      "sweepDays": 2,
+      "id": "potato_plant",
+      "name": "薯播",
+      "kind": "required",
+      "stage": "O",
+      "machine": "impl_potato_planter",
+      "extensions": {
+        "legacyStage": "potato_plant",
+        "legacyJob": "potato_plant",
+        "required": true,
+        "impl": "impl_potato_planter",
+        "implAny": null,
+        "self": null,
+        "mode": null,
+        "cap": "plant_potato",
+        "caps": null,
+        "load": "seed",
+        "drone": false,
+        "auto": false,
+        "plant": true,
+        "harvest": false,
+        "afterHarvest": false,
+        "penalty": 0.15,
+        "order": 2,
+        "framework": false,
+        "note": "必要流程。扫过的格子进 A，没扫到的锁住。"
+      }
+    },
+    {
+      "via": null,
+      "variant": "Em1",
+      "requiresMask": true,
+      "requiresUnlocked": false,
+      "writesMask": false,
+      "locksUnswept": false,
+      "breaksMask": false,
+      "reserved": false,
+      "sweepDays": 1.4,
+      "id": "potato_shallow",
+      "name": "浅中耕",
+      "kind": "optional",
+      "stage": "emerg",
+      "machine": "impl_cultivator",
+      "extensions": {
+        "legacyStage": "potato_emerg",
+        "legacyJob": "potato_shallow",
+        "required": true,
+        "impl": "impl_cultivator",
+        "implAny": null,
+        "self": null,
+        "mode": "shallow",
+        "cap": "cultivate",
+        "caps": null,
+        "load": null,
+        "drone": false,
+        "auto": false,
+        "plant": false,
+        "harvest": false,
+        "afterHarvest": false,
+        "penalty": 0.15,
+        "order": 3,
+        "framework": false,
+        "note": "必要工单，但不挡住出苗进入培土。"
+      }
+    },
+    {
+      "via": null,
+      "variant": "Hi1",
+      "requiresMask": true,
+      "requiresUnlocked": false,
+      "writesMask": false,
+      "locksUnswept": false,
+      "breaksMask": false,
+      "reserved": false,
+      "sweepDays": 1.4,
+      "id": "potato_hill",
+      "name": "培土",
+      "kind": "optional",
+      "stage": "hill",
+      "machine": "impl_cultivator",
+      "extensions": {
+        "legacyStage": "potato_hill",
+        "legacyJob": "potato_hill",
+        "required": true,
+        "impl": "impl_cultivator",
+        "implAny": null,
+        "self": null,
+        "mode": "hill",
+        "cap": "cultivate",
+        "caps": null,
+        "load": null,
+        "drone": false,
+        "auto": false,
+        "plant": false,
+        "harvest": false,
+        "afterHarvest": false,
+        "penalty": 0.15,
+        "order": 4,
+        "framework": false,
+        "note": ""
+      }
+    },
+    {
+      "via": null,
+      "variant": "Hi2",
+      "requiresMask": true,
+      "requiresUnlocked": false,
+      "writesMask": false,
+      "locksUnswept": false,
+      "breaksMask": false,
+      "reserved": false,
+      "sweepDays": 1.4,
+      "id": "potato_topdress",
+      "name": "追肥",
+      "kind": "optional",
+      "stage": "hill",
+      "machine": "impl_fertilizer",
+      "extensions": {
+        "legacyStage": "potato_hill",
+        "legacyJob": "potato_topdress",
+        "required": true,
+        "impl": "impl_fertilizer",
+        "implAny": null,
+        "self": null,
+        "mode": null,
+        "cap": "fertilize",
+        "caps": null,
+        "load": "fertilizer",
+        "drone": false,
+        "auto": false,
+        "plant": false,
+        "harvest": false,
+        "afterHarvest": false,
+        "penalty": 0.15,
+        "order": 5,
+        "framework": false,
+        "note": "和培土同一阶段。后扫的一次盖住变体。"
+      }
+    },
+    {
+      "via": null,
+      "variant": "Bu1",
+      "requiresMask": true,
+      "requiresUnlocked": false,
+      "writesMask": false,
+      "locksUnswept": false,
+      "breaksMask": false,
+      "reserved": false,
+      "sweepDays": 1.2,
+      "id": "potato_irrigate",
+      "name": "灌溉",
+      "kind": "optional",
+      "stage": "bulk",
+      "machine": "irrig_net",
+      "extensions": {
+        "legacyStage": "potato_bulk",
+        "legacyJob": "potato_irrigate",
+        "required": true,
+        "impl": null,
+        "implAny": null,
+        "self": null,
+        "mode": null,
+        "cap": null,
+        "caps": null,
+        "load": null,
+        "drone": false,
+        "auto": true,
+        "plant": false,
+        "harvest": false,
+        "afterHarvest": false,
+        "penalty": 0.15,
+        "order": 6,
+        "framework": false,
+        "note": "水网自动灌溉，不派拖拉机。工坊仍可扫一遍看变体。"
+      }
+    },
+    {
+      "via": null,
+      "variant": "Bu2",
+      "requiresMask": true,
+      "requiresUnlocked": false,
+      "writesMask": false,
+      "locksUnswept": false,
+      "breaksMask": false,
+      "reserved": false,
+      "sweepDays": 1.2,
+      "id": "potato_scout",
+      "name": "侦察",
+      "kind": "optional",
+      "stage": "bulk",
+      "machine": "drone_scout",
+      "extensions": {
+        "legacyStage": "potato_bulk",
+        "legacyJob": "potato_scout",
+        "required": false,
+        "impl": null,
+        "implAny": null,
+        "self": null,
+        "mode": null,
+        "cap": "scout",
+        "caps": null,
+        "load": null,
+        "drone": true,
+        "auto": false,
+        "plant": false,
+        "harvest": false,
+        "afterHarvest": false,
+        "penalty": 0,
+        "order": 7,
+        "framework": false,
+        "note": "只派无人机。"
+      }
+    },
+    {
+      "via": null,
+      "variant": "Bu3",
+      "requiresMask": true,
+      "requiresUnlocked": false,
+      "writesMask": false,
+      "locksUnswept": false,
+      "breaksMask": false,
+      "reserved": false,
+      "sweepDays": 1.2,
+      "id": "potato_treat",
+      "name": "植保",
+      "kind": "optional",
+      "stage": "bulk",
+      "machine": "drone_treat",
+      "extensions": {
+        "legacyStage": "potato_bulk",
+        "legacyJob": "potato_treat",
+        "required": false,
+        "impl": null,
+        "implAny": null,
+        "self": null,
+        "mode": null,
+        "cap": "pest_treat",
+        "caps": null,
+        "load": "pest",
+        "drone": true,
+        "auto": false,
+        "plant": false,
+        "harvest": false,
+        "afterHarvest": false,
+        "penalty": 0,
+        "order": 8,
+        "framework": false,
+        "note": "虫害防治只派无人机。地面喷雾不在这道工里。"
+      }
+    },
+    {
+      "via": null,
+      "variant": "Ha1",
+      "requiresMask": true,
+      "requiresUnlocked": false,
+      "writesMask": false,
+      "locksUnswept": false,
+      "breaksMask": false,
+      "reserved": false,
+      "sweepDays": 1.6,
+      "id": "potato_haulm",
+      "name": "打秧",
+      "kind": "optional",
+      "stage": "haulm",
+      "machine": "impl_haulm",
+      "extensions": {
+        "legacyStage": "potato_haulm",
+        "legacyJob": "potato_haulm",
+        "required": true,
+        "impl": "impl_haulm",
+        "implAny": null,
+        "self": null,
+        "mode": null,
+        "cap": "haulm",
+        "caps": null,
+        "load": null,
+        "drone": false,
+        "auto": false,
+        "plant": false,
+        "harvest": false,
+        "afterHarvest": false,
+        "penalty": 0.15,
+        "order": 9,
+        "framework": false,
+        "note": ""
+      }
+    },
+    {
+      "via": "harvest",
+      "variant": null,
+      "requiresMask": true,
+      "requiresUnlocked": false,
+      "writesMask": false,
+      "locksUnswept": false,
+      "breaksMask": false,
+      "reserved": false,
+      "sweepDays": 2.2,
+      "id": "potato_harvest",
+      "name": "起薯",
+      "kind": "required",
+      "stage": "D",
+      "machine": "harvester_potato",
+      "extensions": {
+        "legacyStage": "potato_harvest",
+        "legacyJob": "potato_harvest",
+        "required": true,
+        "impl": null,
+        "implAny": null,
+        "self": "harvester_potato",
+        "mode": null,
+        "cap": "harvest_potato",
+        "caps": null,
+        "load": null,
+        "drone": false,
+        "auto": false,
+        "plant": false,
+        "harvest": true,
+        "afterHarvest": false,
+        "penalty": 0.15,
+        "order": 10,
+        "framework": false,
+        "note": "执行链在收获机侧。仓满停车侧卸，不单列田面阶段。"
+      }
+    },
+    {
+      "via": "clear",
+      "variant": null,
+      "requiresMask": false,
+      "requiresUnlocked": false,
+      "writesMask": false,
+      "locksUnswept": false,
+      "breaksMask": true,
+      "reserved": false,
+      "sweepDays": 1.8,
+      "id": "potato_clear",
+      "name": "碎残",
+      "kind": "special",
+      "stage": "E",
+      "machine": "impl_cultivator",
+      "extensions": {
+        "legacyStage": "potato_clear",
+        "legacyJob": "potato_clear",
+        "required": true,
+        "impl": null,
+        "implAny": [
+          "impl_cultivator",
+          "impl_rotavator"
+        ],
+        "self": null,
+        "mode": "residue",
+        "cap": null,
+        "caps": [
+          "cultivate",
+          "till_rotary"
+        ],
+        "load": null,
+        "drone": false,
+        "auto": false,
+        "plant": false,
+        "harvest": false,
+        "afterHarvest": true,
+        "penalty": 0.15,
+        "order": 11,
+        "framework": false,
+        "note": "入仓之后就能做，不等 E 的 3 日。"
+      }
+    },
+    {
+      "via": "resow",
+      "variant": null,
+      "requiresMask": false,
+      "requiresUnlocked": false,
+      "writesMask": false,
+      "locksUnswept": false,
+      "breaksMask": false,
+      "reserved": true,
+      "sweepDays": 2,
+      "id": "resow",
+      "name": "复播",
+      "kind": "special",
+      "stage": "E",
+      "machine": "impl_potato_planter",
+      "extensions": {
+        "legacyStage": null,
+        "legacyJob": null,
+        "required": false,
+        "impl": "impl_potato_planter",
+        "implAny": null,
+        "self": null,
+        "mode": null,
+        "cap": null,
+        "caps": null,
+        "load": null,
+        "drone": false,
+        "auto": false,
+        "plant": true,
+        "harvest": false,
+        "afterHarvest": false,
+        "penalty": 0,
+        "order": 92,
+        "framework": true,
+        "note": "E→A 预留，默认关。"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "O",
+      "fromVariant": "",
+      "to": "A",
+      "toVariant": "",
+      "via": "sow",
+      "when": "process",
+      "enabled": true,
+      "breaksMask": false
+    },
+    {
+      "from": "D",
+      "fromVariant": "",
+      "to": "E",
+      "toVariant": "",
+      "via": "harvest",
+      "when": "process",
+      "enabled": true,
+      "breaksMask": false
+    },
+    {
+      "from": "*",
+      "fromVariant": "",
+      "to": "O",
+      "toVariant": "O1",
+      "via": "till",
+      "when": "process",
+      "enabled": true,
+      "breaksMask": true
+    },
+    {
+      "from": "E",
+      "fromVariant": "",
+      "to": "O",
+      "toVariant": "",
+      "via": "clear",
+      "when": "process",
+      "enabled": true,
+      "breaksMask": true
+    },
+    {
+      "from": "E",
+      "fromVariant": "",
+      "to": "A",
+      "toVariant": "",
+      "via": "resow",
+      "when": "process",
+      "enabled": false,
+      "breaksMask": false
+    },
+    {
+      "from": "O",
+      "fromVariant": "*",
+      "to": "O",
+      "toVariant": "O3",
+      "via": "idle",
+      "when": "auto",
+      "enabled": true,
+      "breaksMask": false
+    },
+    {
+      "from": "D",
+      "fromVariant": "",
+      "to": "D",
+      "toVariant": "D1",
+      "via": "overstay",
+      "when": "auto",
+      "enabled": true,
+      "breaksMask": false
+    },
+    {
+      "from": "D",
+      "fromVariant": "D1",
+      "to": "D",
+      "toVariant": "D2",
+      "via": "overstay",
+      "when": "auto",
+      "enabled": true,
+      "breaksMask": false
+    },
+    {
+      "from": "A",
+      "fromVariant": "",
+      "to": "emerg",
+      "toVariant": "",
+      "via": "clock",
+      "when": "natural",
+      "enabled": true,
+      "breaksMask": false
+    },
+    {
+      "from": "emerg",
+      "fromVariant": "",
+      "to": "hill",
+      "toVariant": "",
+      "via": "clock",
+      "when": "natural",
+      "enabled": true,
+      "breaksMask": false
+    },
+    {
+      "from": "hill",
+      "fromVariant": "",
+      "to": "bulk",
+      "toVariant": "",
+      "via": "clock",
+      "when": "natural",
+      "enabled": true,
+      "breaksMask": false
+    },
+    {
+      "from": "bulk",
+      "fromVariant": "",
+      "to": "haulm",
+      "toVariant": "",
+      "via": "clock",
+      "when": "natural",
+      "enabled": true,
+      "breaksMask": false
+    },
+    {
+      "from": "haulm",
+      "fromVariant": "",
+      "to": "D",
+      "toVariant": "",
+      "via": "clock",
+      "when": "natural",
+      "enabled": true,
+      "breaksMask": false
+    }
+  ],
+  "machines": {
+    "impl_potato_planter": {
+      "id": "impl_potato_planter",
+      "name": "薯播",
+      "sweepHead": 1.8,
+      "sweepTail": -1.7
+    },
+    "impl_fertilizer": {
+      "id": "impl_fertilizer",
+      "name": "施肥",
+      "sweepHead": 1.2,
+      "sweepTail": -1.6
+    },
+    "impl_rotavator": {
+      "id": "impl_rotavator",
+      "name": "旋耕",
+      "sweepHead": 1.6,
+      "sweepTail": -1.3
+    },
+    "impl_subsoiler": {
+      "id": "impl_subsoiler",
+      "name": "深松",
+      "sweepHead": 1.5,
+      "sweepTail": -1.4
+    },
+    "impl_cultivator": {
+      "id": "impl_cultivator",
+      "name": "中耕",
+      "sweepHead": 1.5,
+      "sweepTail": -1.4
+    },
+    "impl_haulm": {
+      "id": "impl_haulm",
+      "name": "打秧",
+      "sweepHead": 1.7,
+      "sweepTail": -1.2
+    },
+    "harvester_potato": {
+      "id": "harvester_potato",
+      "name": "起薯",
+      "sweepHead": 2.4,
+      "sweepTail": -2.2
+    },
+    "irrig_net": {
+      "id": "irrig_net",
+      "name": "水网",
+      "sweepHead": 0.4,
+      "sweepTail": -0.4
+    },
+    "drone_scout": {
+      "id": "drone_scout",
+      "name": "侦察无人机",
+      "sweepHead": 0.6,
+      "sweepTail": -0.8
+    },
+    "drone_treat": {
+      "id": "drone_treat",
+      "name": "植保无人机",
+      "sweepHead": 0.6,
+      "sweepTail": -0.8
+    }
+  },
+  "hooks": {
+    "cancelWorkOrder": "cancelWorkOrder"
+  }
+}

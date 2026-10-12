@@ -37,6 +37,27 @@ main{display:grid;grid-template-columns:220px 1fr 268px;min-height:0}
 #brief input,#brief textarea{font:inherit;color:var(--fg);background:transparent;border:1px solid var(--line);padding:6px 8px;letter-spacing:.06em;font-size:13px;resize:vertical}
 #brief textarea{min-height:220px;line-height:1.5}
 #brief .foot{margin-top:8px;font-size:11px;letter-spacing:.06em;color:var(--mut);line-height:1.55}
+main.field-on{grid-template-columns:200px 1fr 320px}
+#brief-form{display:flex;flex-direction:column;gap:10px;min-height:0}
+#brief-form[hidden],#field-panel[hidden],#fieldbar[hidden]{display:none !important}
+#fieldbar{position:absolute;left:12px;right:12px;bottom:12px;z-index:2;display:flex;flex-direction:column;gap:6px;background:rgba(10,12,20,.82);border:1px solid var(--line);padding:8px 10px}
+#fieldbar button,#field-panel button{font:inherit;color:var(--fg);background:transparent;border:1px solid var(--line);padding:4px 8px;letter-spacing:.08em;cursor:pointer;font-size:12px}
+#fieldbar button.on,#field-panel button.on{border-color:var(--sig);color:var(--zone)}
+#field-panel{display:flex;flex-direction:column;gap:8px}
+.fs-row{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.fs-gantt{display:flex;height:22px;width:100%;gap:2px}
+.fs-gantt button{flex:1 1 auto;min-width:0;padding:0 3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;letter-spacing:.02em}
+.fs h3{margin:0;font-size:13px;font-weight:500;letter-spacing:.16em}
+.fs p{margin:0}
+.fs label{display:flex;flex-direction:column;gap:4px;font-size:10px;letter-spacing:.14em;color:var(--mut)}
+.fs input,.fs select{font:inherit;color:var(--fg);background:#0a0c14;border:1px solid var(--line);padding:4px 6px;font-size:13px;letter-spacing:.04em}
+.fs input[type="color"]{padding:0;height:26px;width:100%}
+.fs-split{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.fs-stage{display:grid;grid-template-columns:1fr 72px;gap:6px;align-items:center}
+.fs-stage button{text-align:left}
+#fs-curve{width:100%;height:148px;background:#10131c;border:1px solid var(--line);touch-action:none;cursor:crosshair;display:block}
+.fs-help,.fs-note{font-size:11px;line-height:1.55;color:var(--mut);letter-spacing:.03em}
+#fs-status{font-size:12px;letter-spacing:.06em;line-height:1.45}
 </style></head><body>
 <header>
   <div class="brand"><i></i><div><b>环穗 · 资产工坊</b><small>设计沙盒 · 定稿后由主进度接入</small></div></div>
@@ -53,14 +74,18 @@ main{display:grid;grid-template-columns:220px 1fr 268px;min-height:0}
       <button type="button" data-s="sel">选中</button>
       <button type="button" data-s="break">损坏</button>
     </div>
+    <div id="fieldbar" hidden></div>
     <div id="hint">拖动 旋转 · 右键 平移 · 滚轮 缩放<br>1–4 状态 · 灯组可关</div>
   </div>
   <aside id="brief">
+    <div id="brief-form">
     <label>名称<input id="b-name" autocomplete="off"></label>
     <label>类别<input id="b-cls" autocomplete="off"></label>
     <label>模数<input id="b-size" autocomplete="off"></label>
     <label>备注<textarea id="b-notes"></textarea></label>
     <div class="foot">备注只留在这台浏览器里，不写入环穗存档。</div>
+    </div>
+    <div id="field-panel" class="fs" hidden></div>
   </aside>
 </main>
 <script>__BUNDLE__</script>

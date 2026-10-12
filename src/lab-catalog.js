@@ -1,6 +1,7 @@
 // 资产工坊目录。只有名字和分类，不进主进度存档。
 export const LAB_CLASSES = [
   { id: 'unit', label: '地块' },
+  { id: 'field', label: '田间' },
   { id: 'machine', label: '农机' },
   { id: 'equip', label: '设备' },
   { id: 'rail', label: '轨道设备' },
@@ -188,6 +189,22 @@ export const LAB_ENTRIES = [
   },
   { id: 'field', cls: 'unit', name: '地表田块', size: '128 × 128 m', span: 128, notes: '露天小格。地面是垄，四周是田埂。没有顶。' },
   ...fieldSeries(),
+  {
+    id: 'field-stage',
+    cls: 'field',
+    name: '阶段编辑器',
+    size: '预览 36 × 28 m',
+    span: 44,
+    notes: `田间阶段编辑器。预览一块田，不改环穗里的农时。
+
+空地是 O。播种扫出蒙版 M，M 里从 A 播种后走到 D 待收获，收割后是 E。中间的阶段可以拿掉或插入。土豆这份是土豆B：出苗、培土、膨大、杀秧插在 A 和 D 之间。M 外本轮不参与，也不能再播。
+
+时长是游戏日。1× 下 1 日等于 1 秒，加速按这个比例走。可选作业写成 A1、A2，后一次盖住前一次，到点仍进下一阶段。空地放久变成 O3。待收不割变成 D1，再变成 D2。
+
+收获后默认沿边表清田回 O。E→A 留在边表里，默认关掉。翻地、清田可以拆掉蒙版。取消扫田只停这一趟。
+
+右侧改时长、颜色、垄截面和行数。截面横轴是垄宽，纵轴是高度。保存留在这台浏览器。下载的 JSON 和 data/field-stages/potato.json 是同一结构。主进程用 src/field-stages.js 的 parseFieldStageDoc 来读。`,
+  },
   { id: 'deck', cls: 'unit', name: '培育层地板', size: '128 × 128 m', span: 128, notes: '密封小格。金属地板、墙和顶缘。冷色缝灯。' },
   {
     id: 'hub',
