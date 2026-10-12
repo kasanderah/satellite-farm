@@ -12,6 +12,9 @@ import {
 } from './field-stages.js';
 
 const PREVIEW = { width: 36, length: 28 };
+// 一条垄至少这么多段，陡壁和平顶才不会被 10 来个顶点收成圆丘。行数最多 16。
+const RIDGE_SAMPLES = 64;
+const ALONG_SAMPLES = 24;
 const SPEEDS = [1, 4, 8, 16];
 const SHAPES = ['bush', 'ear', 'stalk', 'tuft', 'rosette'];
 const PLANT_CAP = 1400;
@@ -300,12 +303,13 @@ export function createFieldWorkshop(els) {
 <label>沿行格数<input id="fs-along" type="number" min="6" max="28" step="1"></label>
 </div>
 <div class="fs-split">
-<label>植株<select id="fs-shape">${SHAPES.map(s => `<option value="${s}">${s}</option>`).join('')}</select></label>
+<label>植株模型<select id="fs-shape">${SHAPES.map(s => `<option value="${s}">${s}</option>`).join('')}</select></label>
 <label>株高 m<input id="fs-height" type="number" min="0.1" max="3" step="0.05"></label>
 </div>
 <label>株距 m<input id="fs-plant-along" type="number" min="0.25" max="1.4" step="0.05"></label>
 <div id="fs-edges"></div>
 <p id="fs-mach" class="fs-note"></p>
+<label>显示名<input id="fs-new-name" type="text" maxlength="24" placeholder="作物名"></label>
 <div class="fs-row">
 <button type="button" id="fs-save">保存</button>
 <button type="button" id="fs-dl">下载 JSON</button>
@@ -386,15 +390,26 @@ export function createFieldWorkshop(els) {
       note = '已恢复占位链';
     });
     panel.querySelector('#fs-new').addEventListener('click', () => {
+      const name = panel.querySelector('#fs-new-name').value.trim();
+      if (!name) {
+        note = '先写下作物显示名';
+        paintStatus();
+        return;
+      }
       let n = 1;
       while (docs['custom' + n]) n += 1;
       const id = 'custom' + n;
-      docs[id] = placeholderFieldDoc({ id, name: '新作物 ' + n, shape: 'bush', height: 0.5, row: 0.8, along: 0.4, young: PALETTE.oliveDp, ripe: PALETTE.ochre, stub: PALETTE.rust });
+      const doc = placeholderFieldDoc({ id, name, shape: 'bush', height: 0.5, row: 0.8, along: 0.4, young: PALETTE.oliveDp, ripe: PALETTE.ochre, stub: PALETTE.rust });
+      doc.cropName = name;
+      doc.name = name;
+      docs[id] = doc;
       cropId = id;
       selected = 'O';
       resetSim();
       paintDynamic(true);
       persist();
+      panel.querySelector('#fs-new-name').value = '';
+      note = '已加入 ' + name;
     });
     panel.querySelector('#fs-stages').addEventListener('click', (e) => {
       const b = e.target.closest('[data-stage]');
@@ -963,7 +978,7 @@ ${variants}
 
   function build() {
     const group = new THREE.Group();
-    const geo = new THREE.PlaneGeometry(PREVIEW.width, PREVIEW.length, 80, 56);
+    const geo = new THREE.PlaneGeometry(PREVIEW.width, PREVIEW.length, 16 * RIDGE_SAMPLES, ALONG_SAMPLES);
     geo.rotateX(-Math.PI / 2);
     const count = geo.attributes.position.count;
     const soil = new THREE.BufferAttribute(new Float32Array(count * 3), 3);

@@ -145,6 +145,7 @@ export function placeholderFieldDoc(crop) {
     cropId: id,
     logicId: 'crop_' + id,
     cropName: c.name || id,
+    name: c.name || id,
     timeUnit: 'gameDay',
     secondsPerDayAt1x: FIELD_STAGE_SECONDS_PER_DAY,
     rows: 8,
@@ -257,7 +258,7 @@ export function parseFieldStageDoc(input) {
   if (!Array.isArray(input.edges)) throw new Error('田间配置缺少 edges');
   const seed = placeholderFieldDoc({
     id: input.cropId || 'crop',
-    name: input.cropName,
+    name: input.cropName || input.name,
     shape: input.plant && input.plant.shape,
     height: input.plant && input.plant.height,
     row: input.plant && input.plant.row,
@@ -313,6 +314,9 @@ export function parseFieldStageDoc(input) {
   if (!templates.has(doc.transition.template)) doc.transition.template = 'scatter';
   if (doc.transition.span !== 'full') doc.transition.span = 'window';
   doc.transition.windowDays = clampDays(doc.transition.windowDays, 1.2);
+  const cropName = String(input.cropName || input.name || seed.cropName || doc.cropId).trim() || doc.cropId;
+  doc.cropName = cropName;
+  doc.name = cropName;
   return rebuildNaturalEdges(doc);
 }
 

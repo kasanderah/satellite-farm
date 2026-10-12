@@ -44,6 +44,11 @@ test('potato placeholder has the field chain, both harvest exits, and sweep poin
 test('a new crop gets its own placeholder chain', () => {
   const d = placeholderFieldDoc({ id: 'custom1', name: '新作物', shape: 'ear', young: '#787c32', ripe: '#b59a63', stub: '#81683f' });
   assert.equal(d.logicId, 'crop_custom1');
+  assert.equal(d.cropName, '新作物');
+  assert.equal(d.name, '新作物');
+  const renamed = parseFieldStageDoc({ cropId: 'custom1', name: '青贮玉米', stages: d.stages, edges: d.edges });
+  assert.equal(renamed.cropName, '青贮玉米');
+  assert.equal(renamed.name, '青贮玉米');
   assert.ok(d.stages.length >= 6);
   assert.equal(d.plant.shape, 'ear');
   assert.ok(d.edges.some(e => e.from === 'E' && e.to === 'A' && e.enabled === false));

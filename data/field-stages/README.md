@@ -44,6 +44,7 @@ const doc = parseFieldStageDoc(JSON.parse(text));
 | --- | --- |
 | `schema` | `ringsheaf.field-stage/1` |
 | `cropId` / `logicId` | 对齐 `CROPS.id` 与 `crop_<id>` |
+| `cropName` / `name` | 同一个显示名。工坊新建作物时写入，列表用它 |
 | `timeUnit` | `gameDay`。`secondsPerDayAt1x` 是工坊 1× 的换算，主进程用自己的世界钟 |
 | `rows` | 垄行数，默认全阶段连锁。阶段上的 `rows` 为 `null` 表示继承；写成数字时主进程可以单独用，工坊预览仍用这里的行数，好让蒙版格子对齐 |
 | `grid.along` | 沿行方向的蒙版格数 |
