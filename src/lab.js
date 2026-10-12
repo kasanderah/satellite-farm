@@ -9,12 +9,22 @@ import {
   tractorKit, planterKit, hillerKit, topperKit, potatoLifterKit,
   cultureTankKit, warehouseKit, garageKit, processKit, armKit, irrigatorKit,
 } from './prefabs.js';
+import { createFieldWorkshop } from './lab-field.js';
 
 const $ = id => document.getElementById(id);
 const STORE = 'ringsheaf.assetlab.briefs';
 const C = hex => new THREE.Color(hex);
 
 const viewEl = $('view');
+const fieldShop = createFieldWorkshop({
+  viewEl,
+  briefForm: $('brief-form'),
+  panel: $('field-panel'),
+  bar: $('fieldbar'),
+  statesEl: $('states'),
+  hintEl: $('hint'),
+  mainEl: document.querySelector('main'),
+});
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance', preserveDrawingBuffer: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
 renderer.toneMapping = THREE.AgXToneMapping;
@@ -416,6 +426,17 @@ function applyStageLight(entry) {
   hemi.groundColor.copy(interior ? C(marathon ? '#0c2414' : '#1c2224') : LIGHT0.hemiGround);
   scene.environmentIntensity = interior ? (marathon ? 0.72 : 0.08) : LIGHT0.env;
   renderer.toneMappingExposure = interior ? (marathon ? 1.05 : 1.02) : LIGHT0.exp;
+  if (id === 'field-stage') {
+    sun.intensity = 2.7;
+    sun.color.copy(LIGHT0.sunColor);
+    sun.shadow.bias = -0.0012;
+    sun.shadow.normalBias = 0.04;
+    hemi.intensity = 0.48;
+    hemi.color.copy(LIGHT0.hemiColor);
+    hemi.groundColor.copy(LIGHT0.hemiGround);
+    scene.environmentIntensity = 0.32;
+    renderer.toneMappingExposure = 1.55;
+  }
   sun.castShadow = !(interior || id === 'grub-trough' || id === 'hub');
   renderer.shadowMap.enabled = sun.castShadow;
   if (id === 'grub-trough') {
@@ -462,6 +483,7 @@ const BUILD = {
   'ref-tractor-compare': () => refShows.tractors(),
   'ref-kenney-shovel': () => refShows.shovel(),
   'ref-sketchfab-combine': () => refShows.combine(),
+  'field-stage': () => fieldShop.build(),
 };
 for (const entry of LAB_ENTRIES) {
   if (entry.road) BUILD[entry.id] = buildRoad;
@@ -520,6 +542,14 @@ function frameSpan(entry) {
     eye.tz = 0;
     eye.dist = ((half / Math.cos(eye.pitch)) / Math.tan(vfov / 2)) * 1.35;
   }
+  if (entry.id === 'field-stage') {
+    eye.yaw = 0.4;
+    eye.pitch = 0.78;
+    eye.ty = 0.2;
+    eye.tx = 0;
+    eye.tz = 0;
+    eye.dist = 24;
+  }
   if (entry.id === 'cult-a' || entry.id === 'cult-b') {
     eye.yaw = entry.id === 'cult-b' ? 0.58 : 0.46;
     eye.pitch = entry.id === 'cult-b' ? 0.58 : 0.72;
@@ -532,6 +562,7 @@ function show(id) {
   const entry = LAB_ENTRIES.find(e => e.id === id) || LAB_ENTRIES[0];
   curId = entry.id;
   disposeStage();
+  fieldShop.setActive(entry.id === 'field-stage');
   const built = BUILD[entry.id]();
   stage.add(built.group);
   shown = built;
@@ -671,8 +702,14 @@ function placeCam() {
     cam.far = far;
     cam.updateProjectionMatrix();
   }
-  const interior = shown && shown.ownState;
-  if (interior) {
+  const interior = shown && shown.ownState && curId !== 'field-stage';
+  if (curId === 'field-stage') {
+    sun.position.set(eye.tx + 26, 6.2, eye.tz + 3);
+    sc.left = sc.bottom = -26;
+    sc.right = sc.top = 26;
+    sc.near = 0.4;
+    sc.far = 90;
+  } else if (interior) {
     const r = CULT_EMPTY.plot;
     sun.position.set(eye.tx + r * 0.42, r * 0.72, eye.tz + r * 0.28);
     sc.left = sc.bottom = -r * 0.78;
@@ -759,7 +796,14 @@ $('states').addEventListener('click', (e) => {
 });
 for (const id of ['b-name', 'b-cls', 'b-size', 'b-notes']) $(id).addEventListener('input', saveBrief);
 addEventListener('keydown', (e) => {
-  if (e.target.matches('input, textarea')) return;
+  if (e.target.matches('input, textarea, select')) return;
+  if (fieldShop.active) {
+    if (e.code === 'Space') {
+      e.preventDefault();
+      fieldShop.togglePlay();
+    }
+    return;
+  }
   const map = { 1: 'idle', 2: 'job', 3: 'sel', 4: 'break' };
   if (map[e.key]) setState(map[e.key]);
 });
@@ -814,7 +858,9 @@ function tick() {
       frameSpan(LAB_ENTRIES.find(e => e.id === curId));
     }
   }
-  const p = frozen == null ? (performance.now() % 4200) / 4200 : frozen;
+  const now = performance.now();
+  if (shown && shown.tick) shown.tick(now);
+  const p = frozen == null ? (now % 4200) / 4200 : frozen;
   applyPose(p);
   placeCam();
   renderer.render(scene, cam);
@@ -865,4 +911,5 @@ window.__lab = {
     return out;
   },
   draw() { placeCam(); renderer.render(scene, cam); },
+  field: fieldShop.api,
 };

@@ -488,8 +488,8 @@ test('culture tanks sit in one row off the hub and inside the plot', () => {
 });
 
 test('asset lab lists the four classes and the live placeholders', () => {
-  assert.deepEqual(LAB_CLASSES.map(c => c.id), ['unit', 'machine', 'equip', 'rail', 'ref']);
-  assert.deepEqual(LAB_CLASSES.map(c => c.label), ['地块', '农机', '设备', '轨道设备', '参考·外部']);
+  assert.deepEqual(LAB_CLASSES.map(c => c.id), ['unit', 'field', 'machine', 'equip', 'rail', 'ref']);
+  assert.deepEqual(LAB_CLASSES.map(c => c.label), ['地块', '田间', '农机', '设备', '轨道设备', '参考·外部']);
   for (const id of ['ref-tractor-compare', 'ref-kenney-shovel', 'ref-sketchfab-combine']) {
     const entry = LAB_ENTRIES.find(e => e.id === id);
     assert.ok(entry, id);
