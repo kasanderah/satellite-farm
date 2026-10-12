@@ -27,12 +27,12 @@ export const PALETTE = {
 // grow : 邻区定格冠层的参考相位（秒），不驱动玩家的世界钟。
 // plantable : 表层四作物可种。其余条目只给环带色块。饲料大麦加在末尾，权重 0，不进邻区抽选，旧存档的作物下标不变。
 // weight : 环带上的占比（邻区快照仍用原来的纹理，色板才和美术小样一致）
-// 商品薯阶段中点加总后，成熟待收从第 81 日开始。yieldL / price 只作一茬营收的量级。
+// 土豆B：薯播写完蒙版才起算，成熟待收是生长链走到 D。yieldL / price 只作一茬营收的量级。
 export const CROPS = [
   { id: 'wheat',   name: '麦色冠层', analog: '小麦', family: 'grain', young: 'olive',   ripe: 'straw',  stub: 'regoLt', height: 1.0, row: 0.45, along: 0.30, tex: 'drill',  shape: 'ear',     grow: 260, season: 22, plantable: false, weight: 0.27 },
   { id: 'maize',   name: '高秆冠层', analog: '玉米', family: 'green', young: 'oliveDp', ripe: 'olive',  stub: 'ochre',  height: 2.6, row: 0.80, along: 0.32, tex: 'wide',   shape: 'stalk',   grow: 320, season: 26, plantable: false, weight: 0.17 },
   { id: 'soy',     name: '大豆', analog: '大豆', family: 'green', young: 'oliveDp', ripe: 'oliveDp',stub: 'regoDk', height: 0.8, row: 0.50, along: 0.30, tex: 'drill',  shape: 'bush',    grow: 240, season: 87, plantable: true, yieldL: 3200, price: 520, weight: 0.15, days: 77 },
-  { id: 'potato',  name: '中熟商品薯', analog: '商品薯', family: 'grain', young: 'oliveDp', ripe: 'ochre', stub: 'rust', height: 0.55, row: 0.90, along: 0.40, tex: 'ridges', shape: 'bush', grow: 280, season: 92, plantable: true, yieldL: 44000, price: 412, weight: 0.10, days: 81 },
+  { id: 'potato',  name: '中熟商品薯', analog: '商品薯', family: 'grain', young: 'oliveDp', ripe: 'ochre', stub: 'rust', height: 0.55, row: 0.90, along: 0.40, tex: 'ridges', shape: 'bush', grow: 280, season: 96, plantable: true, yieldL: 44000, price: 412, weight: 0.10, days: 77 },
   { id: 'rice',    name: '水田冠层', analog: '水稻', family: 'teal',  young: 'tealGy',  ripe: 'tealGy', stub: 'regoDk', height: 0.8, row: 0.40, along: 0.30, tex: 'paddy',  shape: 'tuft',    grow: 300, season: 24, plantable: false, weight: 0.08 },
   { id: 'cabbage', name: '结球甘蓝', analog: '甘蓝', family: 'teal',  young: 'tealGy',  ripe: 'sage',   stub: 'regoDk', height: 0.45,row: 0.70, along: 0.55, tex: 'beds',   shape: 'rosette', grow: 220, season: 76, plantable: true, yieldL: 48000, price: 96, weight: 0.08, days: 66 },
   { id: 'alfalfa', name: '银叶苜', analog: '苜蓿', family: 'teal',  young: 'tealGy',  ripe: 'steel',  stub: 'regoDk', height: 0.7, row: 0.30, along: 0.25, tex: 'drill',  shape: 'tuft',    grow: 200, season: 18, plantable: false, weight: 0.10 },
@@ -335,7 +335,9 @@ for (const c of CROPS) {
   c.stages = decorateStages(def);
   for (const s of c.stages) PHASE_LABEL[s.id] = s.name;
   const seedName = productById(def.seed)?.nameZh || '种子';
-  c.yieldNote = `第 ${def.maturity} 日进入成熟待收，第 ${def.rotAt} 日还没收就烂在地里。${seedName}只从商店来。钟自己往前走。播种或移栽走完以前，田面保持裸土。`;
+  c.yieldNote = def.profile === 'potato-b'
+    ? `薯播写完蒙版才起算。第 ${def.maturity} 日进入成熟待收，过熟之后第 ${def.rotAt} 日还没收就烂在地里。${seedName}只从商店来。整地基肥和旋耕不启动这口钟。`
+    : `第 ${def.maturity} 日进入成熟待收，第 ${def.rotAt} 日还没收就烂在地里。${seedName}只从商店来。钟自己往前走。播种或移栽走完以前，田面保持裸土。`;
 }
 // 进度条和「作物」页共用。入仓量仍是整块，再乘漏做的惩罚。
 export const POTATO_STAGES = CROPS.find(c => c.id === 'potato').stages;
@@ -438,15 +440,24 @@ function plantJobDone(f) {
   return jobDone(f, job.id);
 }
 // 作业前沿只跟着真正在走的那一趟。灌溉和水网不算，免得整块被涂成已收。
+// 钟还没起时，画整地或薯播扫过的垄。钟起了以后，没做完的基肥不再挡住出苗。
 function visualFront(f) {
-  if (f.plantedAt == null) return 0;
   const def = cropOf(f);
   if (!def) return 0;
   ensureJobs(f);
+  if (f.plantedAt == null) {
+    for (const job of def.jobs) {
+      if (job.auto || job.spray || job.drone || job.afterHarvest) continue;
+      if (!job.preplant && !job.writesMask) continue;
+      const prog = f.jobS[job.id] || 0;
+      if (prog < L.LANES - 1e-3) return prog;
+    }
+    return 0;
+  }
   const day = fieldDay(f);
   let front = 0;
   for (const job of def.jobs) {
-    if (job.auto || job.spray || job.drone) continue;
+    if (job.auto || job.spray || job.drone || job.preplant) continue;
     if (job.afterHarvest) {
       if (!f.harvested) break;
     } else if (day < job.from) break;
@@ -456,10 +467,17 @@ function visualFront(f) {
   }
   return front;
 }
+// 整地（preplant）和清田（after）不占生长链。土豆的画面阶段从 2 起：1 是还没写完蒙版的裸土。
+function clockStages(def) {
+  return def.stages.filter(s => !s.preplant && !s.after);
+}
 function stageBlend(def, day) {
-  const row = def.stages.find(s => day < s.to) || def.stages[def.stages.length - 1];
-  const st = def.stages.indexOf(row) + 1;
-  if (!row || row.to <= row.from || day >= def.rotAt) return day >= def.rotAt ? 8 : st;
+  const rows = clockStages(def);
+  const potato = def.profile === 'potato-b';
+  if (day >= def.rotAt) return potato ? 9.05 : rows.length;
+  const row = rows.find(s => day < s.to) || rows[rows.length - 1];
+  const st = rows.indexOf(row) + (potato ? 2 : 1);
+  if (!row || row.to <= row.from) return st;
   const frac = Math.min(0.999, Math.max(0, (day - row.from) / (row.to - row.from)));
   return st + frac;
 }
@@ -467,11 +485,14 @@ export function fieldVisual(f) {
   const id = f && f.crop >= 0 ? CROPS[f.crop]?.id : null;
   const potato = id === 'potato';
   if (f?.failed === 'rot') {
-    return { crop: f.crop, g: potato ? 8.05 : 0, s: 0, dir: f.dir };
+    return { crop: f.crop, g: potato ? 9.05 : 0, s: 0, dir: f.dir };
   }
   const def = cropOf(f);
   if (f && f.live && !f.paid && def) {
-    if (f.plantedAt == null) return { crop: f.crop, g: 0, s: 0, dir: f.dir };
+    if (f.plantedAt == null) {
+      const swept = potato ? visualFront(f) : 0;
+      return { crop: f.crop, g: swept > 0 ? 1 : 0, s: swept, dir: f.dir };
+    }
     // 播种或移栽没走完：整块保持裸土。机器走过的垄仍由 s 画出来。
     if (!plantJobDone(f)) return { crop: f.crop, g: potato ? 1 : 0, s: visualFront(f), dir: f.dir };
     const day = fieldDay(f);
@@ -489,11 +510,17 @@ export function cropWatch(f) {
   }
   if (!f?.live || f.paid || !def) return null;
   const days = def.rotAt;
-  if (f.plantedAt == null) return { day: 0, phase: 'plan', label: '待播种', front: 0, days, waiting: true };
+  if (f.plantedAt == null) {
+    const swept = visualFront(f);
+    if (def.profile === 'potato-b' && swept > 0) {
+      return { day: 0, phase: 'potato_till', label: PHASE_LABEL.potato_till || '整地空田', front: swept, days, waiting: true };
+    }
+    return { day: 0, phase: 'plan', label: '待播种', front: 0, days, waiting: true };
+  }
   const day = fieldDay(f);
   let phase = 'rot';
   if (day < def.rotAt) {
-    const row = def.stages.find(s => day < s.to);
+    const row = clockStages(def).find(s => day < s.to);
     phase = row ? row.id : 'rot';
   }
   return { day, phase, label: PHASE_LABEL[phase] || phase, front: visualFront(f), days, waiting: false, planted: plantJobDone(f) };
@@ -589,7 +616,7 @@ function jobOpen(f, job) {
   ensureJobs(f);
   if (jobDone(f, job.id)) return false;
   if (job.afterHarvest) return !!f.harvested;
-  // 整地从第 0 日开始，钟还没走也能派出去。钟一旦记上，窗口结束就关掉，不能一直占到成熟待收。
+  // 整地从第 0 日开始，钟还没走也能派出去。土豆的基肥、旋耕、薯播 to 为 0，蒙版写下之后这扇窗关掉。
   if (job.from <= 0 && f.plantedAt == null) return true;
   if (f.plantedAt == null) return false;
   const day = fieldDay(f);
@@ -671,7 +698,8 @@ function beginJob(r, f, job) {
   if (!f || !job) { goHome(r); return; }
   ensureJobs(f);
   r.job = job.id;
-  if (f.plantedAt == null) f.plantedAt = worldDay;
+  // 土豆B的生长链不在开工时记。基肥、旋耕、薯播出发都不算。薯播写完蒙版见 finishPass。
+  if (f.plantedAt == null && cropOf(f)?.profile !== 'potato-b') f.plantedAt = worldDay;
   const s = Math.min(Math.max(f.jobS[job.id] || 0, 0), L.LANES - 1e-4);
   const lane = Math.floor(s);
   const frac = s - lane;
@@ -854,11 +882,19 @@ function resumeHarvest(r) {
   const pose = workPose(f, lane, r.u);
   r.x = pose.x; r.z = pose.z; r.ang = pose.ang;
 }
+// 薯播进度跨过整田，蒙版 M 就算写下。生长链从这一刻起算，不从规划、基肥、旋耕或播种开工起算。
+// 最后一条垄在到头之前就会越过完成线，不能只等 finishPass。
+function noteMask(f, job) {
+  if (!job?.writesMask || !f || f.plantedAt != null) return;
+  if ((f.jobS?.[job.id] || 0) < L.LANES - 1e-3) return;
+  f.plantedAt = worldDay;
+}
 function finishPass(r) {
   const f = r.f;
   const key = r.job;
   const job = f && key ? cropOf(f)?.jobs.find(j => j.id === key) : null;
   if (f?.jobS && key) f.jobS[key] = L.LANES;
+  noteMask(f, job);
   if (job?.spray && f && !f.sprayed) {
     f.sprayed = true;
     if (stores.spray > 0) stores.spray -= 1;
@@ -902,6 +938,7 @@ function stepWork(r, dt) {
   const leg = Math.min(rem, room);
   const write = () => {
     f.jobS[key] = r.lane + (dirp ? r.u / L.FIELD : (L.FIELD - r.u) / L.FIELD);
+    noteMask(f, job);
     const pose = workPose(f, r.lane, r.u);
     r.x = pose.x; r.z = pose.z; r.ang = pose.ang;
   };
@@ -918,6 +955,7 @@ function stepWork(r, dt) {
   }
   r.u = dest;
   f.jobS[key] = r.lane + 1;
+  noteMask(f, job);
   rem -= room;
   if (job?.harvest && !UNLOAD_WHILE_MOVING) {
     r.bin = (r.bin || 0) + 1;
@@ -958,6 +996,7 @@ function stepTurn(r, dt) {
   r.u = dirp ? 0 : L.FIELD;
   r.mode = 'work';
   f.jobS[key] = r.lane;
+  noteMask(f, cropOf(f)?.jobs.find(j => j.id === key));
   const pose = workPose(f, r.lane, r.u);
   r.x = pose.x; r.z = pose.z; r.ang = pose.ang;
   if (rem > 0) stepWork(r, rem / MACHINE_MPS);
@@ -2038,7 +2077,7 @@ export function plantField(f, cropId, opts = {}) {
   stores.frass -= fert.frass;
   f.crop = crop; f.state = 1; f.g = 0; f.s = 0; f.timer = 0;
   f.live = true; f.hold = false; f.frozen = false;
-  // 规划不算钟。第一趟作业开工才记 plantedAt。出苗要等播种走完。
+  // 规划不算钟。土豆要等薯播写完蒙版才记 plantedAt。其它作物仍是第一趟作业开工才记。
   f.plantedAt = null; f.paid = false; f.sprayed = false; f.claimed = false; f.failed = null;
   f.cycle = !!opts.cycle;
   f.autoBuy = !!opts.autoBuy;

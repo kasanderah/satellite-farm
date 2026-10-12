@@ -65,7 +65,7 @@ bool laneCut(vec2 uv, float s){
   float fr = (s - fs) * FIELD;
   return mod(lane, 2.) < .5 ? uv.x < fr : uv.x > FIELD - fr;
 }
-// g < 1：邻区冠层沿用生长度。g >= 1：商品薯阶段（1 整地 2 播种 3 出苗 4 培土 5 膨大 6 杀秧 7 成熟待收 8 烂在地里）
+// g < 1：邻区冠层沿用生长度。g >= 1：商品薯（1 整地裸土 2 播种后 3 出苗 4 培土 5 膨大 6 杀秧 7 成熟待收 8 过熟 9 烂地）
 float growthVis(float g){
   float stage = floor(g + 0.001);
   if (stage < 0.5) return g;
@@ -76,6 +76,7 @@ float growthVis(float g){
   if (stage < 5.5) return 0.92;
   if (stage < 6.5) return 0.12;
   if (stage < 7.5) return 0.4;
+  if (stage < 8.5) return 0.22;
   return 0.04;
 }
 // 某点的冠层高度（已割 / 非田块 = 0）
@@ -89,7 +90,7 @@ float canopyAt(vec2 p){
   if (laneCut(uv, d.b) && stage < 0.5) return 0.;
   if (laneCut(uv, d.b) && stage > 5.5 && stage < 6.5) return 0.05;
   if (laneCut(uv, d.b) && stage > 6.5 && stage < 7.5) return 0.;
-  if (stage > 7.5) return 0.02;
+  if (stage > 8.5) return 0.02;
   return growthVis(d.g) * uCropP[int(d.r + .5)].x;
 }
 `;

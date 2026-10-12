@@ -1,5 +1,8 @@
-// 表层四作物。阶段时长取区间中点（Math.round）。自然阶段跟世界钟，不等作业。
+// 表层四作物。大豆、大麦、甘蓝的阶段时长仍取区间中点。自然阶段跟世界钟，不等作业。
+// 土豆读 data/field-stages/potato-b.json。生长链从薯播写完蒙版 M 起算，基肥和旋耕不记这口钟。
 // 出苗的绿色要等该田的播种/移栽作业走完才画，逻辑在 fieldVisual。
+import potatoBSource from '../data/field-stages/potato-b.json' with { type: 'json' };
+import { parseFieldStageDoc } from './field-stages.js';
 
 export const JOB_PENALTY = 0.15;
 export const UNLOAD_WHILE_MOVING = false;
@@ -56,37 +59,81 @@ const rust = '#9e543a';
 const ochre = '#81683f';
 const sage = '#8fbbad';
 
+// 土豆B。工单来自 ops[].extensions，同一阶段的培土和追肥各记各的 id。
+// 侧卸不进 stages，只留在起薯的 note 里，执行链仍是收获机停车侧卸。
+// 生长钟不看 O 的 4 日：薯播 writesMask 走完才把 plantedAt 记上，A 及以后从那一天起算。
+function potatoFromProfile(raw) {
+  const doc = parseFieldStageDoc(raw);
+  const stageOf = id => doc.stages.find(s => s.id === id);
+  const O = stageOf('O');
+  const A = stageOf('A');
+  const emerg = stageOf('emerg');
+  const hill = stageOf('hill');
+  const bulk = stageOf('bulk');
+  const haulm = stageOf('haulm');
+  const D = stageOf('D');
+  const E = stageOf('E');
+  const d1 = D.variants.find(v => v.id === 'D1');
+  const d2 = D.variants.find(v => v.id === 'D2');
+  let cursor = 0;
+  const win = {};
+  for (const id of doc.chain) {
+    const row = stageOf(id);
+    win[id] = { from: cursor, to: cursor + row.days, days: row.days };
+    cursor += row.days;
+  }
+  const overFrom = win.D.to;
+  const overTo = overFrom + (d1?.days || 0);
+  const rotAt = overTo + (d2?.days || 0);
+  const face = (id, name, from, to, color, effect, extra = {}) => ({
+    id, name, from, to, days: extra.days ?? (to - from), color, effect, ...extra,
+  });
+  const stages = [
+    face('potato_till', '整地空田', 0, O.days, O.color, `${O.effect} 生长链要等薯播写完蒙版，这一段不记钟。`, { preplant: true }),
+    face('potato_plant', A.name, win.A.from, win.A.to, A.color, A.effect),
+    face('potato_emerg', emerg.name, win.emerg.from, win.emerg.to, emerg.color, emerg.effect),
+    face('potato_hill', hill.name, win.hill.from, win.hill.to, hill.color, hill.effect),
+    face('potato_bulk', bulk.name, win.bulk.from, win.bulk.to, bulk.color, bulk.effect),
+    face('potato_haulm', haulm.name, win.haulm.from, win.haulm.to, haulm.color, haulm.effect),
+    face('potato_harvest', '成熟待收', win.D.from, win.D.to, D.color, D.effect),
+    face('potato_over', d1?.name || '过熟', overFrom, overTo, d1?.color || straw, '成熟待收放满还没起薯。起薯仍可做。侧卸仍在收获机上。'),
+    face('potato_d2', d2?.name || '烂地', overTo, rotAt, d2?.color || rust, '再放满这一段还没收，就烂在地里，不入仓。'),
+    face('potato_clear', '清田', win.D.to, win.D.to + E.days, E.color, E.effect, { after: true }),
+  ];
+  const open = {
+    potato_emerg: win.emerg,
+    potato_hill: win.hill,
+    potato_bulk: win.bulk,
+    potato_haulm: win.haulm,
+    // 起薯从 D 开到烂地结束，过熟和烂地里都还能收。
+    potato_harvest: { from: win.D.from, to: rotAt },
+    potato_clear: { from: win.D.to, to: win.D.to + E.days },
+  };
+  const jobs = doc.ops.filter(op => op.extensions && !op.extensions.framework && op.extensions.legacyJob).map(op => {
+    const ext = op.extensions;
+    const beforeClock = ext.legacyStage === 'potato_till' || !!op.writesMask;
+    const span = beforeClock ? { from: 0, to: 0 } : open[ext.legacyStage];
+    return {
+      id: op.id, name: op.name, stage: ext.legacyStage, from: span.from, to: span.to, order: ext.order ?? 0,
+      required: !!ext.required, plant: !!ext.plant, harvest: !!ext.harvest, spray: false,
+      auto: !!ext.auto, afterHarvest: !!ext.afterHarvest, drone: !!ext.drone,
+      impl: ext.impl || null, implAny: ext.implAny || null, self: ext.self || null, mode: ext.mode || null,
+      penalty: ext.required ? (Number.isFinite(ext.penalty) ? ext.penalty : JOB_PENALTY) : 0,
+      cap: ext.cap || null, caps: ext.caps || null, load: ext.load || null, disc: null, tank: null,
+      writesMask: !!op.writesMask,
+      preplant: ext.legacyStage === 'potato_till' && !op.writesMask,
+      note: ext.note || '',
+    };
+  }).sort((a, b) => a.order - b.order);
+  const harvest = stages.find(s => s.id === 'potato_harvest');
+  return {
+    stages, jobs, profile: doc.profile,
+    maturity: harvest.from, hold: harvest.days, rotAt,
+  };
+}
+
 export const SURFACE_CROPS = {
-  potato: timed([
-    { id: 'potato_till', name: '整地空田', lo: 3, hi: 5, color: soil, effect: '基肥，加上旋耕或深松。这一段还是裸土。', jobs: [
-      { id: 'potato_base_fert', name: '基肥', required: true, impl: 'impl_fertilizer' },
-      { id: 'potato_rotavate', name: '旋耕', required: true, implAny: ['impl_rotavator', 'impl_subsoiler'] },
-    ] },
-    { id: 'potato_plant', name: '播种', lo: 2, hi: 4, color: soilDk, effect: '后挂薯播。这趟走完以前，田面保持裸土，不出绿点。', jobs: [
-      { id: 'potato_plant', name: '薯播', required: true, impl: 'impl_potato_planter', plant: true },
-    ] },
-    { id: 'potato_emerg', name: '出苗', lo: 12, hi: 18, color: young, effect: '浅中耕。这一段不追肥。播种走完才开始出绿。', jobs: [
-      { id: 'potato_shallow', name: '浅中耕', required: true, impl: 'impl_cultivator', mode: 'shallow' },
-    ] },
-    { id: 'potato_hill', name: '培土', lo: 10, hi: 14, color: canopy, effect: '培土，同时追肥。', jobs: [
-      { id: 'potato_hill', name: '培土', required: true, impl: 'impl_cultivator', mode: 'hill' },
-      { id: 'potato_topdress', name: '追肥', required: true, impl: 'impl_fertilizer' },
-    ] },
-    { id: 'potato_bulk', name: '膨大', lo: 35, hi: 45, color: flower, effect: '水网灌溉。侦察和虫害防治只派无人机，不追肥。地面喷雾留到病害。', jobs: [
-      { id: 'potato_irrigate', name: '灌溉', required: true, auto: true },
-      { id: 'potato_scout', name: '侦察', required: false, drone: true, cap: 'scout' },
-      { id: 'potato_treat', name: '植保', required: false, drone: true, cap: 'pest_treat', load: 'pest' },
-    ] },
-    { id: 'potato_haulm', name: '杀秧', lo: 5, hi: 8, color: rust, effect: '后挂碎秧。', jobs: [
-      { id: 'potato_haulm', name: '打秧', required: true, impl: 'impl_haulm' },
-    ] },
-    { id: 'potato_harvest', name: '成熟待收', lo: 8, hi: 14, color: ochre, effect: '自走薯收，仓满停车侧卸。窗口结束还没收就烂在地里。', jobs: [
-      { id: 'potato_harvest', name: '起薯', required: true, harvest: true, self: 'harvester_potato' },
-    ] },
-    { id: 'potato_clear', name: '清田', lo: 2, hi: 4, color: straw, effect: '碎残。收获入仓之后就能做，不等这段日历。', jobs: [
-      { id: 'potato_clear', name: '碎残', required: true, afterHarvest: true, implAny: ['impl_cultivator', 'impl_rotavator'], mode: 'residue' },
-    ] },
-  ]),
+  potato: potatoFromProfile(potatoBSource),
   soy: timed([
     { id: 'soy_till', name: '整地', lo: 3, hi: 5, color: soil, effect: '基肥和旋耕。', jobs: [
       { id: 'soy_base_fert', name: '基肥', required: true, impl: 'impl_fertilizer' },

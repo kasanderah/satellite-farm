@@ -451,6 +451,10 @@ vec3 farmAlbedo(vec2 p){
           canopyHere = true;
           gRough = 0.72;
         }
+      } else if (pst < 8.5) {
+        col = mix(mix(soil, g_straw, 0.55), g_rust, 0.42) * (0.9 + patchy);
+        gTilt = acrossW * slope * 0.22 * rowVis;
+        gRough = 0.84;
       } else {
         col = mix(g_deep, g_rust, 0.62) * (0.85 + patchy);
         gTilt = acrossW * slope * 0.12 * rowVis;
@@ -459,7 +463,7 @@ vec3 farmAlbedo(vec2 p){
       // 自然阶段用散点铺开，不整块换色。杀秧、起薯这些作业色盖在上面。
       float frac = clamp(g - pst, 0.0, 0.999);
       float blendDot = step(hash12(floor(uv * vec2(0.58, 0.47)) + pst), frac);
-      vec3 nxt = pst < 1.5 ? soil : pst < 2.5 ? young : pst < 3.5 ? canopy : pst < 4.5 ? bloom : pst < 5.5 ? mix(bloom, stub, 0.45) : pst < 6.5 ? stub : pst < 7.5 ? mix(soil, g_straw, 0.62) : mix(g_deep, g_rust, 0.72);
+      vec3 nxt = pst < 1.5 ? soil : pst < 2.5 ? young : pst < 3.5 ? canopy : pst < 4.5 ? bloom : pst < 5.5 ? mix(bloom, stub, 0.45) : pst < 6.5 ? stub : pst < 7.5 ? mix(soil, g_straw, 0.62) : pst < 8.5 ? mix(g_straw, g_rust, 0.55) : mix(g_deep, g_rust, 0.72);
       // 整地阶段不往出苗绿点上混。播种作业没走完时 g 停在 1，这里再挡一层。
       if (pst >= 1.5 && !(worked && pst >= 5.5)) col = mix(col, nxt, blendDot);
     } else if (cut) {                                       // 残茬：作业带一深一浅（收割方向不同），带车辙
@@ -667,7 +671,8 @@ varying vec3 vCropCol;`).replace('#include <begin_vertex>', `#include <begin_ver
       if (stage < 0.5 && opened) gg = 0.;
       if (opened && stage > 4.5 && stage < 5.5) gg = 0.08;
       if (opened && stage > 5.5) gg = 0.;
-      if (stage > 7.5) gg = 0.04;
+      if (stage > 7.5 && stage < 8.5) gg *= 0.4;
+      if (stage > 8.5) gg = 0.04;
       sc = gg;
     }
   }
@@ -2324,6 +2329,7 @@ function updateDock() {
   let stat = selNote;
   if (!stat) {
     if (!f.owned) stat = '邻区快照 · 只读';
+    else if (watch?.waiting && watch.phase === 'potato_till') stat = `${CROPS[f.crop].name} · 整地空田 · 生长链要等薯播写完`;
     else if (watch?.waiting) stat = `${CROPS[f.crop].name} · 已规划 · 等第一趟作业，生长还没计时`;
     else if (watch?.failed) stat = `${CROPS[f.crop].name} · 烂在地里 · 没人收，不入仓`;
     else if (watch && watch.planted === false) stat = `${CROPS[f.crop].name} · ${watch.label} · 播种还没走完 · 第 ${Math.floor(watch.day)} 日`;

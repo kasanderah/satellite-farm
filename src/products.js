@@ -43,7 +43,7 @@ export const RECIPES = [
     id: 'potato-field',
     nameZh: '商品薯一茬',
     device: 'field',
-    timeDays: 81,
+    timeDays: 77,
     stub: true,
     utilities: { water: 40 },
     inputs: [
