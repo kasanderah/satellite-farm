@@ -11,7 +11,8 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { HorizontalTiltShiftShader } from 'three/addons/shaders/HorizontalTiltShiftShader.js';
 import { VerticalTiltShiftShader } from 'three/addons/shaders/VerticalTiltShiftShader.js';
-import { PALETTE, CROPS, TEX_ID, L, fields, harvesters, haulers, drones, step, TRUNKS_X, TRUNKS_Z, depots, inCrater, ROADS, RING, LAYERS, CUT, wrapX, PLOT, economy, focus, signals, log, plantField, quote, setTimeScale, setPaused, paused, exportSnapshot, applySnapshot, fieldAtWorld, fieldAt, fieldOrigin, simTime, worldDay, stores, rigs, fieldVisual, cropWatch, POTATO_DAYS, POTATO_STAGES, warehouse, buildings, sellLot, sellStack, warehouseStacks, warehouseCapacity, placeBuilding, removeBuilding, rigReadout, SHOP, buySeed, buyItem, SEED_PER_FIELD, FERT_PER_FIELD, resetGame, CULTURES, DECK_CLIMATE, tanks, cultureWatch, startCulture, tendCulture, harvestCulture, BUILDING_KINDS, CULTURE_CELLS, tankSite, devices, potatoStock, fertPlan, cultureFeedPlan, millWatch, startMill, removeMill, orderProcess, HUB_SITES, cropDossier, MACHINE_SHOP, buyMachine, cropDef, boomWatch, rigProfile, DRONE_SHOP, workDrones, buyDrone, sectorLight, sectorWord, dayCenter, setWorldDay, RING_OMEGA } from './_shared.js';
+import { PALETTE, CROPS, TEX_ID, L, fields, harvesters, haulers, drones, step, TRUNKS_X, TRUNKS_Z, depots, inCrater, ROADS, RING, LAYERS, CUT, wrapX, PLOT, economy, focus, signals, log, plantField, quote, setTimeScale, setPaused, paused, exportSnapshot, applySnapshot, fieldAtWorld, fieldAt, fieldOrigin, simTime, worldDay, stores, rigs, fieldVisual, cropWatch, POTATO_DAYS, POTATO_STAGES, warehouse, buildings, sellLot, sellStack, warehouseStacks, warehouseCapacity, placeBuilding, removeBuilding, rigReadout, SHOP, buySeed, buyItem, SEED_PER_FIELD, FERT_PER_FIELD, resetGame, CULTURES, DECK_CLIMATE, tanks, cultureWatch, startCulture, tendCulture, harvestCulture, BUILDING_KINDS, CULTURE_CELLS, tankSite, devices, potatoStock, fertPlan, cultureFeedPlan, millWatch, startMill, removeMill, orderProcess, HUB_SITES, cropDossier, MACHINE_SHOP, buyMachine, cropDef, boomWatch, rigProfile, DRONE_SHOP, workDrones, buyDrone, sectorLight, sectorWord, dayCenter, setWorldDay, RING_OMEGA, bindPotatoClock } from './_shared.js';
+import { applyStagePayload, revertPotatoStages, bootFieldStageSource, writeStageStore, forgetPotatoStage, stageBadge } from './field-stage-live.js';
 import { productById } from './products.js';
 import { NOISE, FARM, CURVE_DECL, CURVE_PROJECT } from './glsl.js';
 import { harvesterKit, haulerKit, droneKit, personKit, conveyorKit, depotKit, hubKit, plantGeometry, mastKit, irrigatorKit, growRackKit, tankKit, pumpKit, pipeRackKit, shedKit, warehouseKit, garageKit, processKit, cultureTankKit, armKit, deckLightKit } from './prefabs.js';
@@ -2338,6 +2339,7 @@ function updateDock() {
     else if (f.state === 0) stat = '裸地 · 选一种作物。种苗只从商店来';
     else stat = '定格冠层 · 可改种';
   }
+  if (!selNote && watch && CROPS[f.crop]?.id === 'potato') stat += ` · ${stageBadge()}`;
   $('selid').textContent = `F-${String(f.i).padStart(3, '0')}${String(f.j).padStart(2, '0')}`;
   $('selstat').textContent = stat;
   const day = watch && !watch.waiting ? watch.day : 0;
@@ -2368,6 +2370,67 @@ function paintRates() {
   const input = $('rate-in');
   if (input && document.activeElement !== input) input.value = String(economy.timeScale);
 }
+function paintStageChrome(note) {
+  const label = $('stage-src-label');
+  if (label) label.innerHTML = `土豆阶段 · <b>${stageBadge()}</b>`;
+  const err = $('stage-src-err');
+  if (err) err.textContent = note || '';
+  document.querySelectorAll('#selbtns button').forEach(b => {
+    const def = cropDef(b.dataset.crop);
+    const crop = CROPS.find(c => c.id === b.dataset.crop);
+    const small = b.querySelector('small');
+    if (!small || !def || !crop) return;
+    const seedName = productById(def.seed)?.nameZh || '种子';
+    small.textContent = `${seedName} ${def.seedQty} · 肥料 1 · ${crop.days} 日`;
+  });
+  if ($('admin')?.classList.contains('crop')) paintCropBook();
+  updateDock();
+}
+function adoptStageText(text, persist) {
+  let raw;
+  try { raw = JSON.parse(text); }
+  catch { paintStageChrome('这份不是 JSON'); return { ok: false }; }
+  const applied = applyStagePayload(raw);
+  if (!applied.ok) {
+    paintStageChrome(applied.message || '里面没有土豆的田间阶段');
+    return applied;
+  }
+  if (persist) {
+    try { writeStageStore(localStorage, applied.doc); }
+    catch { /* 无痕模式仍可用这一次 */ }
+  }
+  bindPotatoClock();
+  paintStageChrome('');
+  return applied;
+}
+function reloadStageStore() {
+  const booted = bootFieldStageSource(localStorage, null);
+  if (!booted.ok) {
+    paintStageChrome(booted.message || '工坊存档读不了');
+    return booted;
+  }
+  if (booted.skipped) revertPotatoStages();
+  bindPotatoClock();
+  paintStageChrome(booted.skipped ? '这台浏览器里没有工坊存档，仍用仓库默认' : '');
+  return booted;
+}
+function useRepoStages() {
+  try { forgetPotatoStage(localStorage); } catch { /* 无痕模式 */ }
+  revertPotatoStages();
+  bindPotatoClock();
+  paintStageChrome('');
+}
+function stageParamIsUrl(param) {
+  return !!param && param !== 'repo' && param !== 'workshop' && /^(https?:|data:|\.\/|\/|data\/)/.test(param);
+}
+function bootStagesSync() {
+  const param = Q.get('stages');
+  if (stageParamIsUrl(param)) return;
+  const booted = bootFieldStageSource(localStorage, param === 'repo' ? 'repo' : null);
+  if (booted.origin === 'workshop') bindPotatoClock();
+  else if (!booted.ok) paintStageChrome(booted.message || '工坊存档读不了，仍用仓库默认');
+}
+bootStagesSync();
 $('kpi').innerHTML = `<div class="k-rev"><small>营收</small><b class="hv" id="kpi-rev">0</b></div><div class="k-day"><small>世界日</small><b id="kpi-day">0</b></div><div class="k-time"><small>时刻</small><span class="clk"><i class="face" id="kpi-face" aria-hidden="true"><i id="kpi-hh"></i><i id="kpi-mh"></i></i><b id="kpi-hm">00:00</b></span></div><div class="k-act"><small>作业</small><b class="hv" id="kpi-act">0</b><em>/ ${rigs.length}</em></div>`;
 $('dock').innerHTML = `<div class="who"><b id="selid"></b><span id="selstat"></span></div><div id="bar"><i id="selbar"></i></div><div class="row" id="selbtns"></div>`;
 for (const c of CROPS) if (c.plantable) {
@@ -2445,7 +2508,7 @@ function paintCropBook() {
     const jobs = stages.map(s => `<i style="flex:${s.days} 1 0;background:${s.machine ? s.color : 'transparent'}" title="${s.machine ? s.machine + ' 第 ' + s.machineAt + ' 日 · ' + s.effect : '这一段没有农机'}"><em>${s.machine || ''}</em></i>`).join('');
     return `<div class="meta">生长阶段 · 同一时间只在一段里</div><div class="gantt">${growth}</div><div class="meta">作业窗口 · 机器和效果写在阶段上</div><div class="gantt jobs">${jobs}</div><p class="note">只读预览。改阶段仍写在作物定义里。农时这一站不拦播种。</p>`;
   };
-  host.innerHTML = `<p class="lead">阶段、日数、投入和产出读作物定义。条是只读预览，不能在这里改。</p>` + CROPS.map(c => {
+  host.innerHTML = `<p class="lead">土豆阶段：${stageBadge()}。大豆、大麦、甘蓝仍是仓库里的旧表。条是只读预览。</p>` + CROPS.map(c => {
     const d = cropDossier(c.id);
     const stages = d.stages.length
       ? d.stages.map(s => `<div class="io"><span><i style="background:${s.color}"></i>${s.name}</span><span>第 ${s.from}–${s.to} 日 · ${s.days} 日${s.machine ? ' · ' + s.machine : ''}</span></div>`).join('')
@@ -2469,6 +2532,27 @@ function setAdminTab(which) {
 }
 $('tab-clock').addEventListener('click', () => setAdminTab('clock'));
 $('tab-crops').addEventListener('click', () => setAdminTab('crops'));
+$('stage-reload').addEventListener('click', reloadStageStore);
+$('stage-repo').addEventListener('click', useRepoStages);
+$('stage-apply').addEventListener('click', () => adoptStageText($('stage-paste').value, true));
+$('stage-file').addEventListener('change', () => {
+  const file = $('stage-file').files && $('stage-file').files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => adoptStageText(String(reader.result || ''), true);
+  reader.readAsText(file);
+});
+paintStageChrome('');
+if (stageParamIsUrl(Q.get('stages'))) {
+  fetch(Q.get('stages')).then(res => {
+    if (!res.ok) throw new Error('取不到阶段文件');
+    return res.text();
+  }).then(text => adoptStageText(text, true)).catch(() => {
+    const booted = bootFieldStageSource(localStorage, null);
+    if (booted.origin === 'workshop') bindPotatoClock();
+    paintStageChrome(booted.origin === 'workshop' ? '地址栏上的阶段没取到，改用浏览器里的工坊存档' : '地址栏上的阶段没取到，仍用仓库默认');
+  });
+}
 function paintPause() {
   $('pause').textContent = paused ? '继续' : '暂停';
   $('pause').classList.toggle('on', paused);
@@ -2897,6 +2981,8 @@ window.__farm = {
     };
   },
   watch: () => cropWatch(selected),
+  stageBadge,
+  reloadStages: reloadStageStore,
   lock(id) { setMode('machines'); lockRig(id); paintLock(); },
   setMode,
   get picked() { return pickedFields.size; },

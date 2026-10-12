@@ -221,6 +221,26 @@ for (const [id, def] of Object.entries(SURFACE_CROPS)) {
 SURFACE_CROPS.potato.seed = 'seed';
 SURFACE_CROPS.potato.seedQty = 1;
 SURFACE_CROPS.potato.planLabel = '种中熟商品薯';
+SURFACE_CROPS.potato.stageOrigin = 'repo';
+
+// 工坊覆写和仓库默认都走这一份。stages / jobs 就地换掉，已经拿着这两条数组的钟不用重新取对象。
+export function installPotatoProfile(profile, origin) {
+  const dest = SURFACE_CROPS.potato;
+  dest.stages.splice(0, dest.stages.length, ...profile.stages);
+  dest.jobs.splice(0, dest.jobs.length, ...profile.jobs);
+  dest.maturity = profile.maturity;
+  dest.hold = profile.hold;
+  dest.rotAt = profile.rotAt;
+  dest.profile = 'potato-b';
+  dest.stageOrigin = origin === 'workshop' ? 'workshop' : 'repo';
+  return dest;
+}
+export function potatoProfileFromRaw(raw) {
+  return potatoFromProfile(parseFieldStageDoc(raw));
+}
+export function shippedPotatoProfile() {
+  return potatoFromProfile(potatoBSource);
+}
 SURFACE_CROPS.soy.seed = 'seed_soy';
 SURFACE_CROPS.soy.seedQty = 1;
 SURFACE_CROPS.soy.planLabel = '种大豆';

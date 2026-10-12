@@ -335,9 +335,27 @@ for (const c of CROPS) {
   c.stages = decorateStages(def);
   for (const s of c.stages) PHASE_LABEL[s.id] = s.name;
   const seedName = productById(def.seed)?.nameZh || '种子';
-  c.yieldNote = def.profile === 'potato-b'
-    ? `薯播写完蒙版才起算。第 ${def.maturity} 日进入成熟待收，过熟之后第 ${def.rotAt} 日还没收就烂在地里。${seedName}只从商店来。整地基肥和旋耕不启动这口钟。`
-    : `第 ${def.maturity} 日进入成熟待收，第 ${def.rotAt} 日还没收就烂在地里。${seedName}只从商店来。钟自己往前走。播种或移栽走完以前，田面保持裸土。`;
+  c.yieldNote = yieldNoteFor(c, def, seedName);
+}
+function yieldNoteFor(_c, def, seedName) {
+  if (def.profile === 'potato-b') {
+    const origin = def.stageOrigin === 'workshop' ? '阶段来自工坊覆写。' : '阶段来自仓库默认。';
+    return `薯播写完蒙版才起算。第 ${def.maturity} 日进入成熟待收，过熟之后第 ${def.rotAt} 日还没收就烂在地里。${seedName}只从商店来。整地基肥和旋耕不启动这口钟。${origin}`;
+  }
+  return `第 ${def.maturity} 日进入成熟待收，第 ${def.rotAt} 日还没收就烂在地里。${seedName}只从商店来。钟自己往前走。播种或移栽走完以前，田面保持裸土。`;
+}
+// 工坊覆写换过土豆的 stages / jobs 之后调用。CROPS 上的条和 PHASE_LABEL 跟着这份定义走。
+export function bindPotatoClock() {
+  const c = CROPS.find(x => x.id === 'potato');
+  const def = cropDef('potato');
+  if (!c || !def) return;
+  c.days = def.maturity;
+  c.season = def.rotAt;
+  const decorated = decorateStages(def);
+  c.stages.splice(0, c.stages.length, ...decorated);
+  for (const s of c.stages) PHASE_LABEL[s.id] = s.name;
+  const seedName = productById(def.seed)?.nameZh || '种子';
+  c.yieldNote = yieldNoteFor(c, def, seedName);
 }
 // 进度条和「作物」页共用。入仓量仍是整块，再乘漏做的惩罚。
 export const POTATO_STAGES = CROPS.find(c => c.id === 'potato').stages;

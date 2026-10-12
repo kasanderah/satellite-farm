@@ -36,7 +36,11 @@ import { parseFieldStageDoc } from './src/field-stages.js';
 const doc = parseFieldStageDoc(JSON.parse(text));
 ```
 
-`text` 可以是 `data/field-stages/potato.json`，也可以是工坊下载的 `field-stage-<cropId>.json`。浏览器里的另一份在 `localStorage` 键 `ringsheaf.assetlab.fieldStages.v1`，形状是 `{ schema, cropId, crops: { [cropId]: doc } }`。
+`text` 可以是 `data/field-stages/potato-b.json`，也可以是工坊下载的 `field-stage-<cropId>.json`。浏览器里的另一份在 `localStorage` 键 `ringsheaf.assetlab.fieldStages.v1`，形状是 `{ schema, cropId, crops: { [cropId]: doc } }`。
+
+可玩页 `index.html` 打开时读这把钥匙。键里有 `cropId` 或 `logicId` 对上土豆的文档，就用 `parseFieldStageDoc` 换掉土豆的钟、派工和田面阶段名。没有这份，或地址栏带 `?stages=repo`，就用仓库里的 `potato-b.json`。管理面板标着 **工坊覆写** 或 **仓库默认**，也可以重读、贴上 JSON、导入工坊下载的文件。大豆、大麦、甘蓝不读这把钥匙。
+
+用同一个来源打开两页时，工坊「保存」和可玩页看见的是同一份。例如在仓库根目录 `python3 -m http.server`，然后打开 `http://127.0.0.1:8000/asset-lab.html` 和 `http://127.0.0.1:8000/index.html`。直接双击两个 html（`file://`）时，Chrome 把每个文件当成不同来源，localStorage 不共用。那种打开方式从工坊下载 JSON，再到可玩页「导入文件」或粘贴。
 
 `parseFieldStageDoc` 会补上缺的 E→O / E→A，并按 `chain` 重写自然边。它不推进时钟，也不派农机。
 
