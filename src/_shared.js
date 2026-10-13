@@ -4,8 +4,8 @@
 // =====================================================================
 import { productById, recipeById, deviceById, shopRows, utilityCost, LOOP_OFFSETS } from './products.js';
 import { SAVE_VERSION } from './save-contract.js';
-import { cropDef, rigProfile, rigCan, rigHas, hitchPlan, hitchHasModes, droneCan, JOB_PENALTY, UNLOAD_WHILE_MOVING, BIN_LANES, UNLOAD_SECONDS, TRAILER_CARGO_CAP, HITCH_SWAP_S, RELOAD_S, MODE_SWITCH_S, SURFACE_CROPS } from './surface-crops.js';
-export { cropDef, rigProfile, JOB_PENALTY, UNLOAD_WHILE_MOVING, BIN_LANES, SURFACE_CROPS };
+import { cropDef, rigProfile, rigCan, rigHas, hitchPlan, hitchHasModes, droneCan, JOB_PENALTY, UNLOAD_WHILE_MOVING, BIN_LANES, UNLOAD_SECONDS, TRAILER_CARGO_CAP, HITCH_SWAP_S, RELOAD_S, MODE_SWITCH_S, SURFACE_CROPS, workWidthOf, lanesForWidth } from './surface-crops.js';
+export { cropDef, rigProfile, JOB_PENALTY, UNLOAD_WHILE_MOVING, BIN_LANES, SURFACE_CROPS, workWidthOf, lanesForWidth };
 
 // ---------- ① 色板（来自 art-ref 报告 5.4 节，只允许使用这些键名） ----------
 export const PALETTE = {
@@ -362,6 +362,20 @@ export function bindPotatoClock() {
   const seedName = productById(def.seed)?.nameZh || '种子';
   c.yieldNote = yieldNoteFor(c, def, seedName);
 }
+export function bindSurfaceClock(id) {
+  if (id === 'potato') { bindPotatoClock(); return; }
+  const c = CROPS.find(x => x.id === id);
+  const def = cropDef(id);
+  if (!c || !def) return;
+  c.days = def.maturity;
+  c.season = def.rotAt;
+  if (def.displayName) c.name = def.displayName;
+  const decorated = decorateStages(def);
+  c.stages.splice(0, c.stages.length, ...decorated);
+  for (const s of c.stages) PHASE_LABEL[s.id] = s.name;
+  const seedName = productById(def.seed)?.nameZh || '种子';
+  c.yieldNote = yieldNoteFor(c, def, seedName);
+}
 // 进度条和「作物」页共用。入仓量仍是整块，再乘漏做的惩罚。
 export const POTATO_STAGES = CROPS.find(c => c.id === 'potato').stages;
 const FIELD_RECIPE = { potato: 'potato-field', soy: 'soy-field', feed_barley: 'barley-field', cabbage: 'cabbage-field' };
@@ -451,8 +465,24 @@ function ensureJobs(f) {
   if (!def) return;
   for (const j of def.jobs) if (f.jobS[j.id] == null) f.jobS[j.id] = 0;
 }
+function passWidth(f, jobId) {
+  const w = f?.laneW?.[jobId];
+  return w > 0 ? w : L.LANE;
+}
+function passLanes(f, jobId) {
+  return lanesForWidth(passWidth(f, jobId), L.FIELD);
+}
+function stampWidth(f, jobId, width) {
+  if (!f.laneW) f.laneW = {};
+  if (!(f.laneW[jobId] > 0)) f.laneW[jobId] = width > 0 ? width : L.LANE;
+  return f.laneW[jobId];
+}
+function seenLanes(f, jobId, prog) {
+  const n = passLanes(f, jobId);
+  return n > 0 ? prog / n * L.LANES : prog;
+}
 function jobDone(f, id) {
-  return (f?.jobS?.[id] || 0) >= L.LANES - 1e-3;
+  return (f?.jobS?.[id] || 0) >= passLanes(f, id) - 1e-3;
 }
 function plantJob(f) {
   return cropOf(f)?.jobs.find(j => j.plant) || null;
@@ -473,7 +503,7 @@ function visualFront(f) {
       if (job.auto || job.spray || job.drone || job.window?.when === 'after') continue;
       if (job.window?.when !== 'before' && !job.writesMask) continue;
       const prog = f.jobS[job.id] || 0;
-      if (prog < L.LANES - 1e-3) return prog;
+      if (prog < passLanes(f, job.id) - 1e-3) return seenLanes(f, job.id, prog);
     }
     return 0;
   }
@@ -485,7 +515,7 @@ function visualFront(f) {
       if (!f.harvested) break;
     } else if (day < job.window.from) break;
     const prog = f.jobS[job.id] || 0;
-    if (prog < L.LANES - 1e-3) return prog;
+    if (prog < passLanes(f, job.id) - 1e-3) return seenLanes(f, job.id, prog);
     front = prog;
   }
   return front;
@@ -574,7 +604,7 @@ for (const f of fields) {
   if (f.owned && f.state === 3) { f.state = 2; f.s = 0; f.g = 1; }
 }
 
-function laneV(l) { return (l + 0.5) * L.LANE; }
+function laneV(l, width = L.LANE) { return (l + 0.5) * width; }
 function placeRig(h) {
   const dirp = h.lane % 2 === 0;
   const [x, z] = toWorld(h.f, h.u, laneV(h.lane));
@@ -597,18 +627,18 @@ function laneForward(f, dirp) {
   const along = dirp ? 0 : Math.PI;
   return f.dir === 0 ? along : (dirp ? Math.PI / 2 : -Math.PI / 2);
 }
-function workPose(f, lane, u) {
-  const [x, z] = toWorld(f, u, laneV(lane));
+function workPose(f, lane, u, width = L.LANE) {
+  const [x, z] = toWorld(f, u, laneV(lane, width));
   return { x, z, ang: laneForward(f, lane % 2 === 0) };
 }
 // 地头 U 形：从这一行的尽头绕到下一行，车头跟着弯道，结束时正对下一行。a 为 0–1。
-function headlandSample(f, lane, a) {
+function headlandSample(f, lane, a, width = L.LANE) {
   const dirp = lane % 2 === 0;
-  const radius = L.LANE / 2;
+  const radius = width / 2;
   const sweep = Math.min(1, Math.max(0, a)) * Math.PI;
   const bulge = dirp ? 1 : -1;
   const u0 = dirp ? L.FIELD : 0;
-  const v0 = laneV(lane);
+  const v0 = laneV(lane, width);
   const cv = v0 + radius;
   const u = u0 + bulge * Math.sin(sweep) * radius;
   const v = cv - Math.cos(sweep) * radius;
@@ -710,12 +740,14 @@ function parkRig(r, refill = false) {
 }
 function workTarget(f, jobId) {
   ensureJobs(f);
-  const s = Math.min(Math.max(f.jobS[jobId] || 0, 0), L.LANES - 1e-4);
+  const width = passWidth(f, jobId);
+  const lanes = passLanes(f, jobId);
+  const s = Math.min(Math.max(f.jobS[jobId] || 0, 0), lanes - 1e-4);
   const lane = Math.floor(s);
   const frac = s - lane;
   const dirp = lane % 2 === 0;
   const u = dirp ? frac * L.FIELD : (1 - frac) * L.FIELD;
-  return workPose(f, lane, u);
+  return workPose(f, lane, u, width);
 }
 function beginJob(r, f, job) {
   const def = cropOf(f);
@@ -724,13 +756,15 @@ function beginJob(r, f, job) {
   ensureJobs(f);
   r.job = job.id;
   // 生长链不在开工时记。播种写完蒙版见 finishPass。
-  const s = Math.min(Math.max(f.jobS[job.id] || 0, 0), L.LANES - 1e-4);
+  r.laneW = stampWidth(f, job.id, workWidthOf(r.kind, r.hitch));
+  const lanes = passLanes(f, job.id);
+  const s = Math.min(Math.max(f.jobS[job.id] || 0, 0), lanes - 1e-4);
   const lane = Math.floor(s);
   const frac = s - lane;
   const dirp = lane % 2 === 0;
   r.f = f; r.busy = true; r.mode = 'work'; r.intent = 'job'; r.lane = lane;
   r.u = dirp ? frac * L.FIELD : (1 - frac) * L.FIELD;
-  const pose = workPose(f, lane, r.u);
+  const pose = workPose(f, lane, r.u, r.laneW);
   r.x = pose.x; r.z = pose.z; r.ang = pose.ang;
   r.route = null; r.ri = 0;
 }
@@ -782,6 +816,9 @@ function routeTo(r, ex, ez, intent, f) {
 }
 function routeToJob(r, f, job) {
   r.job = job.id;
+  const plan = hitchPlan(r.kind, r.hitch, job);
+  const hitch = plan?.hitch || r.hitch;
+  r.laneW = stampWidth(f, job.id, workWidthOf(r.kind, hitch));
   const pose = workTarget(f, job.id);
   routeTo(r, pose.x, pose.z, 'job', f);
 }
@@ -895,29 +932,32 @@ function resumeHarvest(r) {
     afterWork(r);
     return;
   }
+  const lanes = passLanes(f, key);
+  const width = r.laneW || passWidth(f, key);
   const s = f.jobS[key] || 0;
-  const lane = Math.min(L.LANES - 1, Math.floor(s + 1e-6));
+  const lane = Math.min(lanes - 1, Math.floor(s + 1e-6));
   const dirp = lane % 2 === 0;
   r.lane = lane;
+  r.laneW = width;
   r.u = dirp ? 0 : L.FIELD;
   r.mode = 'work';
   r.intent = 'job';
   r.busy = true;
-  const pose = workPose(f, lane, r.u);
+  const pose = workPose(f, lane, r.u, width);
   r.x = pose.x; r.z = pose.z; r.ang = pose.ang;
 }
 // 薯播进度跨过整田，蒙版 M 就算写下。生长链从这一刻起算，不从规划、基肥、旋耕或播种开工起算。
 // 最后一条垄在到头之前就会越过完成线，不能只等 finishPass。
 function noteMask(f, job) {
   if (!job?.writesMask || !f || f.plantedAt != null) return;
-  if ((f.jobS?.[job.id] || 0) < L.LANES - 1e-3) return;
+  if ((f.jobS?.[job.id] || 0) < passLanes(f, job.id) - 1e-3) return;
   f.plantedAt = worldDay;
 }
 function finishPass(r) {
   const f = r.f;
   const key = r.job;
   const job = f && key ? cropOf(f)?.jobs.find(j => j.id === key) : null;
-  if (f?.jobS && key) f.jobS[key] = L.LANES;
+  if (f?.jobS && key) f.jobS[key] = passLanes(f, key);
   noteMask(f, job);
   if (job?.spray && f && !f.sprayed) {
     f.sprayed = true;
@@ -954,6 +994,9 @@ function stepWork(r, dt) {
   if ((r.charge ?? 1) <= 0) { goHome(r); return; }
   ensureJobs(f);
   const job = cropOf(f)?.jobs.find(j => j.id === key);
+  const width = r.laneW || passWidth(f, key);
+  const lanes = passLanes(f, key);
+  r.laneW = width;
   const pace = hitchPlan(r.kind, r.hitch, job)?.speed || 1;
   let rem = MACHINE_MPS * pace * dt;
   const dirp = r.lane % 2 === 0;
@@ -963,7 +1006,7 @@ function stepWork(r, dt) {
   const write = () => {
     f.jobS[key] = r.lane + (dirp ? r.u / L.FIELD : (L.FIELD - r.u) / L.FIELD);
     noteMask(f, job);
-    const pose = workPose(f, r.lane, r.u);
+    const pose = workPose(f, r.lane, r.u, width);
     r.x = pose.x; r.z = pose.z; r.ang = pose.ang;
   };
   if (useCharge(r, leg)) {
@@ -983,18 +1026,18 @@ function stepWork(r, dt) {
   rem -= room;
   if (job?.harvest && !UNLOAD_WHILE_MOVING) {
     r.bin = (r.bin || 0) + 1;
-    if (r.bin >= BIN_LANES || r.lane + 1 >= L.LANES) {
+    if (r.bin >= BIN_LANES || r.lane + 1 >= lanes) {
       enterNeedUnload(r);
       return;
     }
   }
-  if (r.lane + 1 >= L.LANES) {
+  if (r.lane + 1 >= lanes) {
     finishPass(r);
     if (r.mode === 'travel' && rem > 0) stepTravel(r, rem / MACHINE_MPS);
     return;
   }
-  r.mode = 'turn'; r.turnDist = 0; r.turnLen = Math.PI * (L.LANE / 2);
-  const pose = headlandSample(f, r.lane, 0);
+  r.mode = 'turn'; r.turnDist = 0; r.turnLen = Math.PI * (width / 2);
+  const pose = headlandSample(f, r.lane, 0, width);
   r.x = pose.x; r.z = pose.z; r.ang = pose.ang;
   if (rem > 0) stepTurn(r, rem / MACHINE_MPS);
 }
@@ -1010,7 +1053,7 @@ function stepTurn(r, dt) {
   if (useCharge(r, leg)) { goHome(r); return; }
   if (rem < left - 1e-8) {
     r.turnDist += rem;
-    const pose = headlandSample(f, r.lane, r.turnDist / r.turnLen);
+    const pose = headlandSample(f, r.lane, r.turnDist / r.turnLen, r.laneW || passWidth(f, key));
     r.x = pose.x; r.z = pose.z; r.ang = pose.ang;
     return;
   }
@@ -1021,7 +1064,7 @@ function stepTurn(r, dt) {
   r.mode = 'work';
   f.jobS[key] = r.lane;
   noteMask(f, cropOf(f)?.jobs.find(j => j.id === key));
-  const pose = workPose(f, r.lane, r.u);
+  const pose = workPose(f, r.lane, r.u, r.laneW || passWidth(f, key));
   r.x = pose.x; r.z = pose.z; r.ang = pose.ang;
   if (rem > 0) stepWork(r, rem / MACHINE_MPS);
 }
@@ -1170,9 +1213,11 @@ function stepBoom(dt) {
   if (!boom) return;
   boom.f.boomBusy = true;
   const key = boom.job.id;
-  boom.f.jobS[key] = Math.min(L.LANES, (boom.f.jobS[key] || 0) + (MACHINE_MPS * dt) / L.FIELD);
-  if (boom.f.jobS[key] >= L.LANES - 1e-3) {
-    boom.f.jobS[key] = L.LANES;
+  stampWidth(boom.f, key, workWidthOf(null, 'impl_sprayer'));
+  const lanes = passLanes(boom.f, key);
+  boom.f.jobS[key] = Math.min(lanes, (boom.f.jobS[key] || 0) + (MACHINE_MPS * dt) / L.FIELD);
+  if (boom.f.jobS[key] >= lanes - 1e-3) {
+    boom.f.jobS[key] = lanes;
     boom.f.boomBusy = false;
     if (!boom.f.sprayed) {
       boom.f.sprayed = true;
@@ -1185,9 +1230,11 @@ export function boomWatch() {
   if (!boom?.f) return null;
   const key = boom.job?.id;
   const s = key ? (boom.f.jobS?.[key] || 0) : 0;
-  const lane = Math.min(L.LANES - 1, Math.max(0, Math.floor(s)));
+  const lanes = key ? passLanes(boom.f, key) : L.LANES;
+  const width = key ? passWidth(boom.f, key) : L.LANE;
+  const lane = Math.min(lanes - 1, Math.max(0, Math.floor(s)));
   const frac = Math.max(0, s - lane);
-  const pose = workPose(boom.f, lane, frac * L.FIELD);
+  const pose = workPose(boom.f, lane, frac * L.FIELD, width);
   return { x: pose.x, z: pose.z, ang: pose.ang, f: boom.f };
 }
 const DRONE_MARKS = [[-2.15, 0.45], [2.15, 0.45], [-2.15, 1.55], [2.15, 1.55], [0, 1.55], [0, 0.45], [-3.2, 0.45], [3.2, 0.45]];
@@ -1274,6 +1321,7 @@ function launchDrone(d, f, job) {
     return;
   }
   d.intent = 'job';
+  d.laneW = stampWidth(f, job.id, workWidthOf(d.kind, null));
   const pose = workTarget(f, job.id);
   d.tx = pose.x; d.tz = pose.z;
 }
@@ -1296,14 +1344,16 @@ function beginDronePass(d) {
   const f = d.f;
   const job = f && cropOf(f)?.jobs.find(j => j.id === d.job);
   if (!f || !job || !jobOpen(f, job)) { d.intent = 'home'; d.mode = 'travel'; return; }
-  const s = Math.min(Math.max(f.jobS[job.id] || 0, 0), L.LANES - 1e-4);
+  d.laneW = stampWidth(f, job.id, workWidthOf(d.kind, null));
+  const lanes = passLanes(f, job.id);
+  const s = Math.min(Math.max(f.jobS[job.id] || 0, 0), lanes - 1e-4);
   d.lane = Math.floor(s);
   const frac = s - d.lane;
   const dirp = d.lane % 2 === 0;
   d.u = dirp ? frac * L.FIELD : (1 - frac) * L.FIELD;
   d.mode = 'work';
   d.intent = 'job';
-  const pose = workPose(f, d.lane, d.u);
+  const pose = workPose(f, d.lane, d.u, d.laneW);
   d.x = pose.x; d.z = pose.z; d.ang = pose.ang; d.y = DRONE_WORK_Y;
 }
 // 田块是齐的模块，机具幅宽盖得住，不做地边地角补喷。
@@ -1318,20 +1368,22 @@ function stepDroneWork(d, dt) {
   const room = Math.abs(dest - d.u);
   const leg = Math.min(DRONE_MPS * dt, room);
   d.u += (dirp ? 1 : -1) * leg;
-  const pose = workPose(f, d.lane, d.u);
+  const width = d.laneW || passWidth(f, key);
+  const lanes = passLanes(f, key);
+  const pose = workPose(f, d.lane, d.u, width);
   d.x = pose.x; d.z = pose.z; d.ang = pose.ang; d.y = DRONE_WORK_Y;
   f.jobS[key] = d.lane + (dirp ? d.u / L.FIELD : (L.FIELD - d.u) / L.FIELD);
   if (leg < room - 1e-6) return;
   f.jobS[key] = d.lane + 1;
-  if (d.lane + 1 >= L.LANES) {
-    f.jobS[key] = L.LANES;
+  if (d.lane + 1 >= lanes) {
+    f.jobS[key] = lanes;
     d.mode = 'travel';
     d.intent = 'home';
     return;
   }
   d.lane += 1;
   d.u = d.lane % 2 === 0 ? 0 : L.FIELD;
-  const next = workPose(f, d.lane, d.u);
+  const next = workPose(f, d.lane, d.u, width);
   d.x = next.x; d.z = next.z; d.ang = next.ang;
 }
 function stepWorkDrones(dt) {
@@ -1408,7 +1460,7 @@ function settlePotatoCalendar() {
     if (f.yieldFactor == null) f.yieldFactor = 1;
     const day = fieldDay(f);
     for (const job of def.jobs) {
-      if (job.auto && job.window?.when === 'clock' && day >= job.window.from) f.jobS[job.id] = L.LANES;
+      if (job.auto && job.window?.when === 'clock' && day >= job.window.from) f.jobS[job.id] = passLanes(f, job.id);
     }
     for (const job of def.jobs) {
       if (!job.required || job.auto || f.penalized[job.id]) continue;
@@ -1512,6 +1564,37 @@ function releaseField(f) {
     plantField(f, cropId, { cycle, autoBuy });
   }
 }
+// 清地：已种也停。这一季不入仓，种苗不退。机器离开这块田。
+export function abandonField(f) {
+  if (!f?.owned) return { ok: false, reason: 'plot' };
+  for (const r of rigs) if (r.f === f) goHome(r);
+  for (const d of workDrones) {
+    if (d.f !== f) continue;
+    d.intent = 'home';
+    d.mode = 'travel';
+    d.busy = true;
+  }
+  if (boom?.f === f) { f.boomBusy = false; boom = null; }
+  f.live = false;
+  f.hold = true;
+  f.paid = false;
+  f.plantedAt = null;
+  f.failed = null;
+  f.harvested = false;
+  f.stored = false;
+  f.claimed = false;
+  f.sprayed = false;
+  f.cycle = false;
+  f.state = 0;
+  f.g = 0;
+  f.s = 0;
+  f.yieldFactor = 1;
+  delete f.jobS;
+  delete f.laneW;
+  delete f.penalized;
+  dropPotato(f);
+  return { ok: true };
+}
 export function rigReadout(r) {
   if (!r) return null;
   const aerial = r.kind === 'drone_scout' || r.kind === 'drone_treat';
@@ -1538,7 +1621,7 @@ export function rigReadout(r) {
     doing = job?.name || '作业';
   }
   let frac = 0;
-  if (r.f?.jobS && r.job) frac = Math.max(0, Math.min(1, (r.f.jobS[r.job] || 0) / L.LANES));
+  if (r.f?.jobS && r.job) frac = Math.max(0, Math.min(1, (r.f.jobS[r.job] || 0) / passLanes(r.f, r.job)));
   return { speed, doing, frac, charge: r.charge ?? 1, job: r.job || null, light };
 }
 
@@ -1934,6 +2017,7 @@ export function resetGame() {
     f.yieldFactor = 1;
     f.boomBusy = false;
     delete f.jobS;
+    delete f.laneW;
     delete f.penalized;
     delete f.queued;
   }
@@ -2152,6 +2236,7 @@ export function exportSnapshot() {
       cycle: !!f.cycle, autoBuy: !!f.autoBuy, failed: f.failed || null,
       harvested: !!f.harvested, stored: !!f.stored, yieldFactor: f.yieldFactor == null ? 1 : f.yieldFactor,
       jobs: f.jobS ? Object.fromEntries(Object.entries(f.jobS).map(([k, v]) => [k, +v || 0])) : undefined,
+      laneW: f.laneW ? Object.fromEntries(Object.entries(f.laneW).map(([k, v]) => [k, +v || 0])) : undefined,
     })),
     fleet: rigs.slice(4).map(r => ({ kind: r.kind })),
     workDrones: workDrones.map(d => ({ kind: d.kind })),
@@ -2194,6 +2279,13 @@ export function applySnapshot(data) {
       for (const k of Object.keys(s.jobs)) f.jobS[k] = +s.jobs[k] || 0;
       ensureJobs(f);
     } else if (f.live) f.jobS = blankJobs(f);
+    if (s.laneW && typeof s.laneW === 'object') {
+      f.laneW = {};
+      for (const k of Object.keys(s.laneW)) {
+        const w = +s.laneW[k];
+        if (w > 0) f.laneW[k] = w;
+      }
+    } else delete f.laneW;
   }
   economy.revenue = +data.revenue || 0;
   if (data.stores) {

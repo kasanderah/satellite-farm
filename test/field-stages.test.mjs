@@ -4,7 +4,7 @@ import fs from 'fs';
 import {
   FIELD_STAGE_SCHEMA, placeholderFieldDoc, parseFieldStageDoc, createSim, stepSim,
   startJob, cancelWorkOrder, sampleRidge, ridgeCrestT, setGrowthChain, insertGrowthStage,
-  removeGrowthStage, tally, appearanceOf,
+  removeGrowthStage, tally, appearanceOf, alignFieldCalendar, jobWindows,
 } from '../src/field-stages.js';
 import { compilePlayable, SURFACE_CROPS } from '../src/surface-crops.js';
 
@@ -213,15 +213,53 @@ test('growth chain can drop B and accept an inserted stage', () => {
   const d = doc();
   setGrowthChain(d, ['C']);
   assert.deepEqual(d.chain, ['A', 'C', 'D']);
+  assert.equal(d.cycle, 39);
+  assert.equal(alignFieldCalendar(d).cycle, 39);
   assert.ok(d.edges.some(e => e.when === 'natural' && e.from === 'A' && e.to === 'C'));
   assert.ok(!d.edges.some(e => e.when === 'natural' && e.to === 'B'));
+  assert.equal(jobWindows(d, alignFieldCalendar(d)).some(w => w.op.stage === 'B'), false);
   insertGrowthStage(d, 'A');
   assert.equal(d.chain[1], 'X1');
+  assert.equal(d.cycle, 45);
   assert.ok(d.stages.some(s => s.id === 'X1'));
   removeGrowthStage(d, 'X1');
   assert.ok(!d.chain.includes('X1'));
+  assert.equal(d.cycle, 39);
   removeGrowthStage(d, 'A');
   assert.ok(d.chain.includes('A'));
+});
+
+test('a cycle that does not match the stage sum is refused', () => {
+  const d = doc();
+  d.cycle = 40;
+  assert.throws(() => alignFieldCalendar(d), /总周期和阶段加总对不上/);
+  d.cycle = 51;
+  assert.equal(alignFieldCalendar(d).cycle, 51);
+});
+
+test('an op whose stage was removed is not a window', () => {
+  const d = doc();
+  d.ops.push({ id: 'ghost', name: '杀秧', stage: 'no-such', machine: 'impl_haulm', kind: 'required' });
+  const windows = jobWindows(d, alignFieldCalendar(d));
+  assert.equal(windows.some(w => w.op.id === 'ghost'), false);
+  assert.equal(windows.some(w => w.op.id === 'sow'), true);
+});
+
+test('dropping emerg and haulm keeps a savable potato calendar without those jobs', () => {
+  const raw = JSON.parse(fs.readFileSync(new URL('../data/field-stages/potato-b.json', import.meta.url)));
+  const d = parseFieldStageDoc(raw);
+  assert.equal(d.cycle, 88);
+  removeGrowthStage(d, 'emerg');
+  removeGrowthStage(d, 'haulm');
+  assert.equal(d.chain.includes('emerg'), false);
+  assert.equal(d.chain.includes('haulm'), false);
+  assert.equal(d.ops.some(op => op.stage === 'haulm' || op.stage === 'emerg'), false);
+  assert.equal(d.cycle, 66);
+  const play = compilePlayable(d, { id: 'potato', name: '中熟商品薯', seed: 'seed', slotted: true });
+  assert.equal(play.cycle, 66);
+  assert.equal(play.jobs.some(j => j.stage === 'emerg' || j.stage === 'haulm' || j.cap === 'haulm'), false);
+  assert.equal(play.jobs.some(j => j.id === 'potato_plant' && j.window.when === 'before'), true);
+  assert.equal(play.jobs.some(j => j.id === 'potato_harvest' && j.window.when === 'clock'), true);
 });
 
 test('scatter opens some cells before the stage ends and all of them at the end', () => {

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { LAB_CLASSES, LAB_ENTRIES, CULT_EMPTY, CULT_EMPTY_NOTES, CULT_B_NOTES, GRUB_TROUGH_NOTES, planGrubColumns, GRUB_DEMO_GANTRIES, GRUB_WORK_MPS, GRUB_GANTRY_OPTIONS, REF_SKETCHFAB_COMBINE } from '../src/lab-catalog.js';
 import {
   CROPS, L, PLOT, FIELD_HA, fields, fieldAt, fieldAtWorld, focus, rigs,
-  plantField, step, economy, quote, log, exportSnapshot, applySnapshot, RING,
+  plantField, abandonField, step, economy, quote, log, exportSnapshot, applySnapshot, RING,
   stores, worldDay, cropWatch, fieldVisual, setPaused, setTimeScale,
   DAY_SECONDS, MACHINE_MPS, WORLD_MIN_PER_REAL_MIN, warehouse, sellLot, sellStack, warehouseCapacity, placeBuilding, removeBuilding, buildings, rigReadout,
   SHOP, buySeed, buyItem, SEED_PER_FIELD, resetGame, paused, onHubParcel, HUB_SITES, POTATO_STAGES, POTATO_ROT_AT, POTATO_DAYS, cropDef, cropDossier,
@@ -14,7 +14,7 @@ import {
   devices, potatoStock, fertPlan, cultureFeedPlan, millWatch, startMill, orderProcess, removeMill,
 } from '../src/_shared.js';
 import { productById, recipeById, deviceById, flowModel, LOOP_OFFSETS } from '../src/products.js';
-import { auditDispatch, rigCan, rigHas, hitchPlan } from '../src/surface-crops.js';
+import { auditDispatch, rigCan, rigHas, hitchPlan, workWidthOf, lanesForWidth } from '../src/surface-crops.js';
 
 test('one colonist plot is about 4 km on the ring', () => {
   assert.ok(PLOT.along > 3500 && PLOT.along < 4500, PLOT.along);
@@ -1285,4 +1285,56 @@ test('sector mirrors sweep a 180 degree day around the ring', () => {
   assert.ok(Math.abs(sectorLight(terminator, 0) - 0.5) < 0.02);
   assert.equal(dayCenter(1.25), dayCenter(0.25));
   setWorldDay(0);
+});
+
+test('work width belongs to the implement and sets the lane spacing', () => {
+  assert.equal(workWidthOf('hiller', 'impl_cultivator'), 6.4);
+  assert.equal(lanesForWidth(6.4, L.FIELD), 20);
+  assert.equal(workWidthOf('planter', 'impl_potato_planter'), L.LANE);
+  assert.equal(lanesForWidth(L.LANE, L.FIELD), L.LANES);
+  assert.equal(workWidthOf('lifter', null), 12.8);
+  assert.equal(workWidthOf('harvester_combine', null), 8);
+  assert.equal(lanesForWidth(8, L.FIELD), 16);
+  assert.equal(workWidthOf('harvester_cabbage', null), 4);
+  assert.equal(workWidthOf('drone_scout', null), 32);
+  assert.equal(workWidthOf('drone_treat', null), 16);
+  resetGame();
+  setPaused(false);
+  stores.seed = 2;
+  stores.fertilizer = 2;
+  const f = fieldAt(focus.i, focus.j);
+  assert.equal(plantField(f, 'potato').ok, true);
+  const young = cropDef('potato').stages.find(s => s.id === 'B');
+  f.plantedAt = worldDay - (young.from + 1);
+  f.jobS.sow = L.LANES;
+  const hiller = rigs.find(r => r.kind === 'hiller');
+  let guard = 0;
+  while (!(hiller.job === 'weed' && hiller.mode === 'work') && guard < 1200) { step(1, 0, 1); guard++; }
+  assert.equal(hiller.job, 'weed');
+  assert.equal(hiller.mode, 'work');
+  assert.equal(f.laneW.weed, 6.4);
+  const cross = f.dir === 0 ? hiller.z - f.z0 : hiller.x - f.x0;
+  assert.ok(Math.abs(cross - 3.2) < 0.05, cross);
+  resetGame();
+});
+
+test('clearing a planted field abandons the season and sends machines off', () => {
+  resetGame();
+  setPaused(false);
+  stores.seed = 4;
+  stores.fertilizer = 4;
+  const f = fieldAt(focus.i, focus.j);
+  const lots = warehouse.length;
+  assert.equal(plantField(f, 'potato').ok, true);
+  const seedLeft = stores.seed;
+  step(3, 0, 1);
+  const cleared = abandonField(f);
+  assert.equal(cleared.ok, true);
+  assert.equal(f.live, false);
+  assert.equal(f.plantedAt, null);
+  assert.equal(f.jobS, undefined);
+  assert.equal(warehouse.length, lots);
+  assert.equal(stores.seed, seedLeft);
+  assert.ok(rigs.every(r => r.f !== f));
+  resetGame();
 });

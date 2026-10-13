@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import potatoB from '../data/field-stages/potato-b.json' with { type: 'json' };
-import { cropDef, SURFACE_CROPS, potatoDrawLooks } from '../src/surface-crops.js';
-import { CROPS, bindPotatoClock } from '../src/_shared.js';
+import { cropDef, SURFACE_CROPS, potatoDrawLooks, resetSurfaceCrop, auditDispatch } from '../src/surface-crops.js';
+import { CROPS, bindPotatoClock, bindSurfaceClock } from '../src/_shared.js';
+import { placeholderFieldDoc } from '../src/field-stages.js';
 import {
   applyStagePayload, revertPotatoStages, potatoDocFromPayload, bootFieldStageSource,
   writeStageStore, forgetPotatoStage, stageBadge, FIELD_STAGE_STORE, readStageStore,
@@ -13,6 +14,7 @@ function edited() {
   const emerg = doc.stages.find(s => s.id === 'emerg');
   emerg.name = '出苗工坊';
   emerg.days = 20;
+  doc.cycle = (Number(doc.cycle) || 88) + 5;
   const d2 = doc.stages.find(s => s.id === 'D').variants.find(v => v.id === 'D2');
   d2.days = 8;
   return doc;
@@ -168,14 +170,81 @@ test('a store without a potato doc names what it found', () => {
   assert.match(applied.message, /soy/);
 });
 
-test('a potato op pointing at a missing stage names that stage', () => {
+test('a potato op pointing at a missing stage is left out of the clock', () => {
   const doc = structuredClone(potatoB);
   const op = doc.ops.find(o => o.id === 'potato_shallow');
   op.stage = 'no-such';
   const applied = applyStagePayload(doc);
-  assert.equal(applied.ok, false);
-  assert.match(applied.message, /no-such|作业对不上阶段/);
-  assert.equal(cropDef('potato').stageOrigin, 'repo');
+  try {
+    assert.equal(applied.ok, true, applied.message);
+    assert.equal(cropDef('potato').stageOrigin, 'workshop');
+    assert.equal(cropDef('potato').jobs.some(j => j.id === 'potato_shallow'), false);
+    assert.equal(cropDef('potato').jobs.some(j => j.id === 'potato_haulm'), true);
+  } finally {
+    revertPotatoStages();
+    bindPotatoClock();
+  }
+});
+
+test('deleting emerg and haulm stops the topper without keeping the old clock', () => {
+  const doc = structuredClone(potatoB);
+  const emerg = doc.stages.find(s => s.id === 'emerg');
+  const haulm = doc.stages.find(s => s.id === 'haulm');
+  doc.cycle = doc.cycle - emerg.days - haulm.days;
+  doc.stages = doc.stages.filter(s => s.id !== 'emerg' && s.id !== 'haulm');
+  doc.chain = doc.chain.filter(id => id !== 'emerg' && id !== 'haulm');
+  const applied = applyStagePayload(doc);
+  try {
+    assert.equal(applied.ok, true, applied.message);
+    bindPotatoClock();
+    const jobs = cropDef('potato').jobs;
+    assert.equal(jobs.some(j => j.stage === 'emerg' || j.stage === 'haulm' || j.cap === 'haulm'), false);
+    for (let day = 0; day <= cropDef('potato').rotAt; day++) {
+      const rows = auditDispatch('potato', day, { planted: true });
+      assert.equal(rows.some(row => row.cap === 'haulm' || row.kinds.includes('topper')), false, 'day ' + day);
+    }
+  } finally {
+    revertPotatoStages();
+    bindPotatoClock();
+  }
+});
+
+test('soy barley and cabbage can be replaced from the same store', () => {
+  const soy = placeholderFieldDoc({ id: 'soy', name: '大豆' });
+  soy.stages.find(s => s.id === 'B').name = '大豆苗';
+  soy.stages.find(s => s.id === 'B').days = 20;
+  soy.cycle = 59;
+  const barley = placeholderFieldDoc({ id: 'feed_barley', name: '饲料大麦' });
+  barley.cycle = 10;
+  const applied = applyStagePayload({ crops: { soy, feed_barley: barley } });
+  try {
+    assert.equal(applied.ok, false);
+    assert.match(applied.message, /没有土豆/);
+    assert.match(applied.siblingNotes.join(''), /总周期/);
+    assert.equal(cropDef('soy').stageOrigin, 'workshop');
+    assert.equal(cropDef('soy').cycle, 59);
+    assert.equal(cropDef('soy').stages.find(s => s.id === 'B').name, '大豆苗');
+    assert.equal(cropDef('feed_barley').cycle, 51);
+    assert.equal(cropDef('feed_barley').stageOrigin, 'repo');
+    bindSurfaceClock('soy');
+    assert.equal(CROPS.find(c => c.id === 'soy').name, '大豆');
+    assert.equal(CROPS.find(c => c.id === 'soy').stages.find(s => s.id === 'B').name, '大豆苗');
+    for (const id of ['soy', 'cabbage']) {
+      const sow = auditDispatch(id, 0, { planted: false });
+      assert.equal(sow.some(row => row.id === 'sow'), true, id);
+      const harvest = auditDispatch(id, cropDef(id).maturity, { planted: true });
+      assert.equal(harvest.some(row => row.id === 'harvest'), true, id);
+    }
+    assert.ok(auditDispatch('cabbage', 0, { planted: false }).some(row => row.id === 'sow' && row.kinds.includes('transplanter')));
+    assert.ok(auditDispatch('feed_barley', cropDef('feed_barley').maturity, { planted: true }).some(row => row.id === 'harvest' && row.kinds.includes('harvester_combine')));
+  } finally {
+    resetSurfaceCrop('soy');
+    resetSurfaceCrop('feed_barley');
+    resetSurfaceCrop('cabbage');
+    bindSurfaceClock('soy');
+    bindSurfaceClock('feed_barley');
+    bindSurfaceClock('cabbage');
+  }
 });
 
 test('broken JSON is not treated as an empty browser', () => {

@@ -9,6 +9,7 @@
   "name": "中熟商品薯",
   "timeUnit": "gameDay",
   "secondsPerDayAt1x": 1,
+  "cycle": 88,
   "calendar": {
     "method": "round((lo+hi)/2)",
     "spans": {

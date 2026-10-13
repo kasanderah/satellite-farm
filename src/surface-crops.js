@@ -181,6 +181,38 @@ export function installPotatoProfile(profile, origin) {
   return dest;
 }
 
+export function surfaceProfileFromRaw(id, raw) {
+  const meta = CROP_META[id];
+  if (!meta) throw new Error('没有这作物');
+  const play = compilePlayable(raw, meta);
+  if (id === 'potato') play.slotted = true;
+  return play;
+}
+
+export function installSurfaceProfile(id, profile, origin) {
+  if (id === 'potato') return installPotatoProfile(profile, origin);
+  const dest = SURFACE_CROPS[id];
+  if (!dest) return null;
+  dest.stages.splice(0, dest.stages.length, ...profile.stages);
+  dest.jobs.splice(0, dest.jobs.length, ...profile.jobs);
+  dest.maturity = profile.maturity;
+  dest.hold = profile.hold;
+  dest.rotAt = profile.rotAt;
+  dest.cycle = profile.cycle;
+  dest.displayName = profile.displayName || dest.displayName;
+  dest.planLabel = '种' + (dest.displayName || '');
+  dest.visual = profile.visual;
+  dest.stageOrigin = origin === 'workshop' ? 'workshop' : 'repo';
+  return dest;
+}
+
+export function resetSurfaceCrop(id) {
+  if (id === 'potato') return installPotatoProfile(playableFromMeta(CROP_META.potato), 'repo');
+  const meta = CROP_META[id];
+  if (!meta) return null;
+  return installSurfaceProfile(id, playableFromMeta(meta), 'repo');
+}
+
 // 画面阶段下标和 fieldVisual 的 g 对齐：1 是整地裸土，2 起是生长链。
 export function potatoDrawLooks() {
   const def = SURFACE_CROPS.potato;
@@ -222,15 +254,15 @@ export const RIG_PROFILE = {
   },
   hiller: { logicId: 'tractor_gen', label: '培土机', mesh: 'tractor_gen', defaultHitch: 'impl_cultivator', defaultMode: 'hill', kit: ['impl_cultivator'] },
   topper: { logicId: 'tractor_gen', label: '杀秧机', mesh: 'tractor_gen', defaultHitch: 'impl_haulm', kit: ['impl_haulm'] },
-  lifter: { logicId: 'harvester_potato', label: '收获机', mesh: 'harvester_potato', kit: [] },
+  lifter: { logicId: 'harvester_potato', label: '收获机', mesh: 'harvester_potato', workWidth: 12.8, kit: [] },
   // 买来的拖拉机要能换上这些后挂，否则整地、播种、碎秆和侧卸都没人做。
   tractor: {
     logicId: 'tractor_gen', label: '拖拉机', mesh: 'tractor_gen',
     kit: ['impl_rotavator', 'impl_subsoiler', 'impl_cultivator', 'impl_fertilizer', 'impl_sprayer', 'impl_seeder', 'impl_potato_planter', 'impl_haulm', 'impl_trailer', 'impl_bedder'],
   },
-  harvester_combine: { logicId: 'harvester_combine', label: '联合收割机', mesh: 'harvester_combine', kit: [] },
-  harvester_cabbage: { logicId: 'harvester_cabbage', label: '结球收获机', mesh: 'harvester_cabbage', kit: [] },
-  transplanter: { logicId: 'transplanter', label: '移栽机', mesh: 'transplanter', kit: [] },
+  harvester_combine: { logicId: 'harvester_combine', label: '联合收割机', mesh: 'harvester_combine', workWidth: 8, kit: [] },
+  harvester_cabbage: { logicId: 'harvester_cabbage', label: '结球收获机', mesh: 'harvester_cabbage', workWidth: 4, kit: [] },
+  transplanter: { logicId: 'transplanter', label: '移栽机', mesh: 'transplanter', workWidth: 4, kit: [] },
 };
 
 // 能力是调度用的。同一类挂具可以只覆盖其中几项，参数里带速度和模式。
@@ -238,17 +270,20 @@ export const HITCH_SWAP_S = 8;
 export const RELOAD_S = 6;
 export const MODE_SWITCH_S = 2.5;
 
+// 工作宽度是机具自己的米数，路径按它分趟。12.8 是原来的固定巷距。
+export const DEFAULT_WORK_WIDTH = 12.8;
+
 export const IMPLEMENTS = {
-  impl_rotavator: { caps: [{ id: 'till_rotary' }] },
-  impl_subsoiler: { caps: [{ id: 'till_subsoil' }] },
-  impl_cultivator: { caps: [{ id: 'cultivate', modes: ['shallow', 'weed', 'hill', 'residue'] }] },
-  impl_fertilizer: { caps: [{ id: 'fertilize' }] },
-  impl_sprayer: { caps: [{ id: 'spray', mix: 'field' }] },
-  impl_seeder: { caps: [{ id: 'seed', disc: 'bean', speed: 1 }, { id: 'seed', disc: 'grain', speed: 0.85 }] },
-  impl_potato_planter: { caps: [{ id: 'plant_potato' }] },
-  impl_haulm: { caps: [{ id: 'haulm' }] },
-  impl_trailer: { caps: [{ id: 'haul' }] },
-  impl_bedder: { caps: [{ id: 'bed' }] },
+  impl_rotavator: { workWidth: 3.2, caps: [{ id: 'till_rotary' }] },
+  impl_subsoiler: { workWidth: 2.4, caps: [{ id: 'till_subsoil' }] },
+  impl_cultivator: { workWidth: 6.4, caps: [{ id: 'cultivate', modes: ['shallow', 'weed', 'hill', 'residue'] }] },
+  impl_fertilizer: { workWidth: 12.8, caps: [{ id: 'fertilize' }] },
+  impl_sprayer: { workWidth: 16, caps: [{ id: 'spray', mix: 'field' }] },
+  impl_seeder: { workWidth: 4, caps: [{ id: 'seed', disc: 'bean', speed: 1 }, { id: 'seed', disc: 'grain', speed: 0.85 }] },
+  impl_potato_planter: { workWidth: 12.8, caps: [{ id: 'plant_potato' }] },
+  impl_haulm: { workWidth: 3.2, caps: [{ id: 'haulm' }] },
+  impl_trailer: { workWidth: 12.8, caps: [{ id: 'haul' }] },
+  impl_bedder: { workWidth: 3.2, caps: [{ id: 'bed' }] },
 };
 
 export const PLATFORM_CAPS = {
@@ -310,9 +345,25 @@ export function rigProfile(kind) {
 
 // 侦察和虫害防治不进机库。病害喷雾以后才交给 impl_sprayer / orbit_boom。
 export const DRONE_PROFILE = {
-  drone_scout: { logicId: 'drone_scout', label: '侦察无人机', caps: [{ id: 'scout' }] },
-  drone_treat: { logicId: 'drone_treat', label: '植保无人机', caps: [{ id: 'pest_treat' }] },
+  drone_scout: { logicId: 'drone_scout', label: '侦察无人机', workWidth: 32, caps: [{ id: 'scout' }] },
+  drone_treat: { logicId: 'drone_treat', label: '植保无人机', workWidth: 16, caps: [{ id: 'pest_treat' }] },
 };
+
+export function lanesForWidth(width, field = 128) {
+  const span = Number(width) > 0.4 ? Number(width) : DEFAULT_WORK_WIDTH;
+  const length = field > 0 ? field : 128;
+  return Math.max(1, Math.round(length / span));
+}
+
+export function workWidthOf(kind, hitch) {
+  const impl = hitch && IMPLEMENTS[hitch];
+  if (impl?.workWidth > 0) return impl.workWidth;
+  const profile = rigProfile(kind);
+  if (profile?.workWidth > 0) return profile.workWidth;
+  const drone = kind && DRONE_PROFILE[kind];
+  if (drone?.workWidth > 0) return drone.workWidth;
+  return DEFAULT_WORK_WIDTH;
+}
 
 export function droneCan(kind, job) {
   if (!job?.drone) return false;

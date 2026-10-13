@@ -178,6 +178,7 @@ export function placeholderFieldDoc(crop) {
     ridge: RIDGE_TILL.map(p => ({ ...p })),
     transition: { template: 'scatter', span: 'window', windowDays: 1.2 },
     chain: ['A', 'B', 'C', 'D'],
+    cycle: 51,
     stages: [
       stage({
         id: 'O', name: '空地', kind: 'idle', days: 5,
@@ -265,6 +266,9 @@ export function alignFieldCalendar(doc) {
   if (placed[0].from !== 0 || placed[placed.length - 1].to !== cycle) {
     throw new Error('总周期和阶段加总对不上');
   }
+  if (Number.isFinite(+doc.cycle) && Math.abs(+doc.cycle - cycle) > 0.001) {
+    throw new Error('总周期和阶段加总对不上');
+  }
   const idle = byId.get('O');
   const post = byId.get('E');
   if (!idle) throw new Error('阶段缺 O');
@@ -310,7 +314,8 @@ export function jobWindows(doc, aligned) {
       window = { when: 'after', stage: 'E', from, to: from + days };
     } else {
       const placed = stageOf(op.stage);
-      if (!placed) throw new Error('作业对不上阶段 ' + (op.stage || op.id || op.name || ''));
+      // 阶段已经删掉、或不在生长链上：这道工不进调度，也不把整份作物挡回去。
+      if (!placed) continue;
       let from = placed.from;
       let to = placed.to;
       if (op.window && Number.isFinite(+op.window.from) && Number.isFinite(+op.window.to)) {
@@ -395,6 +400,7 @@ export function parseFieldStageDoc(input) {
     grid: { along: Math.max(4, Math.min(48, Math.round(Number(input.grid && input.grid.along) || seed.grid.along))) },
     plant: { ...seed.plant, ...(input.plant || {}) },
     ridge: copyRidge(input.ridge) || seed.ridge,
+    cycle: Number.isFinite(+input.cycle) ? +input.cycle : undefined,
     transition: { ...seed.transition, ...(input.transition || {}) },
     stages: input.stages.map(raw => {
       const base = seed.stages.find(s => s.id === raw.id);
@@ -714,7 +720,22 @@ export function tally(sim) {
 }
 
 export function setGrowthChain(doc, middleIds) {
-  doc.chain = ['A', ...(middleIds || []), 'D'];
+  const prev = new Set(doc.chain || []);
+  const nextMiddle = middleIds || [];
+  const next = new Set(['A', ...nextMiddle, 'D']);
+  if (Number.isFinite(+doc.cycle)) {
+    let delta = 0;
+    for (const id of prev) {
+      if (next.has(id) || id === 'O' || id === 'E') continue;
+      delta -= Number(stageById(doc, id)?.days) || 0;
+    }
+    for (const id of next) {
+      if (prev.has(id) || id === 'O' || id === 'E') continue;
+      delta += Number(stageById(doc, id)?.days) || 0;
+    }
+    doc.cycle = Math.round((+doc.cycle + delta) * 100) / 100;
+  }
+  doc.chain = ['A', ...nextMiddle, 'D'];
   return rebuildNaturalEdges(doc);
 }
 
@@ -724,6 +745,7 @@ export function insertGrowthStage(doc, afterId) {
   const id = 'X' + n;
   const after = stageById(doc, afterId) || stageById(doc, 'A');
   const atStage = Math.max(0, doc.stages.findIndex(s => s.id === 'D'));
+  if (Number.isFinite(+doc.cycle)) doc.cycle = Math.round((+doc.cycle + 6) * 100) / 100;
   doc.stages.splice(atStage, 0, stage({
     id, name: '插入阶段', kind: 'growth', days: 6, optional: true, inserted: true,
     color: after.color, canopy: after.canopy, roughness: after.roughness,
@@ -742,7 +764,12 @@ export function insertGrowthStage(doc, afterId) {
 
 export function removeGrowthStage(doc, id) {
   if (id === 'A' || id === 'D' || id === 'O' || id === 'E') return doc;
+  const gone = stageById(doc, id);
+  const days = gone ? Number(gone.days) || 0 : 0;
+  const onChain = (doc.chain || []).includes(id);
   doc.stages = doc.stages.filter(s => s.id !== id);
   doc.chain = doc.chain.filter(x => x !== id);
+  doc.ops = (doc.ops || []).filter(op => op.stage !== id);
+  if (onChain && Number.isFinite(+doc.cycle)) doc.cycle = Math.round((+doc.cycle - days) * 100) / 100;
   return rebuildNaturalEdges(doc);
 }

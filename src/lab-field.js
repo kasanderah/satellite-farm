@@ -9,6 +9,7 @@ import {
   FIELD_STAGE_SCHEMA, FIELD_STAGE_STORE, placeholderFieldDoc, parseFieldStageDoc,
   createSim, stepSim, startJob, cancelWorkOrder, sampleRidge, appearanceOf,
   stageById, setGrowthChain, insertGrowthStage, removeGrowthStage, dominant, tally,
+  alignFieldCalendar, jobWindows,
 } from './field-stages.js';
 import potatoBRaw from '../data/field-stages/potato-b.json' with { type: 'json' };
 
@@ -234,8 +235,34 @@ export function createFieldWorkshop(els) {
     if (opt) opt.textContent = name;
   }
 
+  function chainDays(doc) {
+    let sum = 0;
+    for (const id of doc.chain || []) {
+      const st = stageById(doc, id);
+      if (st) sum += Number(st.days) || 0;
+    }
+    return Math.round(sum * 100) / 100;
+  }
+
+  function calendarError(doc) {
+    try {
+      const aligned = alignFieldCalendar(doc);
+      jobWindows(doc, aligned);
+      return '';
+    } catch (err) {
+      return err.message || '阶段对不齐';
+    }
+  }
+
   function persist() {
     flushName();
+    const doc = current();
+    const err = calendarError(doc);
+    if (err) {
+      note = err + '。没写入。阶段合计 ' + chainDays(doc) + ' 日，总周期 ' + (Number.isFinite(+doc.cycle) ? doc.cycle : '未定') + ' 日。';
+      paintStatus();
+      return;
+    }
     const payload = { schema: FIELD_STAGE_SCHEMA, cropId, crops: docs };
     localStorage.setItem(FIELD_STAGE_STORE, JSON.stringify(payload));
     note = '已存进这台浏览器';
@@ -329,6 +356,7 @@ export function createFieldWorkshop(els) {
 <option value="sweep|full">推进 · 全周期</option>
 </select></label>
 <label>窗口（游戏日）<input id="fs-window" type="number" min="0.25" max="80" step="0.25"></label>
+<label>总周期（游戏日）<input id="fs-cycle" type="number" min="1" max="800" step="0.25"></label>
 </div>
 <div class="fs-split">
 <label>行数（全阶段连锁）<input id="fs-rows" type="number" min="4" max="16" step="1"></label>
@@ -378,6 +406,10 @@ export function createFieldWorkshop(els) {
     });
     panel.querySelector('#fs-window').addEventListener('input', (e) => {
       current().transition.windowDays = clampNum(e.target.value, 0.25, 80, 1.2);
+      persist();
+    });
+    panel.querySelector('#fs-cycle').addEventListener('input', (e) => {
+      current().cycle = clampNum(e.target.value, 0.25, 800, chainDays(current()));
       persist();
     });
     panel.querySelector('#fs-rows').addEventListener('change', (e) => {
@@ -707,6 +739,7 @@ ${variants}
       if (el && document.activeElement !== el) el.value = value;
     };
     set('#fs-window', doc.transition.windowDays);
+    set('#fs-cycle', Number.isFinite(+doc.cycle) ? doc.cycle : chainDays(doc));
     set('#fs-rows', doc.rows);
     set('#fs-along', doc.grid.along);
     set('#fs-height', doc.plant.height);
@@ -744,7 +777,9 @@ ${variants}
     const clock = info ? info.day.toFixed(1) : '0.0';
     const job = sim && sim.job ? ` · ${sim.job.op.name} ${sim.job.applied}/${sim.job.queue.length}` : '';
     const mode = inspect ? ' · 查看这一阶段' : (playing ? ' · 播放' : ' · 暂停');
-    const text = `${where} · 蒙版 ${maskPct}% · 第 ${clock} 日${job}${mode}${note ? ' · ' + note : ''}`;
+    const sum = chainDays(doc);
+    const cycle = Number.isFinite(+doc.cycle) ? doc.cycle : '未定';
+    const text = `${where} · 蒙版 ${maskPct}% · 第 ${clock} 日 · 阶段合计 ${sum} / 总周期 ${cycle}${job}${mode}${note ? ' · ' + note : ''}`;
     const status = bar.querySelector('#fs-status');
     const now = panel.querySelector('#fs-now');
     const foot = panel.querySelector('#fs-note');

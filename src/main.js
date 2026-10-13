@@ -11,7 +11,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { HorizontalTiltShiftShader } from 'three/addons/shaders/HorizontalTiltShiftShader.js';
 import { VerticalTiltShiftShader } from 'three/addons/shaders/VerticalTiltShiftShader.js';
-import { PALETTE, CROPS, TEX_ID, L, fields, harvesters, haulers, drones, step, TRUNKS_X, TRUNKS_Z, depots, inCrater, ROADS, RING, LAYERS, CUT, wrapX, PLOT, economy, focus, signals, log, plantField, quote, setTimeScale, setPaused, paused, exportSnapshot, applySnapshot, fieldAtWorld, fieldAt, fieldOrigin, simTime, worldDay, stores, rigs, fieldVisual, cropWatch, POTATO_DAYS, POTATO_STAGES, warehouse, buildings, sellLot, sellStack, warehouseStacks, warehouseCapacity, placeBuilding, removeBuilding, rigReadout, SHOP, buySeed, buyItem, SEED_PER_FIELD, FERT_PER_FIELD, resetGame, CULTURES, DECK_CLIMATE, tanks, cultureWatch, startCulture, tendCulture, harvestCulture, BUILDING_KINDS, CULTURE_CELLS, tankSite, devices, potatoStock, fertPlan, cultureFeedPlan, millWatch, startMill, removeMill, orderProcess, HUB_SITES, cropDossier, MACHINE_SHOP, buyMachine, cropDef, boomWatch, rigProfile, DRONE_SHOP, workDrones, buyDrone, sectorLight, sectorWord, dayCenter, setWorldDay, RING_OMEGA, bindPotatoClock } from './_shared.js';
+import { PALETTE, CROPS, TEX_ID, L, fields, harvesters, haulers, drones, step, TRUNKS_X, TRUNKS_Z, depots, inCrater, ROADS, RING, LAYERS, CUT, wrapX, PLOT, economy, focus, signals, log, plantField, abandonField, quote, setTimeScale, setPaused, paused, exportSnapshot, applySnapshot, fieldAtWorld, fieldAt, fieldOrigin, simTime, worldDay, stores, rigs, fieldVisual, cropWatch, POTATO_DAYS, POTATO_STAGES, warehouse, buildings, sellLot, sellStack, warehouseStacks, warehouseCapacity, placeBuilding, removeBuilding, rigReadout, SHOP, buySeed, buyItem, SEED_PER_FIELD, FERT_PER_FIELD, resetGame, CULTURES, DECK_CLIMATE, tanks, cultureWatch, startCulture, tendCulture, harvestCulture, BUILDING_KINDS, CULTURE_CELLS, tankSite, devices, potatoStock, fertPlan, cultureFeedPlan, millWatch, startMill, removeMill, orderProcess, HUB_SITES, cropDossier, MACHINE_SHOP, buyMachine, cropDef, boomWatch, rigProfile, DRONE_SHOP, workDrones, buyDrone, sectorLight, sectorWord, dayCenter, setWorldDay, RING_OMEGA, bindPotatoClock, bindSurfaceClock } from './_shared.js';
 import { applyStagePayload, revertPotatoStages, bootFieldStageSource, writeStageStore, forgetPotatoStage, stageBadge } from './field-stage-live.js';
 import { potatoDrawLooks } from './surface-crops.js';
 import { ridgeCrestT } from './field-stages.js';
@@ -1535,7 +1535,7 @@ function applyDeckView() {
   document.body.classList.toggle('underground', on);
 }
 // 交互：左键平移 / 右键旋转 / 滚轮缩放 / WASD / QE / N 昼夜 / M 地图模式 / H 隐藏界面
-let drag = null, ptr = null, selected = null, selNote = '';
+let drag = null, ptr = null, selected = null, selNote = '', plantOpen = false;
 let mode = 'look', watchRig = null, pickedLot = null, pickedStack = null, shopPick = 'seed', rigPick = 'planter', cropPick = 'potato', deckTank = 0, deckBlock = null, deckHub = false, buildAct = 'place', buildKind = 'warehouse', buildPick = null, millPlace = false;
 let planCycle = false, planBuy = false;
 const pickedFields = new Set();
@@ -1557,7 +1557,7 @@ function pickFlat(cx, cy) {
   const th = Math.atan2(px - ax, R0 - py);
   return { x: ax + th * R0, z: pz };
 }
-function selectField(f, why) { selected = f || null; selNote = why || ''; }
+function selectField(f, why) { selected = f || null; selNote = why || ''; plantOpen = false; }
 function onMapClick(cx, cy) {
   const p = pickFlat(cx, cy);
   if (viewLayer !== 'surface' && mode !== 'build') {
@@ -1647,6 +1647,7 @@ function doPlant(id) {
     toast(planWhy(r.reason));
     return r;
   }
+  plantOpen = false;
   plantWin = { x: 1e9, z: 1e9, w: 0 };
   saveSoon();
   return r;
@@ -2523,20 +2524,35 @@ function updateDock() {
     else if (watch && watch.planted === false) stat = `${CROPS[f.crop].name} · ${watch.label} · 播种还没走完 · 第 ${Math.floor(watch.day)} 日`;
     else if (watch) stat = `${CROPS[f.crop].name} · ${watch.label} · 播后 ${Math.floor(watch.day)} / ${watch.days} 日`;
     else if (stores.fertilizer + 1e-9 < fertPlan().fromFert) stat = stores.frass > 0 ? '肥料不足。虫粪只能抵一半。' : '肥料不足。打开商店买一份。';
-    else if (f.state === 0) stat = '裸地 · 选一种作物。种苗只从商店来';
+    else if (f.state === 0) stat = '裸地 · 点种植，再选作物';
     else stat = '定格冠层 · 可改种';
   }
   if (!selNote && watch && CROPS[f.crop]?.id === 'potato') stat += ` · ${stageBadge()}`;
   $('selid').textContent = `F-${String(f.i).padStart(3, '0')}${String(f.j).padStart(2, '0')}`;
   $('selstat').textContent = stat;
+  const showStages = !!(watch && f.crop >= 0);
   const day = watch && !watch.waiting ? watch.day : 0;
-  const stages = (f.crop >= 0 && CROPS[f.crop].stages?.length) ? CROPS[f.crop].stages : POTATO_STAGES;
+  const stages = (f.crop >= 0 && CROPS[f.crop].stages?.length) ? CROPS[f.crop].stages : [];
+  const legendHost = $('dock-legend');
+  if (legendHost) {
+    const chips = showStages ? stages.filter(s => !s.preplant && !s.after) : [];
+    legendHost.hidden = !chips.length;
+    legendHost.innerHTML = chips.map(s => `<div class="lg"><i style="background:${s.color}"></i><span>${s.name}</span></div>`).join('');
+  }
   const bar = $('bar');
-  if (bar) bar.innerHTML = stages.map(s => {
+  if (bar) {
+    bar.hidden = !showStages;
+    bar.innerHTML = showStages ? stages.map(s => {
     const fill = day <= s.from ? 0 : day >= s.to ? 1 : (day - s.from) / (s.to - s.from);
     const pct = (fill * 100).toFixed(1);
     return `<i style="flex:${s.to - s.from};background:linear-gradient(90deg,${s.color} ${pct}%,rgba(232,216,208,.16) ${pct}%)"></i>`;
-  }).join('');
+  }).join('') : '';
+  }
+  el.classList.toggle('picking', plantOpen && !!f.owned && !f.live);
+  const plantBtn = $('act-plant');
+  const clearBtn = $('act-clear');
+  if (plantBtn) plantBtn.disabled = !f.owned || !!f.live;
+  if (clearBtn) clearBtn.disabled = !f.owned;
   document.querySelectorAll('#selbtns button').forEach(b => {
     const def = cropDef(b.dataset.crop);
     const seedName = def ? (productById(def.seed)?.nameZh || '种子') : '';
@@ -2591,26 +2607,33 @@ function adoptStageText(text, persist) {
     try { writeStageStore(localStorage, applied.doc); }
     catch { /* 无痕模式仍可用这一次 */ }
   }
-  bindPotatoClock();
-  paintStageChrome('');
+  bindPlayableClocks();
+  const extra = applied.siblingNotes?.length ? applied.siblingNotes.join('；') : '';
+  paintStageChrome(extra);
   return applied;
 }
 function reloadStageStore() {
   const booted = bootFieldStageSource(localStorage, null);
+  bindPlayableClocks();
   if (!booted.ok) {
     paintStageChrome(booted.message || '工坊存档读不了');
     return booted;
   }
   if (booted.skipped) revertPotatoStages();
-  bindPotatoClock();
-  paintStageChrome(booted.skipped ? '这台浏览器里没有工坊存档，仍用仓库默认' : '');
+  bindPlayableClocks();
+  const extra = booted.siblingNotes?.length ? booted.siblingNotes.join('；') : '';
+  paintStageChrome(booted.skipped ? '这台浏览器里没有工坊存档，仍用仓库默认' : extra);
   return booted;
 }
 function useRepoStages() {
   try { forgetPotatoStage(localStorage); } catch { /* 无痕模式 */ }
   revertPotatoStages();
-  bindPotatoClock();
+  bindPlayableClocks();
   paintStageChrome('');
+}
+function bindPlayableClocks() {
+  bindPotatoClock();
+  for (const id of ['soy', 'feed_barley', 'cabbage']) bindSurfaceClock(id);
 }
 function stageParamIsUrl(param) {
   return !!param && param !== 'repo' && param !== 'workshop' && /^(https?:|data:|\.\/|\/|data\/)/.test(param);
@@ -2619,16 +2642,14 @@ function bootStagesSync() {
   const param = Q.get('stages');
   if (stageParamIsUrl(param)) return '';
   const booted = bootFieldStageSource(localStorage, param === 'repo' ? 'repo' : null);
-  if (booted.origin === 'workshop') {
-    bindPotatoClock();
-    return '';
-  }
+  bindPlayableClocks();
+  if (booted.origin === 'workshop') return '';
   if (!booted.ok) return booted.message || '工坊存档读不了，仍用仓库默认';
   return '';
 }
 const bootStageNote = bootStagesSync();
 $('kpi').innerHTML = `<div class="k-rev"><small>营收</small><b class="hv" id="kpi-rev">0</b></div><div class="k-day"><small>世界日</small><b id="kpi-day">0</b></div><div class="k-time"><small>时刻</small><span class="clk"><i class="face" id="kpi-face" aria-hidden="true"><i id="kpi-hh"></i><i id="kpi-mh"></i></i><b id="kpi-hm">00:00</b></span></div><div class="k-act"><small>作业</small><b class="hv" id="kpi-act">0</b><em>/ ${rigs.length}</em></div>`;
-$('dock').innerHTML = `<div class="who"><b id="selid"></b><span id="selstat"></span></div><div id="bar"><i id="selbar"></i></div><div class="row" id="selbtns"></div>`;
+$('dock').innerHTML = `<div class="who"><b id="selid"></b><span id="selstat"></span></div><div id="dock-legend" class="legend" hidden></div><div id="bar"><i id="selbar"></i></div><div class="ops"><button type="button" id="act-plant"><b>种植</b><small>再选作物</small></button><button type="button" id="act-clear"><b>清地</b><small>已种也弃收</small></button></div><div class="row" id="selbtns"></div>`;
 for (const c of CROPS) if (c.plantable) {
   const b = document.createElement('button');
   b.dataset.crop = c.id;
@@ -2639,6 +2660,21 @@ for (const c of CROPS) if (c.plantable) {
   b.addEventListener('click', () => doPlant(c.id));
   $('selbtns').appendChild(b);
 }
+$('act-plant').addEventListener('click', () => {
+  if (!selected?.owned || selected.live) return;
+  plantOpen = !plantOpen;
+  updateDock();
+});
+$('act-clear').addEventListener('click', () => {
+  if (!selected?.owned) return;
+  const had = !!selected.live;
+  const r = abandonField(selected);
+  if (!r.ok) { toast('不能清地'); return; }
+  plantOpen = false;
+  toast(had ? '已清地，这一季不入仓' : '这块是空的');
+  updateDock();
+  saveSoon();
+});
 $('rates').innerHTML = `<span>1×：1 分 = 2 世界时</span>` + [1, 4, 12].map(r => `<button type="button" data-rate="${r}">${r}×</button>`).join('') + `<input id="rate-in" type="text" inputmode="decimal" value="1" aria-label="世界钟倍率" autocomplete="off">`;
 function applyTypedRate() {
   const v = +$('rate-in').value;
@@ -2745,7 +2781,7 @@ if (stageParamIsUrl(Q.get('stages'))) {
     return res.text();
   }).then(text => adoptStageText(text, true)).catch(() => {
     const booted = bootFieldStageSource(localStorage, null);
-    if (booted.origin === 'workshop') bindPotatoClock();
+    bindPlayableClocks();
     paintStageChrome(booted.origin === 'workshop' ? '地址栏上的阶段没取到，改用浏览器里的工坊存档' : '地址栏上的阶段没取到，仍用仓库默认');
   });
 }

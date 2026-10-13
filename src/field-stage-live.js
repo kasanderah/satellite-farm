@@ -1,5 +1,5 @@
 // 可玩页读工坊存下的田间阶段。解析和派工都走同一份编译：阶段对齐，作业窗口。
-// 这份存储只换土豆。大豆、大麦、甘蓝用仓库里的占位文档，不从这里换表。
+// 土豆、大豆、饲料大麦、结球甘蓝都能从这里换表。缺的那一份留仓库占位。
 //
 // 工坊「保存」写入 localStorage `ringsheaf.assetlab.fieldStages.v1`，形状是
 // `{ schema, cropId, crops: { potato: doc } }`。工坊「下载」是单份 doc。
@@ -7,7 +7,7 @@
 // file:// 在 Chrome 里每个文件各算一个来源，两页的 localStorage 互不可见。
 // 那种打开方式用管理里的粘贴或导入文件，或地址栏 `?stages=repo` 强制仓库默认。
 import { FIELD_STAGE_SCHEMA, FIELD_STAGE_STORE } from './field-stages.js';
-import { cropDef, installPotatoProfile, potatoProfileFromRaw, shippedPotatoProfile } from './surface-crops.js';
+import { cropDef, installPotatoProfile, potatoProfileFromRaw, shippedPotatoProfile, surfaceProfileFromRaw, installSurfaceProfile } from './surface-crops.js';
 
 export { FIELD_STAGE_STORE };
 
@@ -57,14 +57,33 @@ export function potatoDocFromPayload(raw) {
   return null;
 }
 
+const SURFACE_IDS = ['soy', 'feed_barley', 'cabbage'];
+
+export function applyStoredCrops(raw) {
+  const notes = [];
+  const crops = raw?.crops;
+  if (!crops || typeof crops !== 'object' || Array.isArray(crops)) return notes;
+  for (const id of SURFACE_IDS) {
+    const doc = crops[id];
+    if (!doc || !Array.isArray(doc.stages)) continue;
+    try {
+      installSurfaceProfile(id, surfaceProfileFromRaw(id, doc), 'workshop');
+    } catch (err) {
+      notes.push((doc.cropName || id) + '：' + (err.message || '读不了'));
+    }
+  }
+  return notes;
+}
+
 export function applyStagePayload(raw) {
+  const siblingNotes = applyStoredCrops(raw);
   const doc = potatoDocFromPayload(raw);
-  if (!doc) return { ok: false, reason: 'empty', message: payloadNote(raw) };
+  if (!doc) return { ok: false, reason: 'empty', message: payloadNote(raw), siblingNotes };
   let profile;
   try { profile = potatoProfileFromRaw(doc); }
-  catch (err) { return { ok: false, reason: 'parse', message: err.message || '这份田间配置读不了' }; }
+  catch (err) { return { ok: false, reason: 'parse', message: err.message || '这份田间配置读不了', siblingNotes }; }
   installPotatoProfile(profile, 'workshop');
-  return { ok: true, origin: 'workshop', maturity: profile.maturity, rotAt: profile.rotAt, doc };
+  return { ok: true, origin: 'workshop', maturity: profile.maturity, rotAt: profile.rotAt, doc, siblingNotes };
 }
 
 export function revertPotatoStages() {
