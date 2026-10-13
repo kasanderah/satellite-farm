@@ -14,6 +14,7 @@ import { VerticalTiltShiftShader } from 'three/addons/shaders/VerticalTiltShiftS
 import { PALETTE, CROPS, TEX_ID, L, fields, harvesters, haulers, drones, step, TRUNKS_X, TRUNKS_Z, depots, inCrater, ROADS, RING, LAYERS, CUT, wrapX, PLOT, economy, focus, signals, log, plantField, quote, setTimeScale, setPaused, paused, exportSnapshot, applySnapshot, fieldAtWorld, fieldAt, fieldOrigin, simTime, worldDay, stores, rigs, fieldVisual, cropWatch, POTATO_DAYS, POTATO_STAGES, warehouse, buildings, sellLot, sellStack, warehouseStacks, warehouseCapacity, placeBuilding, removeBuilding, rigReadout, SHOP, buySeed, buyItem, SEED_PER_FIELD, FERT_PER_FIELD, resetGame, CULTURES, DECK_CLIMATE, tanks, cultureWatch, startCulture, tendCulture, harvestCulture, BUILDING_KINDS, CULTURE_CELLS, tankSite, devices, potatoStock, fertPlan, cultureFeedPlan, millWatch, startMill, removeMill, orderProcess, HUB_SITES, cropDossier, MACHINE_SHOP, buyMachine, cropDef, boomWatch, rigProfile, DRONE_SHOP, workDrones, buyDrone, sectorLight, sectorWord, dayCenter, setWorldDay, RING_OMEGA, bindPotatoClock } from './_shared.js';
 import { applyStagePayload, revertPotatoStages, bootFieldStageSource, writeStageStore, forgetPotatoStage, stageBadge } from './field-stage-live.js';
 import { potatoDrawLooks } from './surface-crops.js';
+import { ridgeCrestT } from './field-stages.js';
 import { migrateSave } from './save-contract.js';
 import { productById } from './products.js';
 import { NOISE, FARM, CURVE_DECL, CURVE_PROJECT } from './glsl.js';
@@ -378,11 +379,14 @@ vec3 potPaint(int slot, float phase, float along, float spacing, float patchy, f
   float al = along / max(spacing, 0.05);
   float clump = smoothstep(0.12, 0.42, abs(fract(al) - 0.5));
   float alongVis = 1.0 - smoothstep(0.2, 0.65, fwidth(al));
-  amt *= mix(1.0, clump, alongVis * plant);
-  // 远看垄挤成一条色带。盖度再高也留出地面色，进度条上的地面色才不会只停在条上。
+  // 株距缺口只打在垄顶。整条跨行都乘 clump 时，蓝沟会连成和垄垂直的色带，植株行就拧过去了。
+  float gap = mix(1.0, clump, alongVis * plant * crest);
+  amt *= gap;
+  // 远看仍按垄相留色带，沟里留地面色。盖度再高也不把整块涂成冠层。
   float far = smoothstep(0.16, 0.48, rowFw);
   float aerial = clamp(cover * 0.55, 0.0, 0.62);
-  amt = mix(amt, aerial, far);
+  float farAmt = aerial * mix(0.28, 1.0, crest);
+  amt = mix(amt, farAmt, far);
   return mix(soilC, canC, amt);
 }
 float gShadow = 1.0, gRough = 0.92; vec2 gTilt = vec2(0.); vec3 gOv = vec3(0.); float gOvA = 0.;
@@ -504,16 +508,23 @@ vec3 farmAlbedo(vec2 p){
     if (pst >= 1.0 && tex == 2) {                    // 商品薯。工坊覆写时垄色、冠层、行距都读阶段表。
       bool worked = laneCut(uv, d.b);
       if (uPotOn > 0.5) {
-        float phase = fract(ph);
+        // 地头不再把跨行轴拧 90°。垄法线、地面色、冠层色带都跟田内行距走同一条 uv.y。
+        float rowAcross = uv.y;
+        vec2 rowAcrossW = d.a > 0.5 ? vec2(1.0, 0.0) : vec2(0.0, 1.0);
+        float rowSp = max(P.y, 0.05);
+        float rowPh = rowAcross / rowSp;
+        float rowFw = fwidth(rowPh);
+        float rowSee = 1.0 - smoothstep(0.22, 0.55, rowFw);
+        float phase = fract(rowPh);
         int slot = int(clamp(pst, 1.0, 9.0));
         int nxtSlot = int(min(float(slot) + 1.0, 9.0));
         float roughA, crestA, slopeA;
         float roughB, crestB, slopeB;
-        vec3 colA = potPaint(slot, phase, uv.x, P.w, patchy, fw, roughA, crestA, slopeA);
-        vec3 colB = potPaint(nxtSlot, phase, uv.x, P.w, patchy, fw, roughB, crestB, slopeB);
+        vec3 colA = potPaint(slot, phase, uv.x, P.w, patchy, rowFw, roughA, crestA, slopeA);
+        vec3 colB = potPaint(nxtSlot, phase, uv.x, P.w, patchy, rowFw, roughB, crestB, slopeB);
         col = colA;
         gRough = roughA;
-        gTilt = acrossW * slopeA * rowVis;
+        gTilt = rowAcrossW * slopeA * rowSee;
         canopyHere = crestA > 0.35;
         float fracW = clamp(g - pst, 0.0, 0.999);
         float blendDotW = step(hash12(floor(uv * vec2(0.58, 0.47)) + pst), fracW);
@@ -521,7 +532,7 @@ vec3 farmAlbedo(vec2 p){
           col = mix(col, colB, blendDotW);
           if (blendDotW > 0.5) {
             gRough = roughB;
-            gTilt = acrossW * slopeB * rowVis;
+            gTilt = rowAcrossW * slopeB * rowSee;
             canopyHere = crestB > 0.35;
           }
         }
@@ -853,6 +864,7 @@ function rebuildPlants(cx, cz, W) {
   const counts = {}; for (const s of SHAPES) counts[s] = 0;
   const fi0 = Math.max(0, Math.floor((cx - W - L.X0) / (L.BP / L.PER)) - 1), fi1 = Math.min(NFX - 1, Math.floor((cx + W - L.X0) / (L.BP / L.PER)) + 1);
   const fj0 = Math.max(0, Math.floor((cz - W - L.Z0) / (L.BP / L.PER)) - 1), fj1 = Math.min(NFZ - 1, Math.floor((cz + W - L.Z0) / (L.BP / L.PER)) + 1);
+  const potDraw = potatoDrawLooks();
   for (let j = fj0; j <= fj1; j++) for (let i = fi0; i <= fi1; i++) {
     const f = fields[j * NFX + i]; if (f.crop < 0) continue;
     if (viewLayer !== 'surface' && f.inPlot) continue;
@@ -860,15 +872,29 @@ function rebuildPlants(cx, cz, W) {
     const xa = Math.max(f.x0, cx - W), xb = Math.min(f.x0 + L.FIELD, cx + W), za = Math.max(f.z0, cz - W), zb = Math.min(f.z0 + L.FIELD, cz + W);
     if (xa >= xb || za >= zb) continue;
     const rowS = cr.row * (cr.tex === 'beds' ? 1.1 : 1), al = cr.along;
-    // 田内：行沿 u；在世界坐标里按田垄方向铺
+    const potRow = cr.id === 'potato' && potDraw.workshop;
+    let crestT = 0.5;
+    if (potRow) {
+      const slot = Math.max(1, Math.min(9, Math.floor(fieldVisual(f).g + 0.001)));
+      const look = potDraw.slots[slot] || potDraw.slots[1];
+      crestT = ridgeCrestT(look && look.ridge);
+    }
+    // 田内：行沿 u；在世界坐标里按田垄方向铺。工坊土豆落在垄顶相位上，和色带同一条跨行轴。
     const [ua, ub, va, vb] = f.dir === 0 ? [xa - f.x0, xb - f.x0, za - f.z0, zb - f.z0] : [za - f.z0, zb - f.z0, xa - f.x0, xb - f.x0];
+    let v0 = Math.ceil(va / rowS) * rowS + rowS * 0.5;
+    if (potRow) {
+      v0 = Math.ceil((va - crestT * rowS) / rowS) * rowS + crestT * rowS;
+      if (v0 < va) v0 += rowS;
+    }
+    const alongJit = potRow ? 0.22 : 0.6;
+    const acrossJit = potRow ? 0.06 : 0.18;
     hseed = f.idx * 7919 + 1;
-    for (let v = Math.ceil(va / rowS) * rowS + rowS * 0.5; v < vb; v += rowS) {
+    for (let v = v0; v < vb; v += rowS) {
       if (cr.tex !== 'beds' && cr.tex !== 'paddy' && Math.abs(((v % 24) + 24) % 24 - 12) < 1.4) continue; // 拖拉机道
       for (let u = Math.ceil(ua / al) * al; u < ub; u += al) {
         if (u < 6 || u > L.FIELD - 6) continue;      // 地头留给地面纹理
         const n = counts[cr.shape]; if (n >= PLANT_CAP) break;
-        const ju = u + (hr() - 0.5) * al * 0.6, jv = v + (hr() - 0.5) * rowS * 0.18;
+        const ju = u + (hr() - 0.5) * al * alongJit, jv = v + (hr() - 0.5) * rowS * acrossJit;
         const x = f.dir === 0 ? f.x0 + ju : f.x0 + jv, z = f.dir === 0 ? f.z0 + jv : f.z0 + ju;
         const s = 0.8 + hr() * 0.4;
         tmpM.compose(tmpP.set(x, 0, z), tmpQ.setFromAxisAngle(UP, hr() * 6.283), tmpS.set(s, s * (0.85 + hr() * 0.3), s));

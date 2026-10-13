@@ -29,6 +29,19 @@ export function hash01(row, along, salt = 0) {
   return (n >>> 0) / 4294967296;
 }
 
+// 8 个采样里最高的那一档，归一到 0–1。植株和垄顶色带都落在这个跨行相位上。
+export function ridgeCrestT(samples) {
+  const n = samples ? samples.length : 0;
+  if (n < 2) return 0.5;
+  let best = 0;
+  let h = -1;
+  for (let i = 0; i < n; i++) {
+    const y = +samples[i] || 0;
+    if (y > h) { h = y; best = i; }
+  }
+  return best / (n - 1);
+}
+
 export function sampleRidge(points, t) {
   const pts = (points || []).map(p => ({ x: Number(p.x), y: Number(p.y) })).filter(p => Number.isFinite(p.x) && Number.isFinite(p.y));
   pts.sort((a, b) => a.x - b.x);

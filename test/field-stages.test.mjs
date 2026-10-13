@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import {
   FIELD_STAGE_SCHEMA, placeholderFieldDoc, parseFieldStageDoc, createSim, stepSim,
-  startJob, cancelWorkOrder, sampleRidge, setGrowthChain, insertGrowthStage,
+  startJob, cancelWorkOrder, sampleRidge, ridgeCrestT, setGrowthChain, insertGrowthStage,
   removeGrowthStage, tally, appearanceOf,
 } from '../src/field-stages.js';
 import { span, SURFACE_CROPS } from '../src/surface-crops.js';
@@ -68,6 +68,11 @@ test('parse keeps the reserved exit and rejects a document without edges', () =>
   assert.ok(d.edges.some(e => e.via === 'resow' && e.to === 'A' && e.enabled === false));
   assert.deepEqual(d.chain, ['A', 'D']);
   assert.ok(d.edges.some(e => e.when === 'natural' && e.from === 'A' && e.to === 'D'));
+});
+
+test('ridge crest phase is the highest sample', () => {
+  assert.equal(ridgeCrestT([0.04, 0.06, 0.1, 0.2, 0.28, 0.1, 0.06, 0.04]), 4 / 7);
+  assert.equal(ridgeCrestT([]), 0.5);
 });
 
 test('ridge samples stay on the control points', () => {
