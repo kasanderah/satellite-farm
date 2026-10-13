@@ -223,6 +223,15 @@ export function createFieldWorkshop(els) {
   }
 
   function persist() {
+    const nameEl = panel.querySelector('#fs-new-name');
+    if (nameEl) {
+      const name = nameEl.value.trim();
+      if (name) {
+        const doc = current();
+        doc.cropName = name;
+        doc.name = name;
+      }
+    }
     const payload = { schema: FIELD_STAGE_SCHEMA, cropId, crops: docs };
     localStorage.setItem(FIELD_STAGE_STORE, JSON.stringify(payload));
     note = '已存进这台浏览器';
@@ -407,8 +416,9 @@ export function createFieldWorkshop(els) {
     });
     panel.querySelector('#fs-new').addEventListener('click', () => {
       const name = panel.querySelector('#fs-new-name').value.trim();
-      if (!name) {
-        note = '先写下作物显示名';
+      const currentName = current().cropName || current().name || '';
+      if (!name || name === currentName) {
+        note = name ? '这是当前作物的显示名，保存后主游戏会用。另起一份先改成新名字。' : '先写下作物显示名';
         paintStatus();
         return;
       }
@@ -697,6 +707,7 @@ ${variants}
     set('#fs-along', doc.grid.along);
     set('#fs-height', doc.plant.height);
     set('#fs-plant-along', doc.plant.along);
+    set('#fs-new-name', doc.cropName || doc.name || '');
     const shape = panel.querySelector('#fs-shape');
     if (shape) shape.value = doc.plant.shape;
     const trans = panel.querySelector('#fs-trans');

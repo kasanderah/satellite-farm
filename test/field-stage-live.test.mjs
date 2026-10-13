@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import potatoB from '../data/field-stages/potato-b.json' with { type: 'json' };
-import { cropDef, SURFACE_CROPS } from '../src/surface-crops.js';
+import { cropDef, SURFACE_CROPS, potatoDrawLooks } from '../src/surface-crops.js';
 import { CROPS, bindPotatoClock } from '../src/_shared.js';
 import {
   applyStagePayload, revertPotatoStages, potatoDocFromPayload, bootFieldStageSource,
@@ -56,6 +56,46 @@ test('a workshop potato doc renames the stage and moves the rot day', () => {
   assert.equal(cropDef('potato').rotAt, 96);
   assert.equal(stageBadge(), '仓库默认');
   assert.equal(CROPS.find(c => c.id === 'potato').stages.find(s => s.id === 'potato_emerg').name, '出苗');
+});
+
+test('a workshop name and stage look reach the dock label and the field paint table', () => {
+  const doc = edited();
+  doc.cropName = '阿巴阿巴';
+  doc.name = '阿巴阿巴';
+  doc.rows = 16;
+  const sown = doc.stages.find(s => s.id === 'A');
+  sown.canopy = '#7a3ea8';
+  sown.color = '#3a3538';
+  sown.roughness = 0.41;
+  sown.cover = 0.8;
+  sown.plantScale = 0.9;
+  sown.ridge = [{ x: 0, y: 0.02 }, { x: 0.5, y: 0.5 }, { x: 1, y: 0.02 }];
+  const applied = applyStagePayload({ schema: 'ringsheaf.field-stage/1', cropId: 'potato', crops: { potato: doc } });
+  try {
+    assert.equal(applied.ok, true);
+    bindPotatoClock();
+    const crop = CROPS.find(c => c.id === 'potato');
+    assert.equal(crop.name, '阿巴阿巴');
+    assert.equal(cropDef('potato').planLabel, '种阿巴阿巴');
+    assert.equal(cropDef('potato').displayName, '阿巴阿巴');
+    const draw = potatoDrawLooks();
+    assert.equal(draw.workshop, true);
+    assert.equal(draw.displayName, '阿巴阿巴');
+    assert.ok(draw.row < 0.5);
+    const look = draw.slots[2];
+    assert.equal(look.canopy, '#7a3ea8');
+    assert.equal(look.color, '#3a3538');
+    assert.equal(look.roughness, 0.41);
+    assert.equal(look.cover, 0.8);
+    assert.equal(look.plantScale, 0.9);
+    assert.ok(look.ridge[4] > look.ridge[0]);
+  } finally {
+    revertPotatoStages();
+    bindPotatoClock();
+  }
+  assert.equal(CROPS.find(c => c.id === 'potato').name, '中熟商品薯');
+  assert.equal(cropDef('potato').planLabel, '种中熟商品薯');
+  assert.equal(potatoDrawLooks().workshop, false);
 });
 
 test('a downloaded field-stage file and a crop_potato logic id both count as potato', () => {

@@ -13,6 +13,7 @@ import { HorizontalTiltShiftShader } from 'three/addons/shaders/HorizontalTiltSh
 import { VerticalTiltShiftShader } from 'three/addons/shaders/VerticalTiltShiftShader.js';
 import { PALETTE, CROPS, TEX_ID, L, fields, harvesters, haulers, drones, step, TRUNKS_X, TRUNKS_Z, depots, inCrater, ROADS, RING, LAYERS, CUT, wrapX, PLOT, economy, focus, signals, log, plantField, quote, setTimeScale, setPaused, paused, exportSnapshot, applySnapshot, fieldAtWorld, fieldAt, fieldOrigin, simTime, worldDay, stores, rigs, fieldVisual, cropWatch, POTATO_DAYS, POTATO_STAGES, warehouse, buildings, sellLot, sellStack, warehouseStacks, warehouseCapacity, placeBuilding, removeBuilding, rigReadout, SHOP, buySeed, buyItem, SEED_PER_FIELD, FERT_PER_FIELD, resetGame, CULTURES, DECK_CLIMATE, tanks, cultureWatch, startCulture, tendCulture, harvestCulture, BUILDING_KINDS, CULTURE_CELLS, tankSite, devices, potatoStock, fertPlan, cultureFeedPlan, millWatch, startMill, removeMill, orderProcess, HUB_SITES, cropDossier, MACHINE_SHOP, buyMachine, cropDef, boomWatch, rigProfile, DRONE_SHOP, workDrones, buyDrone, sectorLight, sectorWord, dayCenter, setWorldDay, RING_OMEGA, bindPotatoClock } from './_shared.js';
 import { applyStagePayload, revertPotatoStages, bootFieldStageSource, writeStageStore, forgetPotatoStage, stageBadge } from './field-stage-live.js';
+import { potatoDrawLooks } from './surface-crops.js';
 import { migrateSave } from './save-contract.js';
 import { productById } from './products.js';
 import { NOISE, FARM, CURVE_DECL, CURVE_PROJECT } from './glsl.js';
@@ -68,6 +69,58 @@ const U = {
   uLocalDay: { value: 1 },
   uMirrorOn: { value: 1 },
 };
+const POT_SLOTS = 10;
+const potTintData = new Float32Array(POT_SLOTS * 3 * 4);
+const potRidgeData = new Float32Array(POT_SLOTS * 2 * 4);
+const potTintTex = new THREE.DataTexture(potTintData, 3, POT_SLOTS, THREE.RGBAFormat, THREE.FloatType);
+const potRidgeTex = new THREE.DataTexture(potRidgeData, 2, POT_SLOTS, THREE.RGBAFormat, THREE.FloatType);
+potTintTex.minFilter = potTintTex.magFilter = THREE.NearestFilter;
+potRidgeTex.minFilter = potRidgeTex.magFilter = THREE.NearestFilter;
+potTintTex.needsUpdate = true;
+potRidgeTex.needsUpdate = true;
+U.uPotTint = { value: potTintTex };
+U.uPotRidge = { value: potRidgeTex };
+U.uPotOn = { value: 0 };
+const potColor = new THREE.Color();
+function writePotColor(offset, hex) {
+  potColor.set(hex || '#6f6a61');
+  potTintData[offset] = potColor.r;
+  potTintData[offset + 1] = potColor.g;
+  potTintData[offset + 2] = potColor.b;
+}
+function syncPotatoPaint() {
+  const draw = potatoDrawLooks();
+  U.uPotOn.value = draw.workshop ? 1 : 0;
+  const potato = CROPS.findIndex(c => c.id === 'potato');
+  const packed = U.uCropP.value[potato];
+  const src = CROPS[potato];
+  if (draw.workshop) {
+    packed.x = draw.height;
+    packed.y = draw.row;
+    packed.w = draw.along;
+  } else {
+    packed.x = src.height;
+    packed.y = src.row;
+    packed.w = src.along;
+  }
+  for (let s = 0; s < POT_SLOTS; s++) {
+    const look = draw.slots[s] || draw.slots[1];
+    const base = s * 12;
+    writePotColor(base, look.color);
+    potTintData[base + 3] = look.roughness;
+    writePotColor(base + 4, look.canopy);
+    potTintData[base + 7] = look.cover;
+    potTintData[base + 8] = look.plantScale;
+    potTintData[base + 9] = 0;
+    potTintData[base + 10] = 0;
+    potTintData[base + 11] = 0;
+    const ridge = look.ridge || [];
+    const rbase = s * 8;
+    for (let i = 0; i < 8; i++) potRidgeData[rbase + i] = ridge[i] || 0;
+  }
+  potTintTex.needsUpdate = true;
+  potRidgeTex.needsUpdate = true;
+}
 // 按期望法线确定三角形绕序（正面朝外，避免被背面剔除 / 双面材质翻转法线）
 function pushQuad(pos, A, B, Cc, D, n) {
   const e1 = [B[0] - A[0], B[1] - A[1], B[2] - A[2]], e2 = [Cc[0] - A[0], Cc[1] - A[1], Cc[2] - A[2]];
@@ -82,6 +135,7 @@ const cut = { on: false, x: 0, z: 0 };
 const cutInner = () => ({ x0: cut.x - CUT.AX + 14, x1: cut.x - CUT.AX + 14 + 2 * CUT.IX, z0: cut.z - CUT.IZ, z1: cut.z + CUT.IZ });
 const inCut = (x, z, pad = 0) => cut.on && Math.abs(x - cut.x) < CUT.AX + pad && Math.abs(z - cut.z) < CUT.AZ + pad;
 function writeFields() {
+  syncPotatoPaint();
   for (const f of fields) {
     const o = (f.j * NFX + f.i) * 4;
     const v = fieldVisual(f);
@@ -286,6 +340,47 @@ uniform float uTime, uSunTan, uCarto, uMap, uNight, uCamDist, uCutOn, uSelOn, uO
 ${Object.keys(GC).map(k => 'uniform vec3 g_' + k + ';').join('\n')}
 ${NOISE}
 ${FARM}
+uniform sampler2D uPotTint;
+uniform sampler2D uPotRidge;
+uniform float uPotOn;
+float potRidgeAt(int slot, int i) {
+  int pix = i < 4 ? 0 : 1;
+  vec4 v = texelFetch(uPotRidge, ivec2(pix, slot), 0);
+  int k = i - pix * 4;
+  if (k == 0) return v.r;
+  if (k == 1) return v.g;
+  if (k == 2) return v.b;
+  return v.a;
+}
+float potRidgeH(int slot, float t) {
+  float x = clamp(t, 0.0, 0.999) * 7.0;
+  int i = int(floor(x));
+  float f = fract(x);
+  float a = potRidgeAt(slot, i);
+  float b = potRidgeAt(slot, min(i + 1, 7));
+  float u = f * f * (3.0 - 2.0 * f);
+  return mix(a, b, u);
+}
+vec3 potPaint(int slot, float phase, float along, float spacing, float patchy, out float rough, out float crest, out float slopeH) {
+  vec4 soilPx = texelFetch(uPotTint, ivec2(0, slot), 0);
+  vec4 canPx = texelFetch(uPotTint, ivec2(1, slot), 0);
+  float pscale = texelFetch(uPotTint, ivec2(2, slot), 0).r;
+  float h0 = potRidgeH(slot, phase);
+  float h1 = potRidgeH(slot, fract(phase + 0.04));
+  slopeH = (h1 - h0) / 0.04;
+  crest = smoothstep(0.02, 0.16, h0);
+  rough = clamp(soilPx.a, 0.05, 1.0);
+  vec3 soilC = soilPx.rgb * (0.72 + 0.35 * crest) * (1.0 + patchy);
+  vec3 canC = canPx.rgb * (1.0 + patchy * 1.2);
+  float cover = clamp(canPx.a, 0.0, 1.0);
+  float plant = smoothstep(0.03, 0.22, pscale);
+  float amt = crest * clamp(cover + plant * 0.85, 0.0, 1.0);
+  float al = along / max(spacing, 0.05);
+  float clump = smoothstep(0.12, 0.42, abs(fract(al) - 0.5));
+  float alongVis = 1.0 - smoothstep(0.2, 0.65, fwidth(al));
+  amt *= mix(1.0, clump, alongVis * plant);
+  return mix(soilC, canC, amt);
+}
 float gShadow = 1.0, gRough = 0.92; vec2 gTilt = vec2(0.); vec3 gOv = vec3(0.); float gOvA = 0.;
 float aaLine(float x, float w){ float fw = fwidth(x); return 1. - smoothstep(w - fw, w + fw, abs(x)); }
 float mirrorDay(float x){
@@ -402,8 +497,38 @@ vec3 farmAlbedo(vec2 p){
     bool cut = laneCut(uv, d.b);
     float patchy = (n1 - 0.5) * 0.12 + (n2 - 0.5) * 0.05;
     float pst = floor(g + 0.001);
-    if (pst >= 1.0 && tex == 2) {                    // 商品薯：与其它田块同一套行距和颗粒，只换阶段颜色
+    if (pst >= 1.0 && tex == 2) {                    // 商品薯。工坊覆写时垄色、冠层、行距都读阶段表。
       bool worked = laneCut(uv, d.b);
+      if (uPotOn > 0.5) {
+        float phase = fract(ph);
+        int slot = int(clamp(pst, 1.0, 9.0));
+        int nxtSlot = int(min(float(slot) + 1.0, 9.0));
+        float roughA, crestA, slopeA;
+        float roughB, crestB, slopeB;
+        vec3 colA = potPaint(slot, phase, uv.x, P.w, patchy, roughA, crestA, slopeA);
+        vec3 colB = potPaint(nxtSlot, phase, uv.x, P.w, patchy, roughB, crestB, slopeB);
+        col = colA;
+        gRough = roughA;
+        gTilt = acrossW * slopeA * rowVis;
+        canopyHere = crestA > 0.35;
+        float fracW = clamp(g - pst, 0.0, 0.999);
+        float blendDotW = step(hash12(floor(uv * vec2(0.58, 0.47)) + pst), fracW);
+        if (pst >= 1.5 && !(worked && pst >= 5.5)) {
+          col = mix(col, colB, blendDotW);
+          if (blendDotW > 0.5) {
+            gRough = roughB;
+            gTilt = acrossW * slopeB * rowVis;
+            canopyHere = crestB > 0.35;
+          }
+        }
+        if (worked && pst >= 5.5) {
+          vec3 soilLane = texelFetch(uPotTint, ivec2(0, slot), 0).rgb;
+          col = mix(col, soilLane * 0.82, 0.55);
+          gRough = max(gRough, 0.9);
+          gTilt *= 0.45;
+          canopyHere = false;
+        }
+      } else {
       vec3 soil = g_soil * (0.78 + 0.1 * prof * rowVis) * (1. + patchy);
       float cover = pst < 1.5 ? 0.0 : pst < 2.5 ? 0.18 : pst < 3.5 ? 0.55 : pst < 4.5 ? 0.78 : pst < 5.5 ? 0.9 : 0.0;
       vec3 young = mix(g_oliveDp, g_moss, 0.35);
@@ -468,6 +593,7 @@ vec3 farmAlbedo(vec2 p){
       vec3 nxt = pst < 1.5 ? soil : pst < 2.5 ? young : pst < 3.5 ? canopy : pst < 4.5 ? bloom : pst < 5.5 ? mix(bloom, stub, 0.45) : pst < 6.5 ? stub : pst < 7.5 ? mix(soil, g_straw, 0.62) : pst < 8.5 ? mix(g_straw, g_rust, 0.55) : mix(g_deep, g_rust, 0.72);
       // 整地阶段不往出苗绿点上混。播种作业没走完时 g 停在 1，这里再挡一层。
       if (pst >= 1.5 && !(worked && pst >= 5.5)) col = mix(col, nxt, blendDot);
+      }
     } else if (cut) {                                       // 残茬：作业带一深一浅（收割方向不同），带车辙
       float lane = floor(uv.y / LANE), lv = mod(uv.y, LANE) - LANE * .5;
       col = mix(g_soil, uCropStub[c], 0.6) * (1. + patchy);
@@ -2378,13 +2504,15 @@ function updateDock() {
     const have = def ? (stores[def.seed] || 0) >= def.seedQty : false;
     b.disabled = !f.owned;
     b.classList.toggle('on', !!watch && !watch.waiting && have && CROPS[f.crop]?.id === b.dataset.crop);
+    const crop = CROPS.find(c => c.id === b.dataset.crop);
     const small = b.querySelector('small');
-    if (small && def) {
+    if (small && def && crop) {
       const fert = fertPlan();
       const fertTxt = Math.abs(fert.fromFert - 1) < 1e-6 ? '1' : stockText(fert.fromFert);
-      const crop = CROPS.find(c => c.id === b.dataset.crop);
       small.textContent = `${seedName} ${def.seedQty} · 肥料 ${fertTxt} · ${crop.days} 日`;
     }
+    const name = b.querySelector('b');
+    if (name && crop) name.textContent = crop.name;
   });
 }
 function paintRates() {
@@ -2400,6 +2528,8 @@ function paintStageChrome(note) {
   document.querySelectorAll('#selbtns button').forEach(b => {
     const def = cropDef(b.dataset.crop);
     const crop = CROPS.find(c => c.id === b.dataset.crop);
+    const name = b.querySelector('b');
+    if (name && crop) name.textContent = crop.name;
     const small = b.querySelector('small');
     if (!small || !def || !crop) return;
     const seedName = productById(def.seed)?.nameZh || '种子';

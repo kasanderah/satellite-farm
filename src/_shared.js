@@ -352,6 +352,7 @@ export function bindPotatoClock() {
   if (!c || !def) return;
   c.days = def.maturity;
   c.season = def.rotAt;
+  c.name = def.displayName || '中熟商品薯';
   const decorated = decorateStages(def);
   c.stages.splice(0, c.stages.length, ...decorated);
   for (const s of c.stages) PHASE_LABEL[s.id] = s.name;

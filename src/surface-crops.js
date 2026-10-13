@@ -2,7 +2,7 @@
 // 土豆读 data/field-stages/potato-b.json。生长链从薯播写完蒙版 M 起算，基肥和旋耕不记这口钟。
 // 出苗的绿色要等该田的播种/移栽作业走完才画，逻辑在 fieldVisual。
 import potatoBSource from '../data/field-stages/potato-b.json' with { type: 'json' };
-import { parseFieldStageDoc } from './field-stages.js';
+import { parseFieldStageDoc, sampleRidge } from './field-stages.js';
 
 export const JOB_PENALTY = 0.15;
 export const UNLOAD_WHILE_MOVING = false;
@@ -58,6 +58,21 @@ const straw = '#b59a63';
 const rust = '#9e543a';
 const ochre = '#81683f';
 const sage = '#8fbbad';
+const POTATO_NAME = '中熟商品薯';
+const RIDGE_N = 8;
+
+function stageLook(stage, fallbackRidge) {
+  const ridge = stage && Array.isArray(stage.ridge) && stage.ridge.length >= 2 ? stage.ridge : fallbackRidge;
+  const color = (stage && stage.color) || soil;
+  return {
+    color,
+    canopy: (stage && stage.canopy) || color,
+    roughness: Number.isFinite(+stage?.roughness) ? +stage.roughness : 0.92,
+    cover: Number.isFinite(+stage?.cover) ? +stage.cover : 0,
+    plantScale: Number.isFinite(+stage?.plantScale) ? +stage.plantScale : 0,
+    ridge: Array.from({ length: RIDGE_N }, (_, i) => sampleRidge(ridge, i / (RIDGE_N - 1))),
+  };
+}
 
 // 土豆B。工单来自 ops[].extensions，同一阶段的培土和追肥各记各的 id。
 // 侧卸不进 stages，只留在起薯的 note 里，执行链仍是收获机停车侧卸。
@@ -85,20 +100,20 @@ function potatoFromProfile(raw) {
   const overFrom = win.D.to;
   const overTo = overFrom + (d1?.days || 0);
   const rotAt = overTo + (d2?.days || 0);
-  const face = (id, name, from, to, color, effect, extra = {}) => ({
-    id, name, from, to, days: extra.days ?? (to - from), color, effect, ...extra,
+  const face = (id, name, from, to, source, effect, extra = {}) => ({
+    id, name, from, to, days: extra.days ?? (to - from), color: source.color, effect, look: stageLook(source, doc.ridge), ...extra,
   });
   const stages = [
-    face('potato_till', '整地空田', 0, O.days, O.color, `${O.effect} 生长链要等薯播写完蒙版，这一段不记钟。`, { preplant: true }),
-    face('potato_plant', A.name, win.A.from, win.A.to, A.color, A.effect),
-    face('potato_emerg', emerg.name, win.emerg.from, win.emerg.to, emerg.color, emerg.effect),
-    face('potato_hill', hill.name, win.hill.from, win.hill.to, hill.color, hill.effect),
-    face('potato_bulk', bulk.name, win.bulk.from, win.bulk.to, bulk.color, bulk.effect),
-    face('potato_haulm', haulm.name, win.haulm.from, win.haulm.to, haulm.color, haulm.effect),
-    face('potato_harvest', '成熟待收', win.D.from, win.D.to, D.color, D.effect),
-    face('potato_over', d1?.name || '过熟', overFrom, overTo, d1?.color || straw, '成熟待收放满还没起薯。起薯仍可做。侧卸仍在收获机上。'),
-    face('potato_d2', d2?.name || '烂地', overTo, rotAt, d2?.color || rust, '再放满这一段还没收，就烂在地里，不入仓。'),
-    face('potato_clear', '清田', win.D.to, win.D.to + E.days, E.color, E.effect, { after: true }),
+    face('potato_till', '整地空田', 0, O.days, O, `${O.effect} 生长链要等薯播写完蒙版，这一段不记钟。`, { preplant: true }),
+    face('potato_plant', A.name, win.A.from, win.A.to, A, A.effect),
+    face('potato_emerg', emerg.name, win.emerg.from, win.emerg.to, emerg, emerg.effect),
+    face('potato_hill', hill.name, win.hill.from, win.hill.to, hill, hill.effect),
+    face('potato_bulk', bulk.name, win.bulk.from, win.bulk.to, bulk, bulk.effect),
+    face('potato_haulm', haulm.name, win.haulm.from, win.haulm.to, haulm, haulm.effect),
+    face('potato_harvest', '成熟待收', win.D.from, win.D.to, D, D.effect),
+    face('potato_over', d1?.name || '过熟', overFrom, overTo, d1 || D, '成熟待收放满还没起薯。起薯仍可做。侧卸仍在收获机上。'),
+    face('potato_d2', d2?.name || '烂地', overTo, rotAt, d2 || D, '再放满这一段还没收，就烂在地里，不入仓。'),
+    face('potato_clear', '清田', win.D.to, win.D.to + E.days, E, E.effect, { after: true }),
   ];
   const open = {
     potato_emerg: win.emerg,
@@ -126,9 +141,17 @@ function potatoFromProfile(raw) {
     };
   }).sort((a, b) => a.order - b.order);
   const harvest = stages.find(s => s.id === 'potato_harvest');
+  const displayName = String(doc.cropName || doc.name || POTATO_NAME).trim() || POTATO_NAME;
   return {
     stages, jobs, profile: doc.profile,
     maturity: harvest.from, hold: harvest.days, rotAt,
+    displayName,
+    visual: {
+      rows: Math.max(4, Math.min(16, Math.round(+doc.rows) || 8)),
+      plantRow: Number.isFinite(+doc.plant?.row) ? +doc.plant.row : 0.9,
+      plantAlong: Number.isFinite(+doc.plant?.along) ? +doc.plant.along : 0.4,
+      plantHeight: Number.isFinite(+doc.plant?.height) ? +doc.plant.height : 0.55,
+    },
   };
 }
 
@@ -220,8 +243,8 @@ for (const [id, def] of Object.entries(SURFACE_CROPS)) {
 
 SURFACE_CROPS.potato.seed = 'seed';
 SURFACE_CROPS.potato.seedQty = 1;
-SURFACE_CROPS.potato.planLabel = '种中熟商品薯';
 SURFACE_CROPS.potato.stageOrigin = 'repo';
+SURFACE_CROPS.potato.planLabel = '种' + (SURFACE_CROPS.potato.displayName || POTATO_NAME);
 
 // 工坊覆写和仓库默认都走这一份。stages / jobs 就地换掉，已经拿着这两条数组的钟不用重新取对象。
 export function installPotatoProfile(profile, origin) {
@@ -232,8 +255,34 @@ export function installPotatoProfile(profile, origin) {
   dest.hold = profile.hold;
   dest.rotAt = profile.rotAt;
   dest.profile = 'potato-b';
+  dest.displayName = profile.displayName || POTATO_NAME;
+  dest.planLabel = '种' + dest.displayName;
+  dest.visual = profile.visual;
   dest.stageOrigin = origin === 'workshop' ? 'workshop' : 'repo';
   return dest;
+}
+
+// 画面阶段下标和 fieldVisual 的 g 对齐：1 是整地裸土，2 起是生长链。
+export function potatoDrawLooks() {
+  const def = SURFACE_CROPS.potato;
+  const clock = def.stages.filter(s => !s.preplant && !s.after);
+  const till = def.stages.find(s => s.preplant) || clock[0];
+  const blank = till.look;
+  const slots = Array.from({ length: 10 }, () => blank);
+  slots[1] = blank;
+  clock.forEach((stage, i) => {
+    if (i + 2 < slots.length && stage.look) slots[i + 2] = stage.look;
+  });
+  const visual = def.visual || {};
+  const rows = visual.rows || 8;
+  return {
+    workshop: def.stageOrigin === 'workshop',
+    displayName: def.displayName || POTATO_NAME,
+    row: (visual.plantRow || 0.9) * (8 / rows),
+    along: visual.plantAlong || 0.4,
+    height: visual.plantHeight || 0.55,
+    slots,
+  };
 }
 export function potatoProfileFromRaw(raw) {
   return potatoFromProfile(parseFieldStageDoc(raw));
