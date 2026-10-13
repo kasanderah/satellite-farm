@@ -17,11 +17,11 @@ function isPotatoDoc(doc, key) {
   const id = String(doc.cropId || '');
   const logic = String(doc.logicId || '');
   const profile = String(doc.profile || '');
-  // 显示名有时被写进 cropId。钥匙或 profile 仍是土豆时要认下来。
+  // 信封钥匙是土豆槽时认下来，哪怕 cropId 曾被写成显示名。
   if (keyId === 'potato' || keyId === 'crop_potato') return true;
   if (id === 'potato' || id === 'crop_potato') return true;
-  if (logic === 'crop_potato' || logic === 'potato') return true;
-  if (profile === 'potato-b') return true;
+  // 单份下载没有库钥匙。工坊里另起的作物即使复制过土豆档案，也不能靠 profile / logicId 顶替土豆槽。
+  if (!keyId && (logic === 'crop_potato' || logic === 'potato' || profile === 'potato-b')) return true;
   return false;
 }
 
@@ -44,6 +44,8 @@ function payloadNote(raw) {
 export function potatoDocFromPayload(raw) {
   if (!raw || typeof raw !== 'object') return null;
   if (raw.crops && typeof raw.crops === 'object' && !Array.isArray(raw.crops)) {
+    const slotted = raw.crops.potato || raw.crops.crop_potato;
+    if (slotted && typeof slotted === 'object' && Array.isArray(slotted.stages)) return slotted;
     for (const [key, doc] of Object.entries(raw.crops)) {
       if (doc && typeof doc === 'object' && doc.crops && !Array.isArray(doc.stages)) {
         const inner = potatoDocFromPayload(doc);

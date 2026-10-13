@@ -9,7 +9,9 @@ import {
   FIELD_STAGE_SCHEMA, FIELD_STAGE_STORE, placeholderFieldDoc, parseFieldStageDoc,
   createSim, stepSim, startJob, cancelWorkOrder, sampleRidge, appearanceOf,
   stageById, setGrowthChain, insertGrowthStage, removeGrowthStage, dominant, tally,
-  alignFieldCalendar, jobWindows,
+  alignFieldCalendar, jobWindows, PLANTABLE_CROP_IDS, allocateCropId, cropOptionLabel,
+  indexCropLibrary, renameCropDisplay, forkCropDocument, setHarvestExit,
+  OP_MACHINE_CHOICES, addStageOp, removeStageOp, patchStageOp,
 } from './field-stages.js';
 import potatoBRaw from '../data/field-stages/potato-b.json' with { type: 'json' };
 
@@ -37,7 +39,11 @@ const HELP = `打开：左侧「田间 / 阶段编辑器」。
 
 截面：横轴是垄宽，纵轴是高度。拖点即改预览。双击加一点，右键删一点。勾上「只改这一阶段」之后，别的阶段还用连锁截面。
 
-边：收获后默认清田回 O。E→A 留着，默认关。翻地、清田可以拆蒙版。取消扫田只停这一趟，不派单。
+边：收获后 E→O（清田）和 E→A（复播）只留一条。默认是清田。勾一条，另一条关掉。
+
+作物：下拉是「显示名 · id」。显示名改不了 id。新作物复制当前阶段，另起 custom id。主游戏仍只种大豆、土豆、结球甘蓝、饲料大麦。
+
+作业：选中阶段后可增删改这一阶段的农机作业。留空的窗口表示整段。保存后主游戏只按窗口派单。
 
 存：保存进这台浏览器。下载得到 field-stage-<作物>.json。主进程用 parseFieldStageDoc 读同一结构，说明在 data/field-stages/README.md。`;
 
@@ -195,6 +201,7 @@ export function createFieldWorkshop(els) {
   let curveDirty = true;
   let listSig = '';
   let editorSig = '';
+  let jobsSig = '';
   let ganttHtml = '';
   let dragPt = null;
   let view = null;
@@ -216,23 +223,19 @@ export function createFieldWorkshop(els) {
     try {
       const raw = JSON.parse(localStorage.getItem(FIELD_STAGE_STORE) || 'null');
       if (!raw || !raw.crops) return;
-      for (const [id, doc] of Object.entries(raw.crops)) {
-        try { docs[id] = parseFieldStageDoc(doc); } catch { /* 坏档跳过，用占位 */ }
+      const pairs = [];
+      for (const [key, doc] of Object.entries(raw.crops)) {
+        try { pairs.push({ key, doc: parseFieldStageDoc(doc) }); } catch { /* 坏档跳过，用占位 */ }
       }
-      if (raw.cropId && (docs[raw.cropId] || builtin.some(c => c.id === raw.cropId))) cropId = raw.cropId;
+      const indexed = indexCropLibrary(pairs);
+      if (!indexed.potato) indexed.potato = docs.potato;
+      docs = indexed;
+      if (raw.cropId && docs[raw.cropId]) cropId = raw.cropId;
     } catch { /* 空浏览器 */ }
   }
 
-  function flushName() {
-    const nameEl = panel.querySelector('#fs-new-name');
-    if (!nameEl) return;
-    const name = nameEl.value.trim();
-    if (!name) return;
-    const doc = current();
-    doc.cropName = name;
-    doc.name = name;
-    const opt = panel.querySelector('#fs-crop option[value="' + cropId + '"]');
-    if (opt) opt.textContent = name;
+  function esc(text) {
+    return String(text ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
   }
 
   function chainDays(doc) {
@@ -255,17 +258,17 @@ export function createFieldWorkshop(els) {
   }
 
   function persist() {
-    flushName();
     const doc = current();
     const err = calendarError(doc);
     if (err) {
       note = err + '。没写入。阶段合计 ' + chainDays(doc) + ' 日，总周期 ' + (Number.isFinite(+doc.cycle) ? doc.cycle : '未定') + ' 日。';
       paintStatus();
-      return;
+      return false;
     }
     const payload = { schema: FIELD_STAGE_SCHEMA, cropId, crops: docs };
     localStorage.setItem(FIELD_STAGE_STORE, JSON.stringify(payload));
     note = '已存进这台浏览器';
+    return true;
   }
 
   function ensureSim() {
@@ -340,10 +343,13 @@ export function createFieldWorkshop(els) {
   function paintShell() {
     panel.innerHTML = `<h3>田间阶段</h3>
 <label>作物<select id="fs-crop"></select></label>
+<p id="fs-editing" class="fs-note"></p>
+<label>显示名<input id="fs-name" type="text" maxlength="24" placeholder="显示名"></label>
 <p id="fs-now" class="fs-note"></p>
 <div id="fs-gantt" class="fs-gantt"></div>
 <div id="fs-stages"></div>
 <div id="fs-edit"></div>
+<div id="fs-jobs"></div>
 <canvas id="fs-curve"></canvas>
 <p class="fs-note">横轴 垄宽 · 纵轴 高度。拖点。双击加点，右键删点。</p>
 <div id="fs-chain"></div>
@@ -369,13 +375,13 @@ export function createFieldWorkshop(els) {
 <label>株距 m<input id="fs-plant-along" type="number" min="0.25" max="1.4" step="0.05"></label>
 <div id="fs-edges"></div>
 <p id="fs-mach" class="fs-note"></p>
-<label>显示名<input id="fs-new-name" type="text" maxlength="24" placeholder="作物名"></label>
 <div class="fs-row">
 <button type="button" id="fs-save">保存</button>
 <button type="button" id="fs-dl">下载 JSON</button>
 <button type="button" id="fs-reset-doc">恢复占位</button>
 <button type="button" id="fs-new">新作物</button>
 </div>
+<p class="fs-note">新作物复制当前阶段链，另起 id。主游戏仍只种大豆、土豆、结球甘蓝、饲料大麦。</p>
 <p id="fs-note" class="fs-note"></p>
 <p class="fs-help">${HELP.replace(/\n/g, '<br>')}</p>`;
 
@@ -396,6 +402,14 @@ export function createFieldWorkshop(els) {
       selected = 'O';
       resetSim();
       paintDynamic(true);
+      persist();
+    });
+    panel.querySelector('#fs-name').addEventListener('input', (e) => {
+      const name = e.target.value.trim();
+      if (!name) return;
+      renameCropDisplay(current(), name);
+      const opt = panel.querySelector('#fs-crop option[value="' + cropId + '"]');
+      if (opt) opt.textContent = cropOptionLabel(name, cropId);
       persist();
     });
     panel.querySelector('#fs-trans').addEventListener('change', (e) => {
@@ -451,27 +465,18 @@ export function createFieldWorkshop(els) {
       note = '已恢复占位链';
     });
     panel.querySelector('#fs-new').addEventListener('click', () => {
-      const name = panel.querySelector('#fs-new-name').value.trim();
-      const currentName = current().cropName || current().name || '';
-      if (!name || name === currentName) {
-        note = name ? '这是当前作物的显示名，保存后主游戏会用。另起一份先改成新名字。' : '先写下作物显示名';
-        paintStatus();
-        return;
-      }
-      let n = 1;
-      while (docs['custom' + n]) n += 1;
-      const id = 'custom' + n;
-      const doc = placeholderFieldDoc({ id, name, shape: 'bush', height: 0.5, row: 0.8, along: 0.4, young: PALETTE.oliveDp, ripe: PALETTE.ochre, stub: PALETTE.rust });
-      doc.cropName = name;
-      doc.name = name;
-      docs[id] = doc;
+      const source = current();
+      const sourceId = source.cropId || cropId;
+      const id = allocateCropId(Object.keys(docs));
+      docs[id] = forkCropDocument(source, id);
       cropId = id;
       selected = 'O';
       resetSim();
       paintDynamic(true);
-      persist();
-      panel.querySelector('#fs-new-name').value = '';
-      note = '已加入 ' + name;
+      if (persist()) {
+        note = '已新建 ' + id + '，从 ' + sourceId + ' 复制阶段。主游戏种植菜单不会出现 ' + id + '。';
+        paintStatus();
+      }
     });
     panel.querySelector('#fs-stages').addEventListener('click', (e) => {
       const b = e.target.closest('[data-stage]');
@@ -532,6 +537,7 @@ export function createFieldWorkshop(els) {
     dirty = true;
     curveDirty = true;
     editorSig = '';
+    jobsSig = '';
     paintDynamic(false);
   }
 
@@ -552,17 +558,27 @@ export function createFieldWorkshop(els) {
   }
 
   function cropOptions() {
-    const ids = builtin.map(c => c.id);
-    for (const id of Object.keys(docs)) if (!ids.includes(id)) ids.push(id);
+    const ids = PLANTABLE_CROP_IDS.filter(id => builtin.some(c => c.id === id) || docs[id]);
+    const extra = Object.keys(docs).filter(id => !ids.includes(id)).sort();
+    ids.push(...extra);
     const sel = panel.querySelector('#fs-crop');
     const prev = cropId;
     sel.innerHTML = ids.map(id => {
       const doc = docs[id];
       const known = builtin.find(c => c.id === id);
-      const name = (doc && doc.cropName) || (known && known.name) || id;
-      return `<option value="${id}">${name}</option>`;
+      const name = (doc && (doc.cropName || doc.name)) || (known && known.name) || id;
+      return `<option value="${esc(id)}">${esc(cropOptionLabel(name, id))}</option>`;
     }).join('');
-    sel.value = prev;
+    if (ids.includes(prev)) sel.value = prev;
+  }
+
+  function paintEditing() {
+    const el = panel.querySelector('#fs-editing');
+    if (!el) return;
+    const plantable = PLANTABLE_CROP_IDS.includes(cropId);
+    el.textContent = plantable
+      ? '正在编辑 ' + cropId + '。这是主游戏种植位。显示名只改文案，不改 id。'
+      : '正在编辑 ' + cropId + '。仅工坊可编辑，主游戏种植菜单不会出现。';
   }
 
   function paintTransport() {
@@ -717,10 +733,9 @@ ${variants}
     panel.querySelector('#fs-edges').innerHTML = lines;
     panel.querySelectorAll('[data-edge]').forEach(input => {
       input.addEventListener('change', () => {
-        const edge = doc.edges.find(e => e.via === input.dataset.edge && (e.from === 'E' || e.via === 'clear'));
-        const hit = doc.edges.find(e => e.via === input.dataset.edge && e.from === 'E');
-        if (hit) hit.enabled = input.checked;
-        if (edge && edge !== hit) edge.enabled = input.checked;
+        const via = input.dataset.edge;
+        if (via === 'clear' || via === 'resow') setHarvestExit(doc, input.checked ? via : (via === 'clear' ? 'resow' : 'clear'));
+        paintEdges();
         paintTransport();
         persist();
       });
@@ -730,6 +745,112 @@ ${variants}
     panel.querySelector('#fs-mach').textContent = mach
       ? `播种机 ${mach.id}：车头 ${mach.sweepHead} m，车尾 ${mach.sweepTail} m。改面点写在 machines 上，扫过以车头为准。`
       : '';
+  }
+
+  function paintJobs() {
+    const host = panel.querySelector('#fs-jobs');
+    if (!host) return;
+    const doc = current();
+    const ops = (doc.ops || []).filter(op => op.stage === selected);
+    const sig = selected + '|' + ops.map(op => op.id).join(',');
+    if (sig === jobsSig && host.childElementCount) return;
+    jobsSig = sig;
+    const stageIds = doc.stages.map(st => st.id);
+    const onChain = selected === 'O' || selected === 'E' || (doc.chain || []).includes(selected);
+    const machines = OP_MACHINE_CHOICES.map(([id, name]) => ({ id, name }));
+    for (const op of doc.ops || []) {
+      if (op.machine && !machines.some(row => row.id === op.machine)) machines.push({ id: op.machine, name: op.machine });
+    }
+    const machineOptions = (currentId) => machines.map(row => `<option value="${esc(row.id)}"${row.id === currentId ? ' selected' : ''}>${esc(row.name)} · ${esc(row.id)}</option>`).join('');
+    const stageOptions = (currentId) => stageIds.map(id => `<option value="${esc(id)}"${id === currentId ? ' selected' : ''}>${esc(id)}</option>`).join('');
+    const kindOptions = (op) => {
+      const rows = [['required', '必要'], ['optional', '可选']];
+      if (op.kind === 'special') rows.push(['special', '特殊']);
+      return rows.map(([id, name]) => `<option value="${id}"${op.kind === id ? ' selected' : ''}>${name}</option>`).join('');
+    };
+    const cards = ops.map(op => `<div class="fs-job" data-job="${esc(op.id)}">
+<div class="fs-row"><b>${esc(op.name)}</b><span class="fs-note">${esc(op.id)}</span><button type="button" data-drop-job="${esc(op.id)}">删除</button></div>
+<div class="fs-split">
+<label>名称<input data-job-name="${esc(op.id)}" type="text" maxlength="24" value="${esc(op.name)}"></label>
+<label>机具<select data-job-machine="${esc(op.id)}">${machineOptions(op.machine)}</select></label>
+</div>
+<div class="fs-split">
+<label>阶段<select data-job-stage="${esc(op.id)}">${stageOptions(op.stage)}</select></label>
+<label>必要<select data-job-kind="${esc(op.id)}">${kindOptions(op)}</select></label>
+</div>
+<div class="fs-split">
+<label>窗口起（日）<input data-job-from="${esc(op.id)}" type="number" min="0" max="400" step="0.25" placeholder="整段" value="${op.window ? op.window.from : ''}"></label>
+<label>窗口止（日）<input data-job-to="${esc(op.id)}" type="number" min="0" max="400" step="0.25" placeholder="整段" value="${op.window ? op.window.to : ''}"></label>
+</div>
+</div>`).join('');
+    const hint = onChain ? '留空表示这一阶段整段都可派。' : '这阶段不在生长链上，进游戏不派这里的作业。';
+    host.innerHTML = `<div class="fs-jobs"><h4>本阶段作业</h4><p class="fs-note">${hint}</p>${cards}<div class="fs-row"><button type="button" id="fs-add-job">增加作业</button></div></div>`;
+    const touchJob = (opId, patch) => {
+      patchStageOp(doc, opId, patch);
+      dirty = true;
+      persist();
+    };
+    host.querySelector('#fs-add-job').addEventListener('click', () => {
+      addStageOp(doc, selected);
+      jobsSig = '';
+      paintJobs();
+      paintTransport();
+      persist();
+    });
+    host.querySelectorAll('[data-drop-job]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        removeStageOp(doc, btn.dataset.dropJob);
+        jobsSig = '';
+        paintJobs();
+        paintTransport();
+        persist();
+      });
+    });
+    host.querySelectorAll('[data-job-name]').forEach(input => {
+      input.addEventListener('input', () => touchJob(input.dataset.jobName, { name: input.value }));
+    });
+    host.querySelectorAll('[data-job-machine]').forEach(input => {
+      input.addEventListener('change', () => touchJob(input.dataset.jobMachine, { machine: input.value }));
+    });
+    host.querySelectorAll('[data-job-stage]').forEach(input => {
+      input.addEventListener('change', () => {
+        patchStageOp(doc, input.dataset.jobStage, { stage: input.value });
+        jobsSig = '';
+        paintJobs();
+        paintTransport();
+        persist();
+      });
+    });
+    host.querySelectorAll('[data-job-kind]').forEach(input => {
+      input.addEventListener('change', () => touchJob(input.dataset.jobKind, { kind: input.value }));
+    });
+    const readWindow = (opId) => {
+      const fromEl = host.querySelector('[data-job-from="' + opId + '"]');
+      const toEl = host.querySelector('[data-job-to="' + opId + '"]');
+      if (!fromEl || !toEl) return;
+      const fromBlank = fromEl.value.trim() === '';
+      const toBlank = toEl.value.trim() === '';
+      if (fromBlank && toBlank) {
+        patchStageOp(doc, opId, { window: null });
+        note = '';
+        persist();
+        return;
+      }
+      const from = Number(fromEl.value);
+      const to = Number(toEl.value);
+      if (!Number.isFinite(from) || !Number.isFinite(to) || !(to > from)) {
+        note = '窗口止要大于起，或两格都留空表示整段。没写入。';
+        paintStatus();
+        return;
+      }
+      patchStageOp(doc, opId, { window: { from, to } });
+      note = '';
+      persist();
+    };
+    host.querySelectorAll('[data-job-from],[data-job-to]').forEach(input => {
+      const opId = input.dataset.jobFrom || input.dataset.jobTo;
+      input.addEventListener('change', () => readWindow(opId));
+    });
   }
 
   function paintNumbers() {
@@ -744,7 +865,7 @@ ${variants}
     set('#fs-along', doc.grid.along);
     set('#fs-height', doc.plant.height);
     set('#fs-plant-along', doc.plant.along);
-    set('#fs-new-name', doc.cropName || doc.name || '');
+    set('#fs-name', doc.cropName || doc.name || '');
     const shape = panel.querySelector('#fs-shape');
     if (shape) shape.value = doc.plant.shape;
     const trans = panel.querySelector('#fs-trans');
@@ -752,14 +873,16 @@ ${variants}
   }
 
   function paintDynamic(rebuildLists) {
-    flushName();
     if (rebuildLists) {
       listSig = '';
       editorSig = '';
+      jobsSig = '';
     }
     cropOptions();
+    paintEditing();
     paintStages();
     paintEditor();
+    paintJobs();
     paintChain();
     paintEdges();
     paintNumbers();
@@ -929,7 +1052,6 @@ ${variants}
   }
 
   function download() {
-    flushName();
     const doc = current();
     const blob = new Blob([JSON.stringify(doc, null, 2) + '\n'], { type: 'application/json' });
     const a = document.createElement('a');

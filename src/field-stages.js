@@ -441,7 +441,176 @@ export function parseFieldStageDoc(input) {
   const cropName = String(input.cropName || input.name || seed.cropName || doc.cropId).trim() || doc.cropId;
   doc.cropName = cropName;
   doc.name = cropName;
+  exclusiveHarvestExits(doc);
   return rebuildNaturalEdges(doc);
+}
+
+// 主游戏目前只种这四槽。工坊可以另存作物，但不能拿显示名去占这四个 id。
+export const PLANTABLE_CROP_IDS = ['potato', 'soy', 'cabbage', 'feed_barley'];
+
+const CROP_ID_OK = /^[A-Za-z][A-Za-z0-9_-]{0,48}$/;
+
+export function isStableCropId(id) {
+  return CROP_ID_OK.test(String(id || ''));
+}
+
+export function allocateCropId(used) {
+  const taken = used instanceof Set ? used : new Set(used || []);
+  let n = 1;
+  while (taken.has('custom' + n)) n += 1;
+  return 'custom' + n;
+}
+
+export function cropOptionLabel(name, id) {
+  const label = String(name || '').trim() || String(id || '');
+  return label + ' · ' + id;
+}
+
+// 库的钥匙是稳定 id。显示名只留在 cropName。土豆槽保留 crop_potato；别的 id 丢掉土豆档案标记。
+export function sealCropIdentity(doc, id) {
+  doc.cropId = id;
+  if (id === 'potato') doc.logicId = 'crop_potato';
+  else {
+    doc.logicId = 'crop_' + id;
+    if (doc.profile === 'potato-b') delete doc.profile;
+  }
+  return doc;
+}
+
+export function renameCropDisplay(doc, name) {
+  const next = String(name ?? '').trim();
+  if (!next) return doc;
+  doc.cropName = next;
+  doc.name = next;
+  return doc;
+}
+
+export function forkCropDocument(source, id) {
+  const copy = structuredClone(source);
+  sealCropIdentity(copy, id);
+  const base = String(source.cropName || source.name || '新作物').trim() || '新作物';
+  const name = /副本$/.test(base) ? base : base + ' 副本';
+  copy.cropName = name;
+  copy.name = name;
+  return copy;
+}
+
+// 已经解析过的文档按信封钥匙归位。不稳定的钥匙（例如显示名）另起 custom id，不覆盖已占用的槽。
+export function indexCropLibrary(pairs) {
+  const docs = {};
+  const used = new Set();
+  const rest = [];
+  for (const row of pairs || []) {
+    const key = String(row.key || '');
+    const doc = row.doc;
+    if (!doc || typeof doc !== 'object') continue;
+    if (isStableCropId(key) && !used.has(key)) {
+      sealCropIdentity(doc, key);
+      docs[key] = doc;
+      used.add(key);
+    } else rest.push(doc);
+  }
+  for (const doc of rest) {
+    const wanted = isStableCropId(doc.cropId) && !used.has(doc.cropId) ? doc.cropId : allocateCropId(used);
+    sealCropIdentity(doc, wanted);
+    docs[wanted] = doc;
+    used.add(wanted);
+  }
+  return docs;
+}
+
+function exclusiveHarvestExits(doc) {
+  const clear = (doc.edges || []).filter(e => e.via === 'clear' && e.from === 'E' && e.to === 'O');
+  const resow = (doc.edges || []).filter(e => e.via === 'resow' && e.from === 'E' && e.to === 'A');
+  const clearOn = clear.some(e => e.enabled);
+  const resowOn = resow.some(e => e.enabled);
+  if (clearOn && resowOn) {
+    for (const edge of resow) edge.enabled = false;
+  } else if (!clearOn && !resowOn && clear.length) {
+    for (const edge of clear) edge.enabled = true;
+  }
+  return doc;
+}
+
+// E→O（clear）和 E→A（resow）只留一条。via 为 resow 时走复播，否则走清田。
+export function setHarvestExit(doc, via) {
+  const want = via === 'resow' ? 'resow' : 'clear';
+  for (const edge of doc.edges || []) {
+    if (edge.via === 'clear' && edge.from === 'E' && edge.to === 'O') edge.enabled = want === 'clear';
+    if (edge.via === 'resow' && edge.from === 'E' && edge.to === 'A') edge.enabled = want === 'resow';
+  }
+  return doc;
+}
+
+export const OP_MACHINE_CHOICES = [
+  ['impl_potato_planter', '薯播'],
+  ['impl_seeder', '条播'],
+  ['transplanter', '移栽'],
+  ['impl_cultivator', '中耕'],
+  ['impl_rotavator', '旋耕'],
+  ['impl_fertilizer', '施肥'],
+  ['impl_sprayer', '喷雾'],
+  ['impl_haulm', '杀秧'],
+  ['impl_bedder', '起垄'],
+  ['harvester_potato', '薯收获'],
+  ['harvester_combine', '联合收割'],
+  ['harvester_cabbage', '结球收获'],
+  ['drone_scout', '侦察'],
+  ['drone_treat', '植保'],
+];
+
+export function addStageOp(doc, stageId) {
+  const stage = String(stageId || 'A');
+  const ids = new Set((doc.ops || []).map(op => op.id));
+  let n = 1;
+  while (ids.has('job' + n)) n += 1;
+  const op = {
+    id: 'job' + n,
+    name: '新作业',
+    kind: 'optional',
+    via: null,
+    stage,
+    variant: null,
+    requiresMask: stage !== 'O',
+    requiresUnlocked: false,
+    writesMask: false,
+    locksUnswept: false,
+    sweepDays: 1.4,
+    machine: stage === 'D' ? 'harvester_potato' : 'impl_cultivator',
+    drone: false,
+  };
+  doc.ops = doc.ops || [];
+  doc.ops.push(op);
+  return op;
+}
+
+export function removeStageOp(doc, opId) {
+  doc.ops = (doc.ops || []).filter(op => op.id !== opId);
+  return doc;
+}
+
+export function patchStageOp(doc, opId, patch) {
+  const op = (doc.ops || []).find(item => item.id === opId);
+  if (!op || !patch) return null;
+  if (patch.name != null) {
+    const name = String(patch.name).trim();
+    if (name) op.name = name;
+  }
+  if (patch.machine != null) {
+    op.machine = String(patch.machine);
+    op.drone = op.machine === 'drone_scout' || op.machine === 'drone_treat';
+  }
+  if (patch.stage != null) op.stage = String(patch.stage);
+  if (patch.kind === 'required' || patch.kind === 'optional' || patch.kind === 'special') {
+    op.kind = patch.kind;
+    const required = patch.kind === 'required';
+    op.extensions = { ...(op.extensions || {}), required };
+  }
+  if (patch.window === null) delete op.window;
+  else if (patch.window && Number.isFinite(+patch.window.from) && Number.isFinite(+patch.window.to)) {
+    op.window = { from: +patch.window.from, to: +patch.window.to };
+  }
+  return op;
 }
 
 export function stageById(doc, id) {

@@ -203,7 +203,9 @@ export const LAB_ENTRIES = [
 
 收获后默认沿边表清田回 O。E→A 留在边表里，默认关掉。翻地、清田可以拆掉蒙版。取消扫田只停这一趟。
 
-右侧改时长、颜色、垄截面和行数。截面横轴是垄宽，纵轴是高度。保存留在这台浏览器。下载的 JSON 和 data/field-stages/potato-b.json 是同一结构。可玩页用 parseFieldStageDoc 来读。`,
+右侧改时长、颜色、垄截面和行数。截面横轴是垄宽，纵轴是高度。保存留在这台浏览器。下载的 JSON 和 data/field-stages/potato-b.json 是同一结构。可玩页用 parseFieldStageDoc 来读。
+
+下拉是「显示名 · id」。显示名改不了 id。新作物复制当前阶段，另起 id，不进主游戏种植菜单。E→O 和 E→A 只留一条，默认清田。选中阶段后可以增删改农机作业。`,
   },
   { id: 'deck', cls: 'unit', name: '培育层地板', size: '128 × 128 m', span: 128, notes: '密封小格。金属地板、墙和顶缘。冷色缝灯。' },
   {

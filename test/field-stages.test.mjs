@@ -5,6 +5,8 @@ import {
   FIELD_STAGE_SCHEMA, placeholderFieldDoc, parseFieldStageDoc, createSim, stepSim,
   startJob, cancelWorkOrder, sampleRidge, ridgeCrestT, setGrowthChain, insertGrowthStage,
   removeGrowthStage, tally, appearanceOf, alignFieldCalendar, jobWindows,
+  allocateCropId, forkCropDocument, indexCropLibrary, setHarvestExit, addStageOp,
+  removeStageOp, patchStageOp,
 } from '../src/field-stages.js';
 import { compilePlayable, SURFACE_CROPS } from '../src/surface-crops.js';
 
@@ -364,4 +366,65 @@ test('potato B and the four placeholders compile through stage windows', () => {
   stepSim(sim, d, d.stages.find(s => s.id === 'emerg').days);
   assert.equal(tally(sim).phases.hill, sim.cells.length);
   assert.equal(sim.cells.every(c => !c.variant), true);
+});
+
+test('a new crop gets its own id and does not rename the source', () => {
+  const source = placeholderFieldDoc(potato);
+  source.cropName = '中熟商品薯';
+  source.profile = 'potato-b';
+  source.logicId = 'crop_potato';
+  const id = allocateCropId(['potato', 'custom1']);
+  assert.equal(id, 'custom2');
+  const copy = forkCropDocument(source, id);
+  assert.equal(source.cropId, 'potato');
+  assert.equal(source.cropName, '中熟商品薯');
+  assert.equal(source.profile, 'potato-b');
+  assert.equal(copy.cropId, 'custom2');
+  assert.equal(copy.logicId, 'crop_custom2');
+  assert.equal(copy.profile, undefined);
+  assert.equal(copy.cropName, '中熟商品薯 副本');
+  assert.equal(copy.chain.join(','), source.chain.join(','));
+  const renamed = parseFieldStageDoc({ ...source, cropId: '阿米阿米', cropName: '阿米阿米' });
+  const library = indexCropLibrary([
+    { key: 'potato', doc: renamed },
+    { key: '阿米阿米', doc: parseFieldStageDoc(copy) },
+  ]);
+  assert.equal(library.potato.cropId, 'potato');
+  assert.equal(library.potato.cropName, '阿米阿米');
+  assert.equal(library['阿米阿米'], undefined);
+  const extra = Object.keys(library).find(key => key !== 'potato');
+  assert.equal(extra, 'custom2');
+  assert.equal(library.custom2.cropId, 'custom2');
+  assert.notEqual(library.custom2.logicId, 'crop_potato');
+});
+
+test('E→O and E→A stay mutually exclusive, defaulting to clear', () => {
+  const raw = doc();
+  raw.edges.find(e => e.via === 'resow').enabled = true;
+  const parsed = parseFieldStageDoc(raw);
+  assert.equal(parsed.edges.find(e => e.via === 'clear' && e.from === 'E').enabled, true);
+  assert.equal(parsed.edges.find(e => e.via === 'resow' && e.from === 'E').enabled, false);
+  setHarvestExit(parsed, 'resow');
+  assert.equal(parsed.edges.find(e => e.via === 'clear' && e.from === 'E').enabled, false);
+  assert.equal(parsed.edges.find(e => e.via === 'resow' && e.from === 'E').enabled, true);
+  const again = parseFieldStageDoc(parsed);
+  assert.equal(again.edges.find(e => e.via === 'resow' && e.from === 'E').enabled, true);
+  assert.equal(again.edges.find(e => e.via === 'clear' && e.from === 'E').enabled, false);
+});
+
+test('a stage job can be added, windowed, and removed', () => {
+  const d = doc();
+  const op = addStageOp(d, 'B');
+  assert.equal(op.id, 'job1');
+  assert.equal(op.stage, 'B');
+  patchStageOp(d, op.id, { name: '浅中耕', machine: 'impl_cultivator', kind: 'required', window: { from: 1, to: 4 } });
+  const windows = jobWindows(d, alignFieldCalendar(d));
+  const row = windows.find(item => item.op.id === 'job1');
+  assert.ok(row);
+  assert.equal(row.window.stage, 'B');
+  assert.equal(row.window.from, 3 + 1);
+  assert.equal(row.window.to, 3 + 4);
+  assert.equal(row.op.kind, 'required');
+  removeStageOp(d, 'job1');
+  assert.equal(jobWindows(d, alignFieldCalendar(d)).some(item => item.op.id === 'job1'), false);
 });

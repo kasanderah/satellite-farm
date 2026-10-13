@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import potatoB from '../data/field-stages/potato-b.json' with { type: 'json' };
 import { cropDef, SURFACE_CROPS, potatoDrawLooks, resetSurfaceCrop, auditDispatch } from '../src/surface-crops.js';
 import { CROPS, bindPotatoClock, bindSurfaceClock } from '../src/_shared.js';
-import { placeholderFieldDoc } from '../src/field-stages.js';
+import { placeholderFieldDoc, forkCropDocument } from '../src/field-stages.js';
 import {
   applyStagePayload, revertPotatoStages, potatoDocFromPayload, bootFieldStageSource,
   writeStageStore, forgetPotatoStage, stageBadge, FIELD_STAGE_STORE, readStageStore,
@@ -269,6 +269,32 @@ test('a string-wrapped workshop save still loads', () => {
     assert.equal(booted.ok, true, booted.message);
     bindPotatoClock();
     assert.equal(CROPS.find(c => c.id === 'potato').name, '阿巴阿巴');
+  } finally {
+    revertPotatoStages();
+    bindPotatoClock();
+  }
+});
+
+test('a forked workshop crop does not replace potato or the plant menu', () => {
+  const potato = structuredClone(potatoB);
+  potato.cropName = '中熟商品薯';
+  potato.name = '中熟商品薯';
+  const fork = forkCropDocument(potato, 'custom1');
+  fork.cropName = '阿米阿米';
+  fork.name = '阿米阿米';
+  fork.logicId = 'crop_potato';
+  fork.profile = 'potato-b';
+  const applied = applyStagePayload({
+    schema: 'ringsheaf.field-stage/1',
+    cropId: 'custom1',
+    crops: { custom1: fork, potato },
+  });
+  try {
+    assert.equal(applied.ok, true, applied.message);
+    bindPotatoClock();
+    assert.equal(CROPS.find(c => c.id === 'potato').name, '中熟商品薯');
+    assert.deepEqual(CROPS.filter(c => c.plantable).map(c => c.id), ['soy', 'potato', 'cabbage', 'feed_barley']);
+    assert.equal(potatoDocFromPayload({ crops: { custom1: fork, potato } }).cropId, 'potato');
   } finally {
     revertPotatoStages();
     bindPotatoClock();
