@@ -6,7 +6,7 @@
   "main": "index.html",
   "scripts": {
     "build": "node build.mjs",
-    "test": "node --test test/sim.test.mjs test/field-stages.test.mjs test/field-stage-live.test.mjs"
+    "test": "node --test test/sim.test.mjs test/field-stages.test.mjs test/field-stage-live.test.mjs test/save-contract.test.mjs"
   },
   "keywords": [],
   "author": "",

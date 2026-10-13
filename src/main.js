@@ -13,6 +13,7 @@ import { HorizontalTiltShiftShader } from 'three/addons/shaders/HorizontalTiltSh
 import { VerticalTiltShiftShader } from 'three/addons/shaders/VerticalTiltShiftShader.js';
 import { PALETTE, CROPS, TEX_ID, L, fields, harvesters, haulers, drones, step, TRUNKS_X, TRUNKS_Z, depots, inCrater, ROADS, RING, LAYERS, CUT, wrapX, PLOT, economy, focus, signals, log, plantField, quote, setTimeScale, setPaused, paused, exportSnapshot, applySnapshot, fieldAtWorld, fieldAt, fieldOrigin, simTime, worldDay, stores, rigs, fieldVisual, cropWatch, POTATO_DAYS, POTATO_STAGES, warehouse, buildings, sellLot, sellStack, warehouseStacks, warehouseCapacity, placeBuilding, removeBuilding, rigReadout, SHOP, buySeed, buyItem, SEED_PER_FIELD, FERT_PER_FIELD, resetGame, CULTURES, DECK_CLIMATE, tanks, cultureWatch, startCulture, tendCulture, harvestCulture, BUILDING_KINDS, CULTURE_CELLS, tankSite, devices, potatoStock, fertPlan, cultureFeedPlan, millWatch, startMill, removeMill, orderProcess, HUB_SITES, cropDossier, MACHINE_SHOP, buyMachine, cropDef, boomWatch, rigProfile, DRONE_SHOP, workDrones, buyDrone, sectorLight, sectorWord, dayCenter, setWorldDay, RING_OMEGA, bindPotatoClock } from './_shared.js';
 import { applyStagePayload, revertPotatoStages, bootFieldStageSource, writeStageStore, forgetPotatoStage, stageBadge } from './field-stage-live.js';
+import { migrateSave } from './save-contract.js';
 import { productById } from './products.js';
 import { NOISE, FARM, CURVE_DECL, CURVE_PROJECT } from './glsl.js';
 import { harvesterKit, haulerKit, droneKit, personKit, conveyorKit, depotKit, hubKit, plantGeometry, mastKit, irrigatorKit, growRackKit, tankKit, pumpKit, pipeRackKit, shedKit, warehouseKit, garageKit, processKit, cultureTankKit, armKit, deckLightKit } from './prefabs.js';
@@ -2266,9 +2267,30 @@ function millStatusText() {
   else if (mill.state === 'ready') line = `可以加工 · 仓库土豆 ${potatoL.toLocaleString('en-US')} L · 一批 ${need.toLocaleString('en-US')} L · 皮 ${stockText(stores.peel)} · 淀粉 ${starchN} 批`;
   return { mill, line };
 }
-function saveNow() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(exportSnapshot())); } catch (e) { /* private mode */ } }
+const RESET_ASK = '清空本机存档，回到开局？仓棚和仓库都会去掉。';
+const UNREADABLE_ASK = '这份存档的版本比现在的游戏新，或者读不了。清空本机存档，回到开局？仓棚和仓库都会去掉。留下则不改浏览器里的那份。';
+let holdSave = false;
+function saveNow() {
+  if (holdSave) return;
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify(exportSnapshot())); } catch (e) { /* private mode */ }
+}
 function saveSoon() { clearTimeout(saveSoon.t); saveSoon.t = setTimeout(saveNow, 400); }
-function loadNow() { try { const raw = localStorage.getItem(SAVE_KEY); return raw ? applySnapshot(JSON.parse(raw)) : false; } catch (e) { return false; } }
+function loadNow() {
+  let text = null;
+  try { text = localStorage.getItem(SAVE_KEY); } catch (e) { return false; }
+  if (!text) return false;
+  let raw;
+  try { raw = JSON.parse(text); } catch (e) { holdSave = true; return false; }
+  const migrated = migrateSave(raw);
+  if (!migrated.ok || !applySnapshot(migrated.data)) { holdSave = true; return false; }
+  return true;
+}
+function offerUnreadableSave() {
+  const ask = $('reset-ask');
+  if (ask) ask.textContent = UNREADABLE_ASK;
+  $('admin').classList.add('on');
+  askReset(true);
+}
 let seenLog = 0, shownRev = -1;
 function drainLog() {
   for (; seenLog < log.length; seenLog++) {
@@ -2560,10 +2582,16 @@ function paintPause() {
 }
 $('pause').addEventListener('click', () => { setPaused(!paused); paintPause(); });
 function askReset(on) { $('admin').classList.toggle('on-reset', on); }
-$('reset').addEventListener('click', () => askReset(true));
-$('reset-no').addEventListener('click', () => askReset(false));
+$('reset').addEventListener('click', () => { $('reset-ask').textContent = RESET_ASK; askReset(true); });
+$('reset-no').addEventListener('click', () => {
+  askReset(false);
+  $('reset-ask').textContent = RESET_ASK;
+  if (holdSave) toast('浏览器里的存档留着，这一局不会写回去。');
+});
 $('reset-yes').addEventListener('click', () => {
   askReset(false);
+  $('reset-ask').textContent = RESET_ASK;
+  holdSave = false;
   millPlace = false;
   planCycle = false;
   planBuy = false;
@@ -2704,7 +2732,10 @@ function toggleViewer() {
   if (open) buildViewer();
 }
 $('viewer-close').addEventListener('click', () => $('viewer').classList.remove('on'));
-if (!VIEW && !Q.has('fresh')) loadNow();
+if (!VIEW && !Q.has('fresh')) {
+  loadNow();
+  if (holdSave) offerUnreadableSave();
+}
 addEventListener('beforeunload', saveNow);
 writeFields();
 function frame(now) {

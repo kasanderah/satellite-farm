@@ -3,6 +3,7 @@
 //  _shared.js —— 色板 / 作物参数 / 农场布局 / 自动化模拟（纯数据与逻辑，不含渲染）
 // =====================================================================
 import { productById, recipeById, deviceById, shopRows, utilityCost, LOOP_OFFSETS } from './products.js';
+import { SAVE_VERSION } from './save-contract.js';
 import { cropDef, rigProfile, rigCan, rigHas, hitchPlan, hitchHasModes, droneCan, JOB_PENALTY, UNLOAD_WHILE_MOVING, BIN_LANES, UNLOAD_SECONDS, TRAILER_CARGO_CAP, HITCH_SWAP_S, RELOAD_S, MODE_SWITCH_S, SURFACE_CROPS } from './surface-crops.js';
 export { cropDef, rigProfile, JOB_PENALTY, UNLOAD_WHILE_MOVING, BIN_LANES, SURFACE_CROPS };
 
@@ -2113,6 +2114,7 @@ export function plantField(f, cropId, opts = {}) {
 export function exportSnapshot() {
   return {
     schema: 2,
+    saveVersion: SAVE_VERSION,
     kind: 'farm-snapshot',
     plotId: PLOT.id,
     simTime: worldDay,

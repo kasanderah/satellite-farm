@@ -2,6 +2,10 @@
 
 环穗 (Ringsheaf) is a browser farm on the inner surface of a colony ring. This slice is one person's plot on the test satellite 农神VIII: about 3.9 km along the ring by the full width of the band. 农神VIII is the satellite, not the title of the game. The rest of the ring is a frozen neighbor backdrop, so the curl, the walls, and the parent planet still read the way the v3.1 art sample does. Nothing here is multiplayer. Your farm is one JSON document that can later be saved or handed over as a neighbor snapshot.
 
+## Friend test
+
+Play `index.html` on this branch. The asset workshop is not required. The game keeps one save in this browser, `ringsheaf.nongshen8.v1`, stamped `saveVersion: 1`. What that file stores, and how a later build migrates it, is `docs/save-contract-v1.md`. Leave off `?fresh=1` if the save should stay.
+
 ## Run
 
 Open `index.html` in a browser. It is a single file: no server, no network.
