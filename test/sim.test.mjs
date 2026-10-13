@@ -46,14 +46,15 @@ test('four surface crops are plantable, and the potato quote uses yield and pric
   assert.equal(quote(potato), expect);
   assert.equal(quote(CROPS.findIndex(c => c.id === 'wheat')), 0);
   assert.equal(CROPS.find(c => c.id === 'potato').days, POTATO_DAYS);
-  assert.equal(POTATO_DAYS, 77);
-  assert.equal(POTATO_ROT_AT, 96);
+  assert.equal(POTATO_DAYS, 43);
+  assert.equal(POTATO_ROT_AT, 59);
   assert.equal(cropDef('soy').seed, 'seed_soy');
   assert.equal(cropDef('cabbage').seed, 'seedling_cabbage');
-  assert.equal(cropDef('feed_barley').maturity, 57);
+  assert.equal(cropDef('feed_barley').maturity, 43);
+  assert.equal(cropDef('soy').cycle, cropDef('potato').cycle);
 });
 
-test('a potato follows one 120-day clock through ridges, vines, vine-kill, and paid harvest', () => {
+test('a potato follows the placeholder clock through stages and a paid harvest', () => {
   const bare = fieldAt(focus.i, focus.j);
   assert.equal(bare.state, 0);
   assert.equal(bare.owned, true);
@@ -69,14 +70,15 @@ test('a potato follows one 120-day clock through ridges, vines, vine-kill, and p
   assert.equal(bare.plantedAt, null, 'planning does not start the clock');
   const planter0 = rigs.find(r => r.kind === 'planter');
   assert.equal(planter0.mode, 'travel');
-  assert.equal(planter0.intent, 'job');
+  assert.equal(planter0.intent, 'service', 'sowing swaps off the fertilizer hitch');
+  assert.equal(planter0.job, 'sow');
   assert.equal(planter0.busy, true);
   let arrive = 0;
   while (planter0.mode !== 'work' && arrive < 8000) { step(0.5, 0, 1); arrive++; }
   assert.equal(planter0.mode, 'work');
-  assert.equal(cropWatch(bare).phase, 'potato_till');
+  assert.equal(cropWatch(bare).phase, 'O');
   assert.equal(fieldVisual(bare).g, 1, 'sowing has not finished, so the field stays bare');
-  assert.ok((bare.jobS.potato_plant || 0) < 1);
+  assert.ok((bare.jobS.sow || 0) < 1);
   const days = (n, scale = 1) => step(n * DAY_SECONDS, 0, scale);
   const edge = L.FIELD / MACHINE_MPS;
   step(Math.max(0.05, edge - 0.35), 0, 1);
@@ -87,38 +89,35 @@ test('a potato follows one 120-day clock through ridges, vines, vine-kill, and p
   assert.equal(planterNow.mode, 'turn', 'the first headland turn starts as the 128 m edge finishes');
   assert.equal(planterNow.f, bare);
   assert.ok(Math.abs(fieldVisual(bare).s - 1) < 0.08, fieldVisual(bare).s);
-  assert.equal(cropWatch(bare).phase, 'potato_till');
+  assert.equal(cropWatch(bare).phase, 'O');
   assert.equal(fieldVisual(bare).g, 1);
   const lifterHold = rigs.find(r => r.kind === 'lifter');
   lifterHold.kind = 'held';
   try {
+  let sown = 0;
+  while (bare.plantedAt == null && sown < 8000) { step(0.5, 0, 1); sown++; }
+  assert.equal(typeof bare.plantedAt, 'number', 'the growth clock starts when sowing finishes the mask');
+  assert.ok(bare.jobS.sow >= L.LANES - 0.05, bare.jobS.sow);
+  assert.equal(cropWatch(bare).phase, 'A');
+  assert.ok(fieldVisual(bare).g >= 2 && fieldVisual(bare).g < 3, fieldVisual(bare).g);
+  const stage = id => cropDef('potato').stages.find(s => s.id === id);
   const jump = (target) => {
     const left = target - cropWatch(bare).day;
     if (left > 0.02) step(left * DAY_SECONDS, 0, 1);
   };
-  jump(3);
-  assert.equal(typeof bare.plantedAt, 'number', 'the growth clock starts when sowing finishes the mask');
-  assert.ok(bare.jobS.potato_plant >= L.LANES - 0.05, bare.jobS.potato_plant);
-  assert.equal(cropWatch(bare).phase, 'potato_plant');
-  assert.ok(fieldVisual(bare).g >= 2 && fieldVisual(bare).g < 3, fieldVisual(bare).g);
-  jump(10);
-  assert.equal(cropWatch(bare).phase, 'potato_emerg');
-  assert.ok(bare.jobS.potato_plant >= L.LANES - 0.05, bare.jobS.potato_plant);
+  jump(stage('B').from + 0.4);
+  assert.equal(cropWatch(bare).phase, 'B');
   assert.ok(fieldVisual(bare).g >= 3 && fieldVisual(bare).g < 4, fieldVisual(bare).g);
-  jump(28);
-  assert.equal(cropWatch(bare).phase, 'potato_hill');
-  jump(50);
-  assert.equal(cropWatch(bare).phase, 'potato_bulk');
-  assert.ok(fieldVisual(bare).g >= 5 && fieldVisual(bare).g < 6, fieldVisual(bare).g);
-  jump(76);
-  assert.equal(cropWatch(bare).phase, 'potato_haulm');
-  jump(85);
-  assert.equal(cropWatch(bare).phase, 'potato_harvest');
-  assert.equal(cropWatch(bare).label, '成熟待收');
+  jump(stage('C').from + 0.4);
+  assert.equal(cropWatch(bare).phase, 'C');
+  assert.ok(fieldVisual(bare).g >= 4 && fieldVisual(bare).g < 5, fieldVisual(bare).g);
+  jump(stage('D').from + 0.2);
+  assert.equal(cropWatch(bare).phase, 'D');
+  assert.equal(cropWatch(bare).label, '待收获');
   assert.equal(economy.revenue, START_REVENUE);
   assert.equal(warehouse.length, 0, 'maturity does not store the field');
   assert.equal(bare.live, true);
-  assert.ok(fieldVisual(bare).g > 7 && fieldVisual(bare).g < 8, fieldVisual(bare).g);
+  assert.ok(fieldVisual(bare).g >= 5 && fieldVisual(bare).g < 6, fieldVisual(bare).g);
   assert.equal(bare.yieldFactor ?? 1, 1);
   } finally {
     lifterHold.kind = 'lifter';
@@ -240,7 +239,7 @@ test('a working machine stays on its field, and the next machine starts from tha
   assert.equal(cropWatch(b).waiting, true);
   assert.equal(planter.f, a, 'planting a second field does not pull the machine off');
   assert.ok(Math.abs(a.jobS[job] - progressed) < 0.02, 'the current step is not marked done');
-  assert.equal(b.jobS.potato_base_fert, 0, 'the new field does not inherit the other field’s progress');
+  assert.equal(b.jobS.sow, 0, 'the new field does not inherit the other field’s progress');
   planter.mode = 'park';
   planter.f = null;
   planter.busy = false;
@@ -252,24 +251,27 @@ test('a working machine stays on its field, and the next machine starts from tha
   let guard = 0;
   while (a.jobS[job] < L.LANES - 0.01 && guard < 500) { step(2, 0, 1); guard++; }
   assert.ok(a.jobS[job] >= L.LANES - 0.01, a.jobS[job]);
+  const hiller = rigs.find(r => r.kind === 'hiller');
+  const hillerKind = hiller.kind;
+  hiller.kind = 'held';
   let stay = 0;
-  while (!(planter.f === a && planter.job === 'potato_rotavate') && stay < 800) { step(0.25, 0, 1); stay++; }
-  assert.equal(planter.f, a, 'the next tillage job stays on the older field');
-  assert.equal(planter.job, 'potato_rotavate');
+  while (!(planter.f === a && planter.job === 'water') && stay < 800) { step(0.25, 0, 1); stay++; }
+  assert.equal(planter.f, a, 'the next open window stays on the older field');
+  assert.equal(planter.job, 'water');
   guard = 0;
-  while ((a.jobS.potato_rotavate || 0) < L.LANES - 0.01 && guard < 500) { step(2, 0, 1); guard++; }
+  while (planter.f === a && guard < 8000) { step(0.5, 0, 1); guard++; }
   let hop = 0;
   while (!(planter.f === b && (planter.mode === 'travel' || planter.mode === 'work')) && hop < 12000) {
     step(0.5, 0, 1); hop++;
   }
-  assert.equal(planter.f, b, 'after the open till jobs it takes the next field');
-  assert.ok((b.jobS[planter.job] || 0) < 0.35, b.jobS[planter.job]);
-  const hiller = rigs.find(r => r.kind === 'hiller');
-  const hillFrom = cropDef('potato').stages.find(s => s.id === 'potato_hill').from;
+  assert.equal(planter.f, b, 'after the open stage windows it takes the next field');
+  assert.equal(planter.job, 'sow');
+  assert.ok((b.jobS.sow || 0) < 0.35, b.jobS.sow);
+  hiller.kind = hillerKind;
+  const hillFrom = cropDef('potato').stages.find(s => s.id === 'B').from;
   a.plantedAt = worldDay - hillFrom - 0.05;
-  for (const id of ['potato_base_fert', 'potato_rotavate', 'potato_plant', 'potato_shallow']) a.jobS[id] = L.LANES;
-  a.jobS.potato_hill = 0;
-  a.jobS.potato_topdress = 0;
+  a.jobS.sow = L.LANES;
+  a.jobS.weed = 0;
   planter.kind = 'held';
   hiller.mode = 'park';
   hiller.f = null;
@@ -282,11 +284,11 @@ test('a working machine stays on its field, and the next machine starts from tha
     while (hiller.mode !== 'work' && hill < 8000) { step(0.5, 0, 1); hill++; }
     assert.equal(hiller.mode, 'work');
     assert.equal(hiller.f, a, 'the hiller starts on the older field');
-    assert.equal(hiller.job, 'potato_hill');
-    assert.ok(a.jobS.potato_hill < 0.2, a.jobS.potato_hill);
+    assert.equal(hiller.job, 'weed');
+    assert.ok(a.jobS.weed < 0.2, a.jobS.weed);
     const read = rigReadout(hiller);
     assert.ok(Math.abs(read.speed - MACHINE_MPS) < 0.05, read.speed);
-    assert.equal(read.doing, '培土');
+    assert.equal(read.doing, '中耕');
     assert.ok(read.frac < 0.05, read.frac);
   } finally {
     planter.kind = 'planter';
@@ -726,10 +728,10 @@ test('planning a potato does not start the growth clock until sowing writes the 
   let arrive = 0;
   while (planter.mode !== 'work' && arrive < 8000) { step(0.5, 0, 1); arrive++; }
   assert.equal(planter.mode, 'work');
-  assert.equal(a.plantedAt, null, 'base fertilizer does not start the potato growth clock');
+  assert.equal(a.plantedAt, null, 'sowing has not finished the mask');
   while (a.plantedAt == null && arrive < 16000) { step(0.5, 0, 1); arrive++; }
   assert.equal(typeof a.plantedAt, 'number');
-  assert.ok(a.jobS.potato_plant >= L.LANES - 0.05);
+  assert.ok(a.jobS.sow >= L.LANES - 0.05);
   assert.equal(cropWatch(a).waiting, false);
   assert.equal(plantField(b, 'potato').ok, true);
   assert.equal(b.plantedAt, null);
@@ -771,7 +773,7 @@ test('an empty machine returns to the garage and recharges before the next job',
   let n = 0;
   while (planter.mode !== 'work' && n < 8000) { step(0.5, 0, 1); n++; }
   assert.equal(planter.mode, 'work');
-  assert.equal(a.plantedAt, null, 'the first pre-plant pass does not start the growth clock');
+  assert.equal(a.plantedAt, null, 'sowing has not finished the mask');
   assert.ok(planter.charge < 1, planter.charge);
   const heldKey = planter.job;
   const held = a.jobS[heldKey];
@@ -803,6 +805,9 @@ test('a machine stays in the garage until the battery is full', () => {
   stores.fertilizer = 2;
   const a = fieldAt(focus.i, focus.j);
   const planter = rigs.find(r => r.kind === 'planter');
+  const hiller = rigs.find(r => r.kind === 'hiller');
+  const hillerKind = hiller.kind;
+  hiller.kind = 'held';
   planter.charge = 0.5;
   planter.mode = 'charge';
   assert.equal(plantField(a, 'potato').ok, true);
@@ -818,6 +823,7 @@ test('a machine stays in the garage until the battery is full', () => {
   step(0.05, 0, 1);
   assert.equal(planter.f, a, 'partial charge outside the garage still resumes the field');
   assert.equal(planter.mode, 'travel');
+  hiller.kind = hillerKind;
 });
 
 test('warehouse stacks lots and keeps a soft capacity', () => {
@@ -840,16 +846,16 @@ test('warehouse stacks lots and keeps a soft capacity', () => {
   assert.equal(dossier.plantable, true);
   assert.equal(dossier.stages.length, POTATO_STAGES.length);
   assert.ok(dossier.stages.every(s => s.color && s.days > 0));
-  assert.equal(dossier.stages.filter(s => s.id !== 'potato_clear' && s.id !== 'potato_till').reduce((sum, s) => sum + s.days, 0), POTATO_ROT_AT);
-  assert.equal(dossier.stages.find(s => s.id === 'potato_till').days, 4);
-  assert.equal(dossier.stages.find(s => s.id === 'potato_clear').days, 3);
-  const hold = dossier.stages.find(s => s.id === 'potato_harvest');
-  assert.equal(hold.name, '成熟待收');
+  assert.equal(dossier.stages.filter(s => s.id !== 'E' && s.id !== 'O').reduce((sum, s) => sum + s.days, 0), POTATO_ROT_AT);
+  assert.equal(dossier.stages.find(s => s.id === 'O').days, 5);
+  assert.equal(dossier.stages.find(s => s.id === 'E').days, 3);
+  const hold = dossier.stages.find(s => s.id === 'D');
+  assert.equal(hold.name, '待收获');
   assert.equal(hold.from, POTATO_DAYS);
   assert.equal(hold.to, POTATO_DAYS + hold.days);
-  assert.equal(dossier.stages.find(s => s.id === 'potato_d2').to, POTATO_ROT_AT);
+  assert.equal(dossier.stages.find(s => s.id === 'D2').to, POTATO_ROT_AT);
   assert.equal(cropDossier('soy').plantable, true);
-  assert.equal(cropDossier('feed_barley').stages.length, 6);
+  assert.equal(cropDossier('feed_barley').stages.length, 8);
   assert.equal(cropDossier('cabbage').inputs.some(i => i.id === 'seedling_cabbage'), true);
   assert.equal(dossier.inputs.find(i => i.id === 'seed').qty, 1);
   assert.equal(dossier.inputs.find(i => i.id === 'fertilizer').qty, 1);
@@ -919,6 +925,8 @@ test('two planters take different fields and a spare stays home', () => {
   assert.equal(buyMachine('planter').ok, true);
   const planters = rigs.filter(r => r.kind === 'planter');
   assert.equal(planters.length, 2);
+  const hiller = rigs.find(r => r.kind === 'hiller');
+  hiller.kind = 'held';
   const a = fieldAt(focus.i, focus.j);
   assert.equal(plantField(a, 'potato').ok, true);
   const claimed = planters.filter(p => p.f === a);
@@ -931,30 +939,28 @@ test('two planters take different fields and a spare stays home', () => {
   assert.ok(b);
   assert.equal(plantField(b, 'potato').ok, true);
   assert.equal(new Set(planters.map(p => p.f)).size, 2);
-  assert.ok(planters.every(p => p.mode === 'travel' || p.mode === 'work'));
+  assert.ok(planters.every(p => p.mode === 'travel' || p.mode === 'work' || p.mode === 'service'));
   const x0 = planters.map(p => p.x);
   const z0 = planters.map(p => p.z);
-  step(1, 0, 1);
+  step(16, 0, 1);
   assert.equal(planters[0].f === planters[1].f, false);
   const d = Math.hypot(planters[0].x - planters[1].x, planters[0].z - planters[1].z);
   assert.ok(d > 3, d);
   const moved = planters.some((p, i) => Math.hypot(p.x - x0[i], p.z - z0[i]) > 1);
   assert.equal(moved, true);
+  hiller.kind = 'hiller';
   resetGame();
 });
 
-test('potato-b keeps hill and topdress as two jobs, and only the potato harvester lifts', () => {
+test('placeholder potato dispatch only opens harvest at maturity, and only the lifter takes it', () => {
   const potato = cropDef('potato');
-  assert.equal(potato.profile, 'potato-b');
-  const hill = potato.jobs.filter(j => j.stage === 'potato_hill' && j.required);
-  assert.deepEqual(hill.map(j => j.id), ['potato_hill', 'potato_topdress']);
-  assert.equal(hill[0].from, hill[1].from);
-  assert.equal(hill[0].to, hill[1].to);
-  assert.ok(hill[0].from > 0);
-  const harvest = potato.jobs.find(j => j.id === 'potato_harvest');
+  assert.equal(potato.profile, null);
+  const harvest = potato.jobs.find(j => j.id === 'harvest');
   assert.equal(harvest.self, 'harvester_potato');
   assert.equal(harvest.harvest, true);
-  assert.match(harvest.note, /侧卸/);
+  assert.equal(harvest.window.when, 'clock');
+  assert.equal(harvest.window.from, potato.maturity);
+  assert.equal(harvest.window.to, potato.rotAt);
   assert.equal(potato.stages.some(s => /侧卸/.test(s.id + s.name)), false);
   assert.equal(rigCan('lifter', harvest), true);
   assert.equal(rigCan('hiller', harvest), false);
@@ -962,15 +968,16 @@ test('potato-b keeps hill and topdress as two jobs, and only the potato harveste
   assert.equal(rigCan('topper', harvest), false);
   assert.equal(rigCan('tractor', harvest), false);
   const atHarvest = auditDispatch('potato', potato.maturity + 0.4, { planted: true });
-  assert.deepEqual(atHarvest.map(row => row.id), ['potato_harvest']);
+  assert.deepEqual(atHarvest.map(row => row.id), ['harvest']);
   assert.deepEqual(atHarvest[0].kinds, ['lifter']);
-  const sow = potato.jobs.find(j => j.id === 'potato_plant');
+  const sow = potato.jobs.find(j => j.id === 'sow');
   assert.equal(sow.writesMask, true);
   assert.equal(sow.plant, true);
-  assert.equal(potato.jobs.find(j => j.id === 'potato_base_fert').preplant, true);
-  assert.equal(potato.jobs.find(j => j.id === 'potato_irrigate').auto, true);
-  assert.equal(potato.jobs.find(j => j.id === 'potato_scout').drone, true);
-  assert.equal(potato.jobs.find(j => j.id === 'potato_treat').drone, true);
+  assert.equal(sow.window.when, 'before');
+  assert.equal(potato.jobs.find(j => j.id === 'cultivate').preplant, true);
+  assert.equal(potato.jobs.find(j => j.id === 'scout').drone, true);
+  assert.equal(potato.jobs.find(j => j.id === 'treat').drone, true);
+  assert.equal(potato.jobs.some(j => j.auto), false);
 });
 
 test('harvest dispatch matches the crop, and a hiller cannot take it', () => {
@@ -992,10 +999,9 @@ test('harvest dispatch matches the crop, and a hiller cannot take it', () => {
     }
   }
   const barley = cropDef('feed_barley');
-  const harvest = barley.jobs.find(j => j.id === 'barley_harvest');
+  const harvest = barley.jobs.find(j => j.id === 'harvest');
   const open = auditDispatch('feed_barley', barley.maturity + 0.4, { planted: true });
-  assert.deepEqual(open.map(row => row.id), ['barley_harvest']);
-  assert.equal(harvest.mode, 'grain');
+  assert.deepEqual(open.map(row => row.id), ['harvest']);
   assert.equal(harvest.tank, 'grain');
   assert.equal(hitchPlan('harvester_combine', null, harvest).platform, true);
   assert.equal(rigCan('hiller', harvest), false);
@@ -1004,10 +1010,10 @@ test('harvest dispatch matches the crop, and a hiller cannot take it', () => {
   assert.equal(rigHas('tractor', 'impl_trailer'), true);
   assert.equal(rigHas('planter', 'impl_trailer'), true);
   assert.equal(rigHas('hiller', 'impl_trailer'), false);
-  assert.equal(rigCan('tractor', barley.jobs.find(j => j.id === 'barley_plant')), true);
-  assert.equal(rigCan('tractor', barley.jobs.find(j => j.id === 'barley_rotavate')), true);
-  const clear = auditDispatch('feed_barley', barley.maturity + 0.4, { planted: true, harvested: true, done: { barley_harvest: true } });
-  assert.ok(clear.some(row => row.id === 'barley_clear' && row.kinds.includes('hiller')));
+  assert.equal(rigCan('tractor', barley.jobs.find(j => j.id === 'sow')), true);
+  assert.equal(rigCan('tractor', barley.jobs.find(j => j.id === 'cultivate')), true);
+  const clear = auditDispatch('feed_barley', barley.maturity + 0.4, { planted: true, harvested: true, done: { harvest: true } });
+  assert.ok(clear.some(row => row.id === 'clear' && row.kinds.includes('hiller')));
   assert.ok(clear.every(row => !row.harvest));
 
   resetGame();
@@ -1033,7 +1039,7 @@ test('harvest dispatch matches the crop, and a hiller cannot take it', () => {
   const combine = rigs.find(r => r.kind === 'harvester_combine');
   const hiller = rigs.find(r => r.kind === 'hiller');
   hiller.f = f;
-  hiller.job = 'barley_harvest';
+  hiller.job = 'harvest';
   hiller.mode = 'work';
   hiller.busy = true;
   hiller.intent = 'job';
@@ -1041,12 +1047,12 @@ test('harvest dispatch matches the crop, and a hiller cannot take it', () => {
   hiller.u = 20;
   hiller.charge = 1;
   step(1, 0, 1);
-  assert.notEqual(hiller.job, 'barley_harvest');
+  assert.notEqual(hiller.job, 'harvest');
   assert.notEqual(hiller.f, f);
-  assert.ok((f.jobS.barley_harvest || 0) < 0.05, f.jobS.barley_harvest);
+  assert.ok((f.jobS.harvest || 0) < 0.05, f.jobS.harvest);
   let guard = 0;
-  while (combine.job !== 'barley_harvest' && guard < 400) { step(1, 0, 1); guard++; }
-  assert.equal(combine.job, 'barley_harvest');
+  while (combine.job !== 'harvest' && guard < 400) { step(1, 0, 1); guard++; }
+  assert.equal(combine.job, 'harvest');
   assert.equal(combine.f, f);
   assert.equal(combine.tank, 'grain');
   assert.notEqual(hiller.f, f);
@@ -1056,7 +1062,7 @@ test('harvest dispatch matches the crop, and a hiller cannot take it', () => {
   guard = 0;
   while (!rigs.some(r => r.intent === 'unload' || r.mode === 'unload' || r.pending?.hitch === 'impl_trailer') && guard < 600) { step(1, 0, 1); guard++; }
   assert.ok(rigs.some(r => (r.intent === 'unload' || r.mode === 'unload' || r.pending?.hitch === 'impl_trailer') && r.kind !== 'hiller'));
-  assert.ok(!rigs.some(r => r.kind === 'hiller' && r.job === 'barley_harvest'));
+  assert.ok(!rigs.some(r => r.kind === 'hiller' && r.job === 'harvest'));
   resetGame();
 });
 
@@ -1083,7 +1089,7 @@ function armLifter(f, day) {
   f.plantedAt = worldDay - day;
   f.jobS = {};
   for (const j of cropDef('potato').jobs) f.jobS[j.id] = L.LANES;
-  f.jobS.potato_harvest = L.LANES - 0.02;
+  f.jobS.harvest = L.LANES - 0.02;
   f.yieldFactor = 1;
   f.penalized = {};
   f.harvested = false;
@@ -1109,25 +1115,27 @@ test('a mature field waits, then rots if nobody lifts it', () => {
   stores.fertilizer = 2;
   const f = fieldAt(focus.i, focus.j);
   assert.equal(plantField(f, 'potato').ok, true);
-  f.plantedAt = worldDay - 12;
-  f.jobS.potato_plant = 0;
+  const young = cropDef('potato').stages.find(s => s.id === 'B');
+  f.plantedAt = worldDay - (young.from + young.days * 0.75);
+  f.jobS.sow = 0;
   assert.equal(fieldVisual(f).g, 1, 'emergence stays off until the planter finishes');
-  f.jobS.potato_plant = L.LANES;
+  f.jobS.sow = L.LANES;
   const mid = fieldVisual(f);
-  assert.ok(mid.g > 3.5 && mid.g < 3.7, mid.g);
-  assert.equal(cropWatch(f).phase, 'potato_emerg');
-  f.plantedAt = worldDay - 50;
-  for (const id of Object.keys(f.jobS)) f.jobS[id] = id === 'potato_plant' ? L.LANES : 0;
-  assert.equal(cropWatch(f).phase, 'potato_bulk');
+  assert.ok(Math.abs(mid.g - 3.75) < 0.05, mid.g);
+  assert.equal(cropWatch(f).phase, 'B');
+  const ripe = cropDef('potato').stages.find(s => s.id === 'D');
+  f.plantedAt = worldDay - (ripe.from + 1);
+  for (const id of Object.keys(f.jobS)) f.jobS[id] = id === 'sow' ? L.LANES : 0;
+  assert.equal(cropWatch(f).phase, 'D');
   assert.equal(fieldVisual(f).s, 0);
   const lifter = rigs.find(r => r.kind === 'lifter');
   lifter.kind = 'held';
   try {
-    f.plantedAt = worldDay - 85;
-    f.jobS.potato_plant = L.LANES;
+    f.plantedAt = worldDay - (ripe.from + 0.4);
+    f.jobS.sow = L.LANES;
     step(1, 0, 1);
-    assert.equal(cropWatch(f).phase, 'potato_harvest');
-    assert.equal(cropWatch(f).label, '成熟待收');
+    assert.equal(cropWatch(f).phase, 'D');
+    assert.equal(cropWatch(f).label, '待收获');
     assert.equal(f.live, true);
     assert.equal(warehouse.length, 0);
     f.plantedAt = worldDay - POTATO_ROT_AT;
@@ -1156,7 +1164,7 @@ test('the lifter stores the field, and a cycle replants only when supplies are t
   assert.equal(plantField(f, 'potato', { cycle: true, autoBuy: false }).ok, true);
   assert.equal(f.cycle, true);
   assert.equal(f.autoBuy, false);
-  armLifter(f, 83);
+  armLifter(f, cropDef('potato').maturity + 2);
   let n = 0;
   while (warehouse.length < 1 && n < 8000) { step(0.5, 0, 1); n++; }
   assert.equal(warehouse.length, 1);
@@ -1173,7 +1181,7 @@ test('the lifter stores the field, and a cycle replants only when supplies are t
   const g = fieldAt(focus.i, focus.j);
   assert.equal(plantField(g, 'potato', { cycle: true, autoBuy: true }).ok, true);
   assert.equal(stores.seed, 0);
-  armLifter(g, 83);
+  armLifter(g, cropDef('potato').maturity + 2);
   n = 0;
   while (warehouse.length < 1 && n < 8000) { step(0.5, 0, 1); n++; }
   assert.equal(warehouse.length, 1);
@@ -1243,19 +1251,19 @@ test('drones scout and treat from a base, not the machine garage', () => {
   const f = fieldAt(focus.i, focus.j);
   assert.equal(plantField(f, 'potato').ok, true);
   const jobs = cropDef('potato').jobs;
-  assert.equal(jobs.some(j => j.id === 'potato_scout' && j.drone && j.cap === 'scout' && !j.required), true);
-  assert.equal(jobs.some(j => j.id === 'potato_treat' && j.drone && j.cap === 'pest_treat' && !j.required), true);
+  assert.equal(jobs.some(j => j.id === 'scout' && j.drone && j.cap === 'scout' && !j.required), true);
+  assert.equal(jobs.some(j => j.id === 'treat' && j.drone && j.cap === 'pest_treat' && !j.required), true);
   assert.equal(jobs.some(j => j.spray), false);
   f.plantedAt = worldDay - 40;
-  for (const j of jobs) f.jobS[j.id] = j.id === 'potato_scout' || j.id === 'potato_treat' ? 0 : L.LANES;
+  for (const j of jobs) f.jobS[j.id] = j.id === 'scout' || j.id === 'treat' ? 0 : L.LANES;
   const starterKinds = rigs.slice(0, 4).map(r => r.kind);
   for (const r of rigs) r.kind = 'held';
   try {
     step(1, 0, 1);
-    assert.equal(rigs.some(r => r.job === 'potato_scout' || r.job === 'potato_treat'), false);
+    assert.equal(rigs.some(r => r.job === 'scout' || r.job === 'treat'), false);
     let n = 0;
-    while (scout.job !== 'potato_scout' && n < 40) { step(0.5, 0, 1); n++; }
-    assert.equal(scout.job, 'potato_scout');
+    while (scout.job !== 'scout' && n < 40) { step(0.5, 0, 1); n++; }
+    assert.equal(scout.job, 'scout');
     assert.equal(spray.job, null);
     assert.notEqual(scout.mode, 'park');
   } finally {

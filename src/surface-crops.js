@@ -1,8 +1,6 @@
-// 表层四作物。大豆、大麦、甘蓝的阶段时长仍取区间中点。自然阶段跟世界钟，不等作业。
-// 土豆读 data/field-stages/potato-b.json。生长链从薯播写完蒙版 M 起算，基肥和旋耕不记这口钟。
-// 出苗的绿色要等该田的播种/移栽作业走完才画，逻辑在 fieldVisual。
-import potatoBSource from '../data/field-stages/potato-b.json' with { type: 'json' };
-import { parseFieldStageDoc, sampleRidge } from './field-stages.js';
+// 表层四作物。玩法只读田间文档：总周期、阶段对齐、阶段内作业窗口。调度只吃窗口。
+// 出苗要等该田的播种/移栽写完蒙版才画，逻辑在 fieldVisual。
+import { parseFieldStageDoc, placeholderFieldDoc, alignFieldCalendar, jobWindows, sampleRidge } from './field-stages.js';
 
 export const JOB_PENALTY = 0.15;
 export const UNLOAD_WHILE_MOVING = false;
@@ -10,54 +8,7 @@ export const BIN_LANES = 4;
 export const UNLOAD_SECONDS = 3.5;
 export const TRAILER_CARGO_CAP = 2;
 
-export function span(lo, hi) {
-  return Math.round((lo + hi) / 2);
-}
-
-function timed(rows) {
-  let t = 0;
-  const stages = rows.map(row => {
-    const days = span(row.lo, row.hi);
-    const stage = {
-      id: row.id, name: row.name, from: t, to: t + days, days,
-      color: row.color, effect: row.effect,
-    };
-    t += days;
-    return { ...stage, jobDefs: row.jobs };
-  });
-  const jobs = [];
-  let order = 0;
-  for (const stage of stages) {
-    for (const job of stage.jobDefs) {
-      jobs.push({
-        id: job.id, name: job.name, stage: stage.id, from: stage.from, to: stage.to, order: order++,
-        required: !!job.required, plant: !!job.plant, harvest: !!job.harvest, spray: !!job.spray,
-        auto: !!job.auto, afterHarvest: !!job.afterHarvest, drone: !!job.drone,
-        impl: job.impl || null, implAny: job.implAny || null, self: job.self || null,
-        mode: job.mode || null, penalty: job.required ? JOB_PENALTY : 0,
-        cap: job.cap || null, caps: job.caps || null, load: job.load || null, disc: job.disc || null, tank: job.tank || null,
-      });
-    }
-    delete stage.jobDefs;
-  }
-  const harvest = stages.find(s => jobs.some(j => j.harvest && j.stage === s.id));
-  return {
-    stages, jobs,
-    maturity: harvest.from,
-    hold: harvest.days,
-    rotAt: harvest.to,
-  };
-}
-
 const soil = '#6f6a61';
-const soilDk = '#4a4844';
-const young = '#51542c';
-const canopy = '#787c32';
-const flower = '#c4b0d4';
-const straw = '#b59a63';
-const rust = '#9e543a';
-const ochre = '#81683f';
-const sage = '#8fbbad';
 const POTATO_NAME = '中熟商品薯';
 const RIDGE_N = 8;
 
@@ -74,187 +25,143 @@ function stageLook(stage, fallbackRidge) {
   };
 }
 
-// 土豆B。工单来自 ops[].extensions，同一阶段的培土和追肥各记各的 id。
-// 侧卸不进 stages，只留在起薯的 note 里，执行链仍是收获机停车侧卸。
-// 生长钟不看 O 的 4 日：薯播 writesMask 走完才把 plantedAt 记上，A 及以后从那一天起算。
-function potatoFromProfile(raw) {
-  const doc = parseFieldStageDoc(raw);
-  const stageOf = id => doc.stages.find(s => s.id === id);
-  const need = id => {
-    const row = stageOf(id);
-    if (!row) throw new Error('土豆阶段缺 ' + id);
-    return row;
+const MACHINE_JOB = {
+  impl_fertilizer: { cap: 'fertilize', load: 'fertilizer' },
+  impl_rotavator: { cap: 'till_rotary' },
+  impl_cultivator: { cap: 'cultivate' },
+  impl_sprayer: { cap: 'spray' },
+  impl_seeder: { cap: 'seed' },
+  impl_potato_planter: { cap: 'plant_potato' },
+  impl_bedder: { cap: 'bed' },
+  impl_haulm: { cap: 'haulm' },
+  transplanter: { cap: 'transplant' },
+  harvester_potato: { cap: 'harvest_potato' },
+  harvester_combine: { cap: 'harvest_combine' },
+  harvester_cabbage: { cap: 'harvest_cabbage' },
+  drone_scout: { cap: 'scout', drone: true },
+  drone_treat: { cap: 'pest_treat', load: 'pest', drone: true },
+};
+
+function faceStage(row, from, to, doc, extra = {}) {
+  const days = extra.days ?? (to - from);
+  return {
+    id: row.id,
+    name: row.name || row.id,
+    from, to, days,
+    color: row.color || soil,
+    effect: row.effect || '',
+    look: stageLook(row, doc.ridge),
+    preplant: !!extra.preplant,
+    after: !!extra.after,
   };
-  const O = need('O');
-  const A = need('A');
-  const emerg = need('emerg');
-  const hill = need('hill');
-  const bulk = need('bulk');
-  const haulm = need('haulm');
-  const D = need('D');
-  const E = need('E');
-  const d1 = (D.variants || []).find(v => v.id === 'D1');
-  const d2 = (D.variants || []).find(v => v.id === 'D2');
-  let cursor = 0;
-  const win = {};
-  for (const id of doc.chain || []) {
-    const row = stageOf(id);
-    if (!row) throw new Error('土豆生长链缺 ' + id);
-    win[id] = { from: cursor, to: cursor + row.days, days: row.days };
-    cursor += row.days;
+}
+
+// 一份田间文档编译成玩法用的阶段和窗口。能力来自作业自己的 extensions，没有再查旧工单号。
+export function compilePlayable(raw, meta = {}) {
+  const doc = raw && raw.stages && raw.edges ? parseFieldStageDoc(raw) : raw;
+  const aligned = alignFieldCalendar(doc);
+  const windows = jobWindows(doc, aligned);
+  const stages = [];
+  if (aligned.idle) stages.push(faceStage(aligned.idle, 0, Number(aligned.idle.days) || 0, doc, { preplant: true }));
+  for (const placed of aligned.placed) stages.push(faceStage(placed.row, placed.from, placed.to, doc));
+  const hold = aligned.placed[aligned.placed.length - 1];
+  let tail = hold.to;
+  for (const variant of [aligned.d1, aligned.d2]) {
+    if (!variant) continue;
+    const days = Math.max(0, Number(variant.days) || 0);
+    stages.push(faceStage({ ...hold.row, ...variant, id: variant.id, name: variant.name || variant.id }, tail, tail + days, doc));
+    tail += days;
   }
-  if (!win.A || !win.emerg || !win.hill || !win.bulk || !win.haulm || !win.D) {
-    throw new Error('土豆生长链要有 A、emerg、hill、bulk、haulm、D');
+  if (aligned.post) {
+    const days = Number(aligned.post.days) || 0;
+    stages.push(faceStage(aligned.post, hold.to, hold.to + days, doc, { after: true }));
   }
-  const overFrom = win.D.to;
-  const overTo = overFrom + (d1?.days || 0);
-  const rotAt = overTo + (d2?.days || 0);
-  const face = (id, name, from, to, source, effect, extra = {}) => ({
-    id, name, from, to, days: extra.days ?? (to - from), color: source.color, effect, look: stageLook(source, doc.ridge), ...extra,
-  });
-  const stages = [
-    face('potato_till', '整地空田', 0, O.days, O, `${O.effect} 生长链要等薯播写完蒙版，这一段不记钟。`, { preplant: true }),
-    face('potato_plant', A.name, win.A.from, win.A.to, A, A.effect),
-    face('potato_emerg', emerg.name, win.emerg.from, win.emerg.to, emerg, emerg.effect),
-    face('potato_hill', hill.name, win.hill.from, win.hill.to, hill, hill.effect),
-    face('potato_bulk', bulk.name, win.bulk.from, win.bulk.to, bulk, bulk.effect),
-    face('potato_haulm', haulm.name, win.haulm.from, win.haulm.to, haulm, haulm.effect),
-    face('potato_harvest', '成熟待收', win.D.from, win.D.to, D, D.effect),
-    face('potato_over', d1?.name || '过熟', overFrom, overTo, d1 || D, '成熟待收放满还没起薯。起薯仍可做。侧卸仍在收获机上。'),
-    face('potato_d2', d2?.name || '烂地', overTo, rotAt, d2 || D, '再放满这一段还没收，就烂在地里，不入仓。'),
-    face('potato_clear', '清田', win.D.to, win.D.to + E.days, E, E.effect, { after: true }),
-  ];
-  const open = {
-    potato_emerg: win.emerg,
-    potato_hill: win.hill,
-    potato_bulk: win.bulk,
-    potato_haulm: win.haulm,
-    // 起薯从 D 开到烂地结束，过熟和烂地里都还能收。
-    potato_harvest: { from: win.D.from, to: rotAt },
-    potato_clear: { from: win.D.to, to: win.D.to + E.days },
-  };
-  const jobs = doc.ops.filter(op => op.extensions && !op.extensions.framework && op.extensions.legacyJob).map(op => {
-    const ext = op.extensions;
-    const beforeClock = ext.legacyStage === 'potato_till' || !!op.writesMask;
-    const span = beforeClock ? { from: 0, to: 0 } : open[ext.legacyStage];
-    if (!span) throw new Error('作业对不上阶段 ' + (op.name || op.id || ext.legacyStage || ''));
+  const jobs = windows.map(({ op, window, order }) => {
+    const ext = op.extensions || {};
+    const machine = op.machine || null;
+    const inferred = MACHINE_JOB[machine] || {};
+    const writesMask = !!op.writesMask;
+    const required = typeof ext.required === 'boolean' ? ext.required : op.kind === 'required';
+    const plant = typeof ext.plant === 'boolean' ? ext.plant : writesMask;
+    const harvest = typeof ext.harvest === 'boolean' ? ext.harvest : op.via === 'harvest';
+    const drone = !!(op.drone || ext.drone || inferred.drone);
+    const seeder = machine === 'impl_seeder' || machine === 'impl_potato_planter' || machine === 'transplanter';
+    const combine = machine === 'harvester_combine';
     return {
-      id: op.id, name: op.name, stage: ext.legacyStage, from: span.from, to: span.to, order: ext.order ?? 0,
-      required: !!ext.required, plant: !!ext.plant, harvest: !!ext.harvest, spray: false,
-      auto: !!ext.auto, afterHarvest: !!ext.afterHarvest, drone: !!ext.drone,
-      impl: ext.impl || null, implAny: ext.implAny || null, self: ext.self || null, mode: ext.mode || null,
-      penalty: ext.required ? (Number.isFinite(ext.penalty) ? ext.penalty : JOB_PENALTY) : 0,
-      cap: ext.cap || null, caps: ext.caps || null, load: ext.load || null, disc: null, tank: null,
-      writesMask: !!op.writesMask,
-      preplant: ext.legacyStage === 'potato_till' && !op.writesMask,
+      id: op.id,
+      name: op.name || op.id,
+      stage: window.stage,
+      from: window.from,
+      to: window.to,
+      window,
+      order,
+      required,
+      plant,
+      harvest,
+      spray: !!ext.spray,
+      auto: !!ext.auto,
+      afterHarvest: window.when === 'after',
+      drone,
+      preplant: window.when === 'before' && !writesMask,
+      writesMask,
+      impl: ext.impl || (machine && String(machine).startsWith('impl_') ? machine : null),
+      implAny: ext.implAny || null,
+      self: ext.self || (machine && !String(machine).startsWith('impl_') && !drone ? machine : null),
+      mode: ext.mode || null,
+      penalty: required ? (Number.isFinite(+ext.penalty) ? +ext.penalty : JOB_PENALTY) : 0,
+      cap: ext.cap || inferred.cap || null,
+      caps: ext.caps || null,
+      load: ext.load || (seeder ? (meta.seed || null) : (inferred.load || null)),
+      disc: ext.disc || (machine === 'impl_seeder' ? (meta.disc || null) : null),
+      tank: ext.tank || (combine ? (meta.tank || null) : null),
       note: ext.note || '',
     };
-  }).sort((a, b) => a.order - b.order);
-  const harvest = stages.find(s => s.id === 'potato_harvest');
-  const displayName = String(doc.cropName || doc.name || POTATO_NAME).trim() || POTATO_NAME;
+  });
+  const displayName = String(doc.cropName || doc.name || meta.name || doc.cropId || '').trim() || meta.name || doc.cropId;
   return {
-    stages, jobs, profile: doc.profile,
-    maturity: harvest.from, hold: harvest.days, rotAt,
+    id: meta.id || doc.cropId,
+    logicId: doc.logicId || ('crop_' + (meta.id || doc.cropId)),
+    stages,
+    jobs,
+    cycle: aligned.cycle,
+    maturity: aligned.maturity,
+    hold: aligned.hold,
+    rotAt: aligned.rotAt,
+    profile: doc.profile || null,
     displayName,
+    seed: meta.seed || null,
+    seedQty: meta.seedQty || 1,
+    planLabel: '种' + displayName,
+    slotted: !!meta.slotted,
     visual: {
       rows: Math.max(4, Math.min(16, Math.round(+doc.rows) || 8)),
-      plantRow: Number.isFinite(+doc.plant?.row) ? +doc.plant.row : 0.9,
-      plantAlong: Number.isFinite(+doc.plant?.along) ? +doc.plant.along : 0.4,
-      plantHeight: Number.isFinite(+doc.plant?.height) ? +doc.plant.height : 0.55,
+      plantRow: Number.isFinite(+doc.plant?.row) ? +doc.plant.row : (meta.row ?? 0.9),
+      plantAlong: Number.isFinite(+doc.plant?.along) ? +doc.plant.along : (meta.along ?? 0.4),
+      plantHeight: Number.isFinite(+doc.plant?.height) ? +doc.plant.height : (meta.height ?? 0.55),
     },
   };
 }
 
-export const SURFACE_CROPS = {
-  potato: potatoFromProfile(potatoBSource),
-  soy: timed([
-    { id: 'soy_till', name: '整地', lo: 3, hi: 5, color: soil, effect: '基肥和旋耕。', jobs: [
-      { id: 'soy_base_fert', name: '基肥', required: true, impl: 'impl_fertilizer' },
-      { id: 'soy_rotavate', name: '旋耕', required: true, impl: 'impl_rotavator' },
-    ] },
-    { id: 'soy_plant', name: '播种', lo: 2, hi: 3, color: soilDk, effect: '精播豆盘。走完才出苗。', jobs: [
-      { id: 'soy_plant', name: '精播', required: true, impl: 'impl_seeder', mode: 'bean', plant: true },
-    ] },
-    { id: 'soy_veg', name: '分枝', lo: 18, hi: 25, color: young, effect: '中耕除草。', jobs: [
-      { id: 'soy_weed', name: '除草', required: true, impl: 'impl_cultivator', mode: 'weed' },
-    ] },
-    { id: 'soy_flower', name: '结荚', lo: 25, hi: 35, color: canopy, effect: '追肥、灌溉。侦察和虫害防治只派无人机。', jobs: [
-      { id: 'soy_topdress', name: '追肥', required: true, impl: 'impl_fertilizer' },
-      { id: 'soy_irrigate', name: '灌溉', required: true, auto: true },
-      { id: 'soy_scout', name: '侦察', required: false, drone: true, cap: 'scout' },
-      { id: 'soy_treat', name: '植保', required: false, drone: true, cap: 'pest_treat', load: 'pest' },
-    ] },
-    { id: 'soy_fill', name: '鼓粒', lo: 15, hi: 20, color: flower, effect: '只灌溉，不追肥。', jobs: [
-      { id: 'soy_irrigate_fill', name: '灌溉', required: true, auto: true },
-    ] },
-    { id: 'soy_harvest', name: '成熟待收', lo: 7, hi: 12, color: ochre, effect: '联合收割豆模式，停车侧卸。', jobs: [
-      { id: 'soy_harvest', name: '联收', required: true, harvest: true, self: 'harvester_combine', mode: 'bean' },
-    ] },
-    { id: 'soy_clear', name: '清田', lo: 2, hi: 4, color: straw, effect: '碎秆。', jobs: [
-      { id: 'soy_clear', name: '碎秆', required: true, afterHarvest: true, implAny: ['impl_cultivator', 'impl_rotavator'], mode: 'residue' },
-    ] },
-  ]),
-  feed_barley: timed([
-    { id: 'barley_till', name: '整地', lo: 2, hi: 4, color: soil, effect: '基肥和旋耕。', jobs: [
-      { id: 'barley_base_fert', name: '基肥', required: true, impl: 'impl_fertilizer' },
-      { id: 'barley_rotavate', name: '旋耕', required: true, impl: 'impl_rotavator' },
-    ] },
-    { id: 'barley_plant', name: '播种', lo: 1, hi: 3, color: soilDk, effect: '精播谷盘。走完才出苗。', jobs: [
-      { id: 'barley_plant', name: '精播', required: true, impl: 'impl_seeder', mode: 'grain', plant: true },
-    ] },
-    { id: 'barley_tillering', name: '分蘖', lo: 20, hi: 28, color: young, effect: '追肥。浅中耕可选。', jobs: [
-      { id: 'barley_topdress', name: '追肥', required: true, impl: 'impl_fertilizer' },
-      { id: 'barley_shallow', name: '浅中耕', required: false, impl: 'impl_cultivator', mode: 'shallow' },
-    ] },
-    { id: 'barley_grain', name: '灌浆', lo: 25, hi: 30, color: straw, effect: '灌溉。侦察和虫害防治只派无人机，不追肥。', jobs: [
-      { id: 'barley_irrigate', name: '灌溉', required: true, auto: true },
-      { id: 'barley_scout', name: '侦察', required: false, drone: true, cap: 'scout' },
-      { id: 'barley_treat', name: '植保', required: false, drone: true, cap: 'pest_treat', load: 'pest' },
-    ] },
-    { id: 'barley_harvest', name: '成熟待收', lo: 6, hi: 10, color: ochre, effect: '联合收割谷模式，停车侧卸。', jobs: [
-      { id: 'barley_harvest', name: '联收', required: true, harvest: true, self: 'harvester_combine', mode: 'grain' },
-    ] },
-    { id: 'barley_clear', name: '清田', lo: 2, hi: 3, color: rust, effect: '碎秆。打捆以后再做。', jobs: [
-      { id: 'barley_clear', name: '碎秆', required: true, afterHarvest: true, implAny: ['impl_cultivator', 'impl_rotavator'], mode: 'residue' },
-    ] },
-  ]),
-  cabbage: timed([
-    { id: 'cabbage_bed', name: '作畦', lo: 2, hi: 4, color: soil, effect: '基肥、旋耕、作畦。甘蓝苗从商店买，不在田里育。', jobs: [
-      { id: 'cabbage_base_fert', name: '基肥', required: true, impl: 'impl_fertilizer' },
-      { id: 'cabbage_rotavate', name: '旋耕', required: true, impl: 'impl_rotavator' },
-      { id: 'cabbage_bed', name: '作畦', required: true, impl: 'impl_bedder' },
-    ] },
-    { id: 'cabbage_transplant', name: '定植', lo: 2, hi: 3, color: soilDk, effect: '移栽机。这趟走完才长叶。', jobs: [
-      { id: 'cabbage_transplant', name: '移栽', required: true, self: 'transplanter', plant: true },
-    ] },
-    { id: 'cabbage_rosette', name: '莲座', lo: 25, hi: 35, color: sage, effect: '中耕、追肥、灌溉。', jobs: [
-      { id: 'cabbage_cultivate', name: '中耕', required: true, impl: 'impl_cultivator', mode: 'weed' },
-      { id: 'cabbage_topdress', name: '追肥', required: true, impl: 'impl_fertilizer' },
-      { id: 'cabbage_irrigate', name: '灌溉', required: true, auto: true },
-    ] },
-    { id: 'cabbage_head', name: '结球', lo: 25, hi: 35, color: '#52747e', effect: '灌溉。侦察和虫害防治只派无人机，不追肥。', jobs: [
-      { id: 'cabbage_irrigate_head', name: '灌溉', required: true, auto: true },
-      { id: 'cabbage_scout', name: '侦察', required: false, drone: true, cap: 'scout' },
-      { id: 'cabbage_treat', name: '植保', required: false, drone: true, cap: 'pest_treat', load: 'pest' },
-    ] },
-    { id: 'cabbage_harvest', name: '成熟待收', lo: 7, hi: 12, color: ochre, effect: '结球收获，停车侧卸。', jobs: [
-      { id: 'cabbage_harvest', name: '收球', required: true, harvest: true, self: 'harvester_cabbage' },
-    ] },
-    { id: 'cabbage_clear', name: '清田', lo: 2, hi: 3, color: straw, effect: '碎茬。', jobs: [
-      { id: 'cabbage_clear', name: '碎茬', required: true, afterHarvest: true, impl: 'impl_cultivator', mode: 'residue' },
-    ] },
-  ]),
+const CROP_META = {
+  potato: { id: 'potato', name: POTATO_NAME, shape: 'bush', young: '#51542c', ripe: '#81683f', stub: '#9e543a', height: 0.55, row: 0.9, along: 0.4, seed: 'seed', slotted: true },
+  soy: { id: 'soy', name: '大豆', shape: 'bush', young: '#51542c', ripe: '#787c32', stub: '#6f6a61', height: 0.8, row: 0.5, along: 0.3, seed: 'seed_soy', disc: 'bean', tank: 'bean' },
+  feed_barley: { id: 'feed_barley', name: '饲料大麦', shape: 'ear', young: '#8a8f45', ripe: '#b59a63', stub: '#81683f', height: 0.9, row: 0.4, along: 0.28, seed: 'seed_barley', disc: 'grain', tank: 'grain' },
+  cabbage: { id: 'cabbage', name: '结球甘蓝', shape: 'rosette', young: '#8fbbad', ripe: '#52747e', stub: '#6f6a61', height: 0.45, row: 0.7, along: 0.55, seed: 'seedling_cabbage' },
 };
 
-for (const [id, def] of Object.entries(SURFACE_CROPS)) {
-  def.id = id;
-  def.logicId = 'crop_' + id;
+function playableFromMeta(meta) {
+  const doc = placeholderFieldDoc(meta);
+  const play = compilePlayable(doc, meta);
+  play.stageOrigin = 'repo';
+  return play;
 }
 
-SURFACE_CROPS.potato.seed = 'seed';
-SURFACE_CROPS.potato.seedQty = 1;
-SURFACE_CROPS.potato.stageOrigin = 'repo';
-SURFACE_CROPS.potato.planLabel = '种' + (SURFACE_CROPS.potato.displayName || POTATO_NAME);
+export const SURFACE_CROPS = {
+  potato: playableFromMeta(CROP_META.potato),
+  soy: playableFromMeta(CROP_META.soy),
+  feed_barley: playableFromMeta(CROP_META.feed_barley),
+  cabbage: playableFromMeta(CROP_META.cabbage),
+};
 
 // 工坊覆写和仓库默认都走这一份。stages / jobs 就地换掉，已经拿着这两条数组的钟不用重新取对象。
 export function installPotatoProfile(profile, origin) {
@@ -264,10 +171,12 @@ export function installPotatoProfile(profile, origin) {
   dest.maturity = profile.maturity;
   dest.hold = profile.hold;
   dest.rotAt = profile.rotAt;
-  dest.profile = 'potato-b';
+  dest.cycle = profile.cycle;
+  dest.profile = profile.profile || null;
   dest.displayName = profile.displayName || POTATO_NAME;
   dest.planLabel = '种' + dest.displayName;
   dest.visual = profile.visual;
+  dest.slotted = true;
   dest.stageOrigin = origin === 'workshop' ? 'workshop' : 'repo';
   return dest;
 }
@@ -295,20 +204,13 @@ export function potatoDrawLooks() {
   };
 }
 export function potatoProfileFromRaw(raw) {
-  return potatoFromProfile(parseFieldStageDoc(raw));
+  const play = compilePlayable(raw, CROP_META.potato);
+  play.slotted = true;
+  return play;
 }
 export function shippedPotatoProfile() {
-  return potatoFromProfile(potatoBSource);
+  return playableFromMeta(CROP_META.potato);
 }
-SURFACE_CROPS.soy.seed = 'seed_soy';
-SURFACE_CROPS.soy.seedQty = 1;
-SURFACE_CROPS.soy.planLabel = '种大豆';
-SURFACE_CROPS.feed_barley.seed = 'seed_barley';
-SURFACE_CROPS.feed_barley.seedQty = 1;
-SURFACE_CROPS.feed_barley.planLabel = '种饲料大麦';
-SURFACE_CROPS.cabbage.seed = 'seedling_cabbage';
-SURFACE_CROPS.cabbage.seedQty = 1;
-SURFACE_CROPS.cabbage.planLabel = '种结球甘蓝';
 
 // 开局四台机器仍用原来的 kind，好让机库存档和分田测试不用改下标。
 // 画面用 logicId 和当前挂具，网格是工坊锁定的低模剪影。
@@ -356,60 +258,6 @@ export const PLATFORM_CAPS = {
   transplanter: [{ id: 'transplant' }],
   orbit_boom: [{ id: 'spray_boom' }],
 };
-
-const JOB_CAP = {
-  potato_base_fert: { cap: 'fertilize', load: 'fertilizer' },
-  potato_rotavate: { caps: ['till_rotary', 'till_subsoil'] },
-  potato_plant: { cap: 'plant_potato', load: 'seed' },
-  potato_shallow: { cap: 'cultivate' },
-  potato_hill: { cap: 'cultivate' },
-  potato_topdress: { cap: 'fertilize', load: 'fertilizer' },
-  potato_scout: { cap: 'scout' },
-  potato_treat: { cap: 'pest_treat', load: 'pest' },
-  potato_haulm: { cap: 'haulm' },
-  potato_harvest: { cap: 'harvest_potato' },
-  potato_clear: { caps: ['cultivate', 'till_rotary'] },
-  soy_base_fert: { cap: 'fertilize', load: 'fertilizer' },
-  soy_rotavate: { cap: 'till_rotary' },
-  soy_plant: { cap: 'seed', disc: 'bean', load: 'seed_soy' },
-  soy_weed: { cap: 'cultivate' },
-  soy_topdress: { cap: 'fertilize', load: 'fertilizer' },
-  soy_scout: { cap: 'scout' },
-  soy_treat: { cap: 'pest_treat', load: 'pest' },
-  soy_harvest: { cap: 'harvest_combine', tank: 'bean' },
-  soy_clear: { caps: ['cultivate', 'till_rotary'] },
-  barley_base_fert: { cap: 'fertilize', load: 'fertilizer' },
-  barley_rotavate: { cap: 'till_rotary' },
-  barley_plant: { cap: 'seed', disc: 'grain', load: 'seed_barley' },
-  barley_topdress: { cap: 'fertilize', load: 'fertilizer' },
-  barley_shallow: { cap: 'cultivate' },
-  barley_scout: { cap: 'scout' },
-  barley_treat: { cap: 'pest_treat', load: 'pest' },
-  barley_harvest: { cap: 'harvest_combine', tank: 'grain' },
-  barley_clear: { caps: ['cultivate', 'till_rotary'] },
-  cabbage_base_fert: { cap: 'fertilize', load: 'fertilizer' },
-  cabbage_rotavate: { cap: 'till_rotary' },
-  cabbage_bed: { cap: 'bed' },
-  cabbage_transplant: { cap: 'transplant', load: 'seedling_cabbage' },
-  cabbage_cultivate: { cap: 'cultivate' },
-  cabbage_topdress: { cap: 'fertilize', load: 'fertilizer' },
-  cabbage_scout: { cap: 'scout' },
-  cabbage_treat: { cap: 'pest_treat', load: 'pest' },
-  cabbage_harvest: { cap: 'harvest_cabbage' },
-  cabbage_clear: { cap: 'cultivate' },
-};
-
-for (const def of Object.values(SURFACE_CROPS)) {
-  for (const job of def.jobs) {
-    const extra = JOB_CAP[job.id];
-    if (!extra) continue;
-    if (extra.cap) job.cap = extra.cap;
-    if (extra.caps) job.caps = extra.caps;
-    if (extra.load) job.load = extra.load;
-    if (extra.disc) job.disc = extra.disc;
-    if (extra.tank) job.tank = extra.tank;
-  }
-}
 
 function wantedCaps(job) {
   if (!job) return null;
@@ -500,9 +348,10 @@ export function auditDispatch(cropId, day, opts = {}) {
   return def.jobs.filter(job => {
     if (job.auto || job.drone || job.spray) return false;
     if (done && done[job.id]) return false;
-    if (job.afterHarvest) return harvested;
-    if (!planted) return job.from <= 0;
-    return day >= job.from && day < job.to;
+    if (job.window?.when === 'after') return harvested;
+    if (job.window?.when === 'before') return !planted;
+    if (!planted) return false;
+    return day >= job.window.from && day < job.window.to;
   }).map(job => ({
     id: job.id,
     name: job.name,

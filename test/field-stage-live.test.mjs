@@ -38,13 +38,13 @@ test('a workshop potato doc renames the stage and moves the rot day', () => {
     const def = cropDef('potato');
     assert.equal(def.stageOrigin, 'workshop');
     assert.equal(stageBadge(), '工坊覆写');
-    assert.equal(def.stages.find(s => s.id === 'potato_emerg').name, '出苗工坊');
-    assert.equal(def.stages.find(s => s.id === 'potato_emerg').days, 20);
-    assert.equal(def.maturity, 77 + 5);
-    assert.equal(def.rotAt, 96 + 5 + 4);
+    assert.equal(def.stages.find(s => s.id === 'emerg').name, '出苗工坊');
+    assert.equal(def.stages.find(s => s.id === 'emerg').days, 20);
+    assert.equal(def.maturity, 82);
+    assert.equal(def.rotAt, 105);
     const crop = CROPS.find(c => c.id === 'potato');
     assert.equal(crop.days, def.maturity);
-    assert.equal(crop.stages.find(s => s.id === 'potato_emerg').name, '出苗工坊');
+    assert.equal(crop.stages.find(s => s.id === 'emerg').name, '出苗工坊');
     assert.equal(SURFACE_CROPS.soy.jobs, soyJobs);
     assert.equal(SURFACE_CROPS.soy.maturity, soyMaturity);
     assert.match(crop.yieldNote, /工坊覆写/);
@@ -52,10 +52,11 @@ test('a workshop potato doc renames the stage and moves the rot day', () => {
     revertPotatoStages();
     bindPotatoClock();
   }
-  assert.equal(cropDef('potato').maturity, 77);
-  assert.equal(cropDef('potato').rotAt, 96);
+  assert.equal(cropDef('potato').maturity, 43);
+  assert.equal(cropDef('potato').rotAt, 59);
   assert.equal(stageBadge(), '仓库默认');
-  assert.equal(CROPS.find(c => c.id === 'potato').stages.find(s => s.id === 'potato_emerg').name, '出苗');
+  assert.equal(CROPS.find(c => c.id === 'potato').stages.find(s => s.id === 'B').name, '小植株');
+  assert.equal(CROPS.find(c => c.id === 'potato').stages.some(s => s.id === 'potato_emerg'), false);
 });
 
 test('a workshop name and stage look reach the dock label and the field paint table', () => {
@@ -130,7 +131,7 @@ test('boot reads the workshop store and repo skips it', () => {
     assert.equal(booted.ok, true);
     assert.equal(booted.origin, 'workshop');
     bindPotatoClock();
-    assert.equal(cropDef('potato').stages.find(s => s.id === 'potato_emerg').name, '出苗工坊');
+    assert.equal(cropDef('potato').stages.find(s => s.id === 'emerg').name, '出苗工坊');
   } finally {
     revertPotatoStages();
     bindPotatoClock();
@@ -167,13 +168,13 @@ test('a store without a potato doc names what it found', () => {
   assert.match(applied.message, /soy/);
 });
 
-test('a potato doc missing emerg names the stage', () => {
+test('a potato op pointing at a missing stage names that stage', () => {
   const doc = structuredClone(potatoB);
-  doc.stages = doc.stages.filter(s => s.id !== 'emerg');
-  doc.chain = doc.chain.filter(id => id !== 'emerg');
+  const op = doc.ops.find(o => o.id === 'potato_shallow');
+  op.stage = 'no-such';
   const applied = applyStagePayload(doc);
   assert.equal(applied.ok, false);
-  assert.match(applied.message, /emerg/);
+  assert.match(applied.message, /no-such|作业对不上阶段/);
   assert.equal(cropDef('potato').stageOrigin, 'repo');
 });
 

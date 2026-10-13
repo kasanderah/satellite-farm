@@ -75,7 +75,6 @@
   "stages": [
     {
       "id": "O",
-      "legacyId": "potato_till",
       "name": "空地",
       "kind": "idle",
       "days": 4,
@@ -169,7 +168,6 @@
     },
     {
       "id": "A",
-      "legacyId": "potato_plant",
       "name": "播种后",
       "kind": "growth",
       "days": 3,
@@ -206,7 +204,6 @@
     },
     {
       "id": "emerg",
-      "legacyId": "potato_emerg",
       "name": "出苗",
       "kind": "growth",
       "days": 15,
@@ -234,7 +231,6 @@
     },
     {
       "id": "hill",
-      "legacyId": "potato_hill",
       "name": "培土",
       "kind": "growth",
       "days": 12,
@@ -316,7 +312,6 @@
     },
     {
       "id": "bulk",
-      "legacyId": "potato_bulk",
       "name": "膨大",
       "kind": "growth",
       "days": 40,
@@ -366,7 +361,6 @@
     },
     {
       "id": "haulm",
-      "legacyId": "potato_haulm",
       "name": "杀秧",
       "kind": "growth",
       "days": 7,
@@ -394,7 +388,6 @@
     },
     {
       "id": "D",
-      "legacyId": "potato_harvest",
       "name": "待收获",
       "kind": "growth",
       "days": 11,
@@ -447,7 +440,6 @@
     },
     {
       "id": "E",
-      "legacyId": "potato_clear",
       "name": "收获后",
       "kind": "post",
       "days": 3,
@@ -492,8 +484,6 @@
       "stage": "O",
       "machine": "impl_fertilizer",
       "extensions": {
-        "legacyStage": "potato_till",
-        "legacyJob": "potato_base_fert",
         "required": true,
         "impl": "impl_fertilizer",
         "implAny": null,
@@ -529,8 +519,6 @@
       "stage": "O",
       "machine": "impl_rotavator",
       "extensions": {
-        "legacyStage": "potato_till",
-        "legacyJob": "potato_rotavate",
         "required": true,
         "impl": null,
         "implAny": [
@@ -572,8 +560,6 @@
       "stage": "O",
       "machine": "impl_fertilizer",
       "extensions": {
-        "legacyStage": null,
-        "legacyJob": null,
         "required": false,
         "impl": "impl_fertilizer",
         "implAny": null,
@@ -609,8 +595,6 @@
       "stage": "*",
       "machine": "impl_rotavator",
       "extensions": {
-        "legacyStage": null,
-        "legacyJob": null,
         "required": false,
         "impl": "impl_rotavator",
         "implAny": null,
@@ -646,8 +630,6 @@
       "stage": "O",
       "machine": "impl_potato_planter",
       "extensions": {
-        "legacyStage": "potato_plant",
-        "legacyJob": "potato_plant",
         "required": true,
         "impl": "impl_potato_planter",
         "implAny": null,
@@ -683,8 +665,6 @@
       "stage": "emerg",
       "machine": "impl_cultivator",
       "extensions": {
-        "legacyStage": "potato_emerg",
-        "legacyJob": "potato_shallow",
         "required": true,
         "impl": "impl_cultivator",
         "implAny": null,
@@ -720,8 +700,6 @@
       "stage": "hill",
       "machine": "impl_cultivator",
       "extensions": {
-        "legacyStage": "potato_hill",
-        "legacyJob": "potato_hill",
         "required": true,
         "impl": "impl_cultivator",
         "implAny": null,
@@ -757,8 +735,6 @@
       "stage": "hill",
       "machine": "impl_fertilizer",
       "extensions": {
-        "legacyStage": "potato_hill",
-        "legacyJob": "potato_topdress",
         "required": true,
         "impl": "impl_fertilizer",
         "implAny": null,
@@ -794,8 +770,6 @@
       "stage": "bulk",
       "machine": "irrig_net",
       "extensions": {
-        "legacyStage": "potato_bulk",
-        "legacyJob": "potato_irrigate",
         "required": true,
         "impl": null,
         "implAny": null,
@@ -831,8 +805,6 @@
       "stage": "bulk",
       "machine": "drone_scout",
       "extensions": {
-        "legacyStage": "potato_bulk",
-        "legacyJob": "potato_scout",
         "required": false,
         "impl": null,
         "implAny": null,
@@ -868,8 +840,6 @@
       "stage": "bulk",
       "machine": "drone_treat",
       "extensions": {
-        "legacyStage": "potato_bulk",
-        "legacyJob": "potato_treat",
         "required": false,
         "impl": null,
         "implAny": null,
@@ -905,8 +875,6 @@
       "stage": "haulm",
       "machine": "impl_haulm",
       "extensions": {
-        "legacyStage": "potato_haulm",
-        "legacyJob": "potato_haulm",
         "required": true,
         "impl": "impl_haulm",
         "implAny": null,
@@ -942,8 +910,6 @@
       "stage": "D",
       "machine": "harvester_potato",
       "extensions": {
-        "legacyStage": "potato_harvest",
-        "legacyJob": "potato_harvest",
         "required": true,
         "impl": null,
         "implAny": null,
@@ -979,8 +945,6 @@
       "stage": "E",
       "machine": "impl_cultivator",
       "extensions": {
-        "legacyStage": "potato_clear",
-        "legacyJob": "potato_clear",
         "required": true,
         "impl": null,
         "implAny": [
@@ -1022,8 +986,6 @@
       "stage": "E",
       "machine": "impl_potato_planter",
       "extensions": {
-        "legacyStage": null,
-        "legacyJob": null,
         "required": false,
         "impl": "impl_potato_planter",
         "implAny": null,

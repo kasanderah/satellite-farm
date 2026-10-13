@@ -1,5 +1,5 @@
-// 可玩页读工坊存下的田间阶段。解析只走 parseFieldStageDoc，钟和派工仍是土豆 B 那条。
-// 大豆、大麦、甘蓝不从这份存储里换表。
+// 可玩页读工坊存下的田间阶段。解析和派工都走同一份编译：阶段对齐，作业窗口。
+// 这份存储只换土豆。大豆、大麦、甘蓝用仓库里的占位文档，不从这里换表。
 //
 // 工坊「保存」写入 localStorage `ringsheaf.assetlab.fieldStages.v1`，形状是
 // `{ schema, cropId, crops: { potato: doc } }`。工坊「下载」是单份 doc。

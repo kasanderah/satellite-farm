@@ -69,6 +69,7 @@ const U = {
   uPenumbra: { value: 8 * DEG },
   uLocalDay: { value: 1 },
   uMirrorOn: { value: 1 },
+  uLockDay: { value: 0 },
 };
 const POT_SLOTS = 10;
 const potTintData = new Float32Array(POT_SLOTS * 3 * 4);
@@ -337,7 +338,7 @@ MAT.ground.onBeforeCompile = (s) => {
   s.fragmentShader = s.fragmentShader
     .replace('#include <common>', `#include <common>
 varying vec3 vWP;
-uniform float uTime, uSunTan, uCarto, uMap, uNight, uCamDist, uCutOn, uSelOn, uOpen, uDayCenter, uCirc, uHalfDay, uPenumbra, uLocalDay, uMirrorOn; uniform vec2 uSunXZ; uniform vec4 uPlantWin, uCut, uSel, uPlot;
+uniform float uTime, uSunTan, uCarto, uMap, uNight, uCamDist, uCutOn, uSelOn, uOpen, uDayCenter, uCirc, uHalfDay, uPenumbra, uLocalDay, uMirrorOn, uLockDay; uniform vec2 uSunXZ; uniform vec4 uPlantWin, uCut, uSel, uPlot;
 ${Object.keys(GC).map(k => 'uniform vec3 g_' + k + ';').join('\n')}
 ${NOISE}
 ${FARM}
@@ -707,7 +708,7 @@ vec3 farmAlbedo(vec2 p){
     .replace('#include <normal_fragment_begin>', '#include <normal_fragment_begin>\n normal = normalize(normal + (viewMatrix * vec4(gTilt.x, 0., gTilt.y, 0.)).xyz);')
     .replace('#include <lights_fragment_begin>', THREE.ShaderChunk.lights_fragment_begin.replace('getDirectionalLightInfo( directionalLight, directLight );', 'getDirectionalLightInfo( directionalLight, directLight );\n directLight.color *= gShadow;'))
     .replace('#include <opaque_fragment>', `outgoingLight = mix(outgoingLight, gOv, gOvA);
- if (uMirrorOn > 0.5) {
+ if (uMirrorOn > 0.5 && uLockDay < 0.5) {
    float band = mix(0.1, 1.0, mirrorDay(vWP.x));
    outgoingLight *= band / max(uLocalDay, 0.1);
  }
@@ -1800,7 +1801,7 @@ addEventListener('keydown', e => {
   if ('1234'.includes(e.key)) gotoTier(+e.key);
 });
 addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
-let nightT = Q.has('night') ? 1 : 0, mapT = Q.has('map') ? 1 : 0;
+let nightT = Q.has('night') ? 1 : 0, mapT = Q.has('map') ? 1 : 0, lockDay = false;
 U.uNight.value = nightT; U.uMap.value = mapT;
 
 // ---------------- 后期：Render → GTAO → Bloom → 移轴 → Output(AgX) → SMAA → 暗角/颗粒 ----------------
@@ -2516,7 +2517,7 @@ function updateDock() {
   let stat = selNote;
   if (!stat) {
     if (!f.owned) stat = '邻区快照 · 只读';
-    else if (watch?.waiting && watch.phase === 'potato_till') stat = `${CROPS[f.crop].name} · 整地空田 · 生长链要等薯播写完`;
+    else if (watch?.waiting && watch.phase === 'O') stat = `${CROPS[f.crop].name} · 整地空田 · 生长链要等播种写完`;
     else if (watch?.waiting) stat = `${CROPS[f.crop].name} · 已规划 · 等第一趟作业，生长还没计时`;
     else if (watch?.failed) stat = `${CROPS[f.crop].name} · 烂在地里 · 没人收，不入仓`;
     else if (watch && watch.planted === false) stat = `${CROPS[f.crop].name} · ${watch.label} · 播种还没走完 · 第 ${Math.floor(watch.day)} 日`;
@@ -2753,6 +2754,15 @@ function paintPause() {
   $('pause').classList.toggle('on', paused);
   paintWorldClock();
 }
+function paintLockDay() {
+  const btn = $('lock-day');
+  if (!btn) return;
+  btn.textContent = lockDay ? '已锁白天' : '锁定白天';
+  btn.classList.toggle('on', lockDay);
+  btn.setAttribute('aria-pressed', lockDay ? 'true' : 'false');
+}
+$('lock-day').addEventListener('click', () => { lockDay = !lockDay; paintLockDay(); });
+paintLockDay();
 $('pause').addEventListener('click', () => { setPaused(!paused); paintPause(); });
 function askReset(on) { $('admin').classList.toggle('on-reset', on); }
 $('reset').addEventListener('click', () => { $('reset-ask').textContent = RESET_ASK; askReset(true); });
@@ -2939,9 +2949,11 @@ function frame(now) {
   sky.material.uniforms.uSpin.value = t * RING_OMEGA;
   const insideDeck = camS.deck && cam.position.y < 2;
   const mirrorOn = viewLayer === 'surface' && !insideDeck;
-  const dayAmt = mirrorOn ? ((nightT > 0.5) ? 0 : sectorLight(camS.x, worldDay)) : 1;
+  const sector = (nightT > 0.5) ? 0 : sectorLight(camS.x, worldDay);
+  const dayAmt = mirrorOn ? (lockDay ? 1 : sector) : 1;
   U.uDayCenter.value = dayCenter(worldDay);
   U.uMirrorOn.value = mirrorOn ? 1 : 0;
+  U.uLockDay.value = lockDay ? 1 : 0;
   U.uNight.value += ((mirrorOn ? 1 - dayAmt : 0) - U.uNight.value) * Math.min(1, dt * 2);
   U.uMap.value += (mapT - U.uMap.value) * Math.min(1, dt * 3);
   const nt = U.uNight.value;
@@ -3166,6 +3178,8 @@ window.__farm = {
   get onDeck() { return !!camS.deck; },
   snapshot: exportSnapshot, plant: doPlant, select: (i, j) => selectField(fieldAt(i, j)),
   setTimeScale, setPaused,
+  setLockDay(on) { lockDay = !!on; paintLockDay(); },
+  get lockDay() { return lockDay; },
   get selected() { return selected; },
   get worldDay() { return worldDay; },
   setWorldDay,

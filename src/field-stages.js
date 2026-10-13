@@ -119,6 +119,9 @@ function opsFor(crop) {
   const sowName = crop.id === 'cabbage' ? '定植' : '播种';
   return [
     { id: 'sow', name: sowName, kind: 'required', via: 'sow', stage: 'O', requiresMask: false, requiresUnlocked: true, writesMask: true, locksUnswept: true, sweepDays: 2, machine: planter },
+    { id: 'weed', name: '中耕', kind: 'optional', via: null, stage: 'B', variant: null, requiresMask: true, requiresUnlocked: false, writesMask: false, locksUnswept: false, sweepDays: 1.6, machine: 'impl_cultivator' },
+    { id: 'scout', name: '侦察', kind: 'optional', via: null, stage: 'C', variant: null, requiresMask: true, requiresUnlocked: false, writesMask: false, locksUnswept: false, sweepDays: 1, machine: 'drone_scout', drone: true },
+    { id: 'treat', name: '植保', kind: 'optional', via: null, stage: 'C', variant: null, requiresMask: true, requiresUnlocked: false, writesMask: false, locksUnswept: false, sweepDays: 1, machine: 'drone_treat', drone: true },
     { id: 'water', name: '喷水', kind: 'optional', via: null, stage: 'A', variant: 'A1', requiresMask: true, requiresUnlocked: false, writesMask: false, locksUnswept: false, sweepDays: 1.4, machine: 'impl_sprayer' },
     { id: 'fertilize', name: '施肥', kind: 'optional', via: null, stage: 'A', variant: 'A2', requiresMask: true, requiresUnlocked: false, writesMask: false, locksUnswept: false, sweepDays: 1.4, machine: 'impl_fertilizer' },
     { id: 'spray', name: '喷药', kind: 'optional', via: null, stage: 'C', variant: 'C1', requiresMask: true, requiresUnlocked: false, writesMask: false, locksUnswept: false, sweepDays: 1.4, machine: 'impl_sprayer' },
@@ -229,6 +232,108 @@ export function placeholderFieldDoc(crop) {
     },
   };
   return rebuildNaturalEdges(doc);
+}
+
+// 作物文档 → 总周期 → 阶段首尾相接。O、E 不进这口钟。对不齐就抛错，不另造一张旧日历。
+export function alignFieldCalendar(doc) {
+  if (!doc || !Array.isArray(doc.stages) || !Array.isArray(doc.chain)) {
+    throw new Error('田间配置对不齐：缺阶段或生长链');
+  }
+  const byId = new Map(doc.stages.map(s => [s.id, s]));
+  const chain = doc.chain;
+  if (!chain.length || chain[0] !== 'A' || chain[chain.length - 1] !== 'D') {
+    throw new Error('生长链要从 A 排到 D');
+  }
+  const seen = new Set();
+  const placed = [];
+  let cursor = 0;
+  for (const id of chain) {
+    if (seen.has(id)) throw new Error('生长链重复 ' + id);
+    seen.add(id);
+    const row = byId.get(id);
+    if (!row) throw new Error('生长链缺 ' + id);
+    const days = Number(row.days);
+    if (!(days > 0)) throw new Error('阶段 ' + id + ' 没有时长');
+    const from = cursor;
+    cursor += days;
+    placed.push({ id, from, to: cursor, days, row });
+  }
+  for (let i = 1; i < placed.length; i++) {
+    if (placed[i].from !== placed[i - 1].to) throw new Error('阶段 ' + placed[i].id + ' 和上一段接不上');
+  }
+  const cycle = cursor;
+  if (placed[0].from !== 0 || placed[placed.length - 1].to !== cycle) {
+    throw new Error('总周期和阶段加总对不上');
+  }
+  const idle = byId.get('O');
+  const post = byId.get('E');
+  if (!idle) throw new Error('阶段缺 O');
+  if (!post) throw new Error('阶段缺 E');
+  const hold = placed[placed.length - 1];
+  const variants = hold.row.variants || [];
+  const d1 = variants.find(v => v.id === 'D1' && v.auto);
+  const d2 = variants.find(v => v.id === 'D2' && v.auto);
+  const over = d1 ? Math.max(0, Number(d1.days) || 0) : 0;
+  const rotTail = d2 ? Math.max(0, Number(d2.days) || 0) : 0;
+  return {
+    cycle,
+    placed,
+    idle,
+    post,
+    maturity: hold.from,
+    hold: hold.days,
+    rotAt: hold.to + over + rotTail,
+    d1,
+    d2,
+  };
+}
+
+// 每道工的窗口必须落在它的阶段里。收获窗可以盖住 D 的过熟和烂地，因为那仍是 D。
+export function jobWindows(doc, aligned) {
+  const stageOf = id => aligned.placed.find(s => s.id === id) || null;
+  const hold = aligned.placed[aligned.placed.length - 1];
+  const out = [];
+  let fallback = 0;
+  for (const op of doc.ops || []) {
+    if (!op || op.reserved) continue;
+    const ext = op.extensions || {};
+    if (ext.framework) continue;
+    if (op.stage === '*') continue;
+    const writesMask = !!op.writesMask;
+    const harvest = ext.harvest === true || op.via === 'harvest';
+    let window;
+    if (writesMask || op.stage === 'O') {
+      window = { when: 'before', stage: 'O', from: 0, to: 0 };
+    } else if (op.stage === 'E' || ext.afterHarvest === true) {
+      const from = hold.to;
+      const days = Number(aligned.post.days) || 0;
+      window = { when: 'after', stage: 'E', from, to: from + days };
+    } else {
+      const placed = stageOf(op.stage);
+      if (!placed) throw new Error('作业对不上阶段 ' + (op.stage || op.id || op.name || ''));
+      let from = placed.from;
+      let to = placed.to;
+      if (op.window && Number.isFinite(+op.window.from) && Number.isFinite(+op.window.to)) {
+        from = placed.from + Number(op.window.from);
+        to = placed.from + Number(op.window.to);
+        if (from < placed.from || to > placed.to || !(to > from)) {
+          throw new Error('作业窗口越出阶段 ' + (op.id || op.name || op.stage));
+        }
+      } else if (harvest && placed.id === hold.id) {
+        to = aligned.rotAt;
+      }
+      if (!(to > from) || from < placed.from || (to > placed.to && !(harvest && placed.id === hold.id))) {
+        throw new Error('作业窗口越出阶段 ' + (op.id || op.name || op.stage));
+      }
+      window = { when: 'clock', stage: placed.id, from, to };
+    }
+    const order = Number.isFinite(+ext.order) ? +ext.order : fallback;
+    fallback += 1;
+    out.push({ op, window, order });
+  }
+  const rank = { before: 0, clock: 1, after: 2 };
+  out.sort((a, b) => rank[a.window.when] - rank[b.window.when] || a.window.from - b.window.from || a.order - b.order);
+  return out;
 }
 
 export function rebuildNaturalEdges(doc) {

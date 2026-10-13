@@ -1,8 +1,8 @@
 # 田间阶段配置
 
-`parseFieldStageDoc` 读这份结构。可玩进程里的土豆已经按 `potato-b.json`（`profile: potato-b`，`logicId: crop_potato`）走钟、派工和田面。大豆、大麦、甘蓝仍用 `SURFACE_CROPS` 里的旧表。不要在农时里写死「收获后只能回空地」。
+`parseFieldStageDoc` 读这份结构。可玩进程里大豆、中熟商品薯、结球甘蓝、饲料大麦都用同一份编译：总周期、阶段首尾对齐、阶段内作业窗口。调度只吃窗口。仓库默认是占位文档。`potato-b.json` 是工坊里打开的土豆，重读之后也走这份编译，不再另有一张旧日历。不要在农时里写死「收获后只能回空地」。
 
-土豆的生长链从**薯播写完蒙版 M**起算。空地上的基肥和旋耕不启动这口钟。自然边 A→出苗→培土→膨大→杀秧→D 按世界日从这次播种走完算。成熟待收放满进 D1 过熟，再放满进 D2 烂地，到点还没收就烂在地里。侧卸写在起薯的备注里，留在收获机的执行链上，不单列田面阶段。同一阶段的培土和追肥按工单 id 各记各的进度。
+生长链从**播种或移栽写完蒙版 M**起算。空地上的作业不启动这口钟。自然边按世界日从这次播种走完。待收获放满进 D1 过熟，再放满进 D2 烂地，到点还没收就烂在地里。侧卸若要写，写在收获作业的 `extensions.note` 里，留在收获机的执行链上，不单列田面阶段。同一阶段里的几道工各记各的进度，窗口相同。
 
 阶段编辑器在这份构建的资产工坊里：打开 `asset-lab.html`，左侧 **田间 → 阶段编辑器**。默认土豆是 `potato-b.json`。保存写入 `ringsheaf.assetlab.fieldStages.v1`。可玩页 `index.html` 读同一把钥匙，刷新或点「重读工坊」后码头标 **工坊覆写**。
 
@@ -63,50 +63,40 @@ const doc = parseFieldStageDoc(JSON.parse(text));
 | `plant` | `shape` 是 `plantGeometry` 的 `bush` / `ear` / `stalk` / `tuft` / `rosette`。`height` `along` `row` 以及 `young` `ripe` `stub` |
 | `transition` | `template`：`instant` 瞬间，`scatter` 散点，`sweep` 沿行推进。`span`：`full` 铺满整个阶段，`window` 只用结束前的 `windowDays` |
 | `ops[]` | `kind`：`required` 走流程边（播种、收割），`optional` 只改当前阶段的变体、不改阶段，`special` 特殊（翻地、清田、预留复播）。`writesMask` 播种写下 M。`locksUnswept` 播种结束时把 M 外锁住。`breaksMask` 拆蒙版。`sweepDays` 是工坊扫完整趟的游戏日，不是阶段日历。`reserved: true` 的作业只有对应边启用才出现 |
-| `ops[].extensions` | 调度草稿，模拟器不读。见下面「调度草稿」。没有这些字段的作业照旧能播 |
+| `ops[].extensions` | 能力、是否必要、无人机、备注。窗口不写在这里，由阶段对齐推出来。见下面「调度」。工坊扫田不读这些字段 |
 | `edges[]` | 显式边。`when`：`natural` 到点，`auto` 久置或过熟，`process` 要农机扫过。`via` 对上 `ops.via`。`from: "*"` 表示任何阶段。默认启用 `E → O`（`via: clear`）。预留 `E → A`（`via: resow`，`enabled: false`） |
 | `machines` | 每台占位农机的 `sweepHead` / `sweepTail`，单位米，相对车体原点，正值在车头一侧。扫过的格子在车头点经过时改面。车尾只预留给主进程 |
 | `hooks.cancelWorkOrder` | 字符串 `cancelWorkOrder` |
 
 O 放满自己的 `days` 变成 O3。中耕、撒石灰会把变体改成 O1、O2，并从这次作业重新计算久置。D 放满 `days` 还不收，变成 D1，再放满 D1 的 `days` 变成 D2。E 不会自己离开，要走边上的流程。
 
-## 调度草稿
+## 调度
 
-`ops[].extensions` 给主进程派单用。工坊扫田只看 `kind`、`stage`、`variant`、`via` 和蒙版开关。
+玩法不另存一张工单表。`alignFieldCalendar` 把生长链从 A 排到 D，首尾相接，加总等于总周期。O 和 E 必须在，但不进这口钟。对不齐就抛错。
+
+`jobWindows` 给每道工一个窗口。写下蒙版的，或阶段是 O 的，在钟起之前。阶段是 E 的，在收获之后。其余必须落在它写的那个阶段里。待收获上的收获可以盖到 D1、D2，因为过熟和烂地仍是 D。`framework`、`reserved`、阶段 `*` 不进调度。
+
+工坊扫田只看 `kind`、`stage`、`variant`、`via` 和蒙版开关。
 
 | 字段 | 含义 |
 | --- | --- |
-| `required` | 旧表里的 ●。`true` 表示应该派这道工。时钟仍然往下走，不等它做完 |
+| `required` | `true` 表示这道工该做。时钟仍然往下走，不等它做完。漏做才扣产量 |
 | `impl` / `implAny` / `self` | 后挂具、多选一，或自走机械的 logic id |
 | `mode` | 挂具模式，如 `shallow`、`hill`、`residue` |
 | `cap` / `caps` | 能力 id。`caps` 是满足其中一项即可 |
 | `load` | 装载物，如 `seed`、`fertilizer`、`pest` |
 | `drone` | 只派无人机 |
 | `auto` | 水网之类自己发生，不派拖拉机 |
-| `plant` / `harvest` / `afterHarvest` | 这道工是播种、收获，或收获入仓之后才能做 |
-| `penalty` | 旧表必要工单的缺工系数，现在是 0.15 |
-| `legacyStage` / `legacyJob` | 对应 `SURFACE_CROPS` 的阶段 id 和工单 id |
-| `order` | 旧表里的先后 |
-| `framework` | `true` 表示这是编辑器自己的变体或预留边，不是旧日历里的工 |
+| `plant` / `harvest` | 这道工是播种，或收获 |
+| `penalty` | 必要工漏做时的缺工系数，默认 0.15 |
+| `order` | 同一窗口里的先后 |
+| `framework` | `true` 表示编辑器自己的变体或预留边，不进调度 |
 | `note` | 给人看的备注 |
 
 ## 土豆B
 
-`data/field-stages/potato-b.json` 的 `profile` 是 `potato-b`，`logicId` 仍是 `crop_potato`。工坊里的土豆打开的就是这份。`data/field-stages/potato.json` 仍是早先的占位链。
+`data/field-stages/potato-b.json` 的 `profile` 是 `potato-b`，`logicId` 仍是 `crop_potato`。工坊里的土豆打开的就是这份。可玩页仓库默认不是这份，是四作物共用的占位链。重读工坊时，这份也按上面的对齐和窗口编译，阶段 id 仍是文档里的 `A`、`emerg`、`hill`、`D`。
 
-时长是旧表 `round((lo+hi)/2)` 游戏日。侧卸不单列阶段，写在起薯的 `extensions.note`：执行链在收获机侧。
+侧卸不单列阶段，写在起薯的 `extensions.note`：执行链在收获机侧。
 
-`kind` 和旧表的 ● 不是同一个开关。薯播、起薯才是 `required`（要走流程边）。碎残、翻地、复播是 `special`。浅中耕、培土、追肥、灌溉、打秧在模拟器里是 `optional`（只改变体），但 `extensions.required` 仍是 `true`。
-
-| 旧阶段 | 中点 | 土豆B |
-| --- | --- | --- |
-| potato_till 整地空田 | 4 | O 空地。基肥、旋耕是 O 上的作业。O1 / O2 / O3 还在 |
-| potato_plant 播种 | 3 | 薯播把 O 扫成 A 播种后。A 的 3 日是这扇窗 |
-| potato_emerg 出苗 | 15 | `emerg`，插在 A 和 D 之间。浅中耕 |
-| potato_hill 培土 | 12 | `hill`。培土、追肥 |
-| potato_bulk 膨大 | 40 | `bulk`。灌溉 `auto`，侦察和植保 `drone` |
-| potato_haulm 杀秧 | 7 | `haulm`。打秧 |
-| potato_harvest 成熟待收 | 11 | D 待收获。起薯走 D→E。不管就 D1、D2 |
-| potato_clear 清田 | 3 | E 收获后。碎残默认开着，E→O。入仓后可提前做 |
-
-蒙版里走到 D 之前是 77 日，等于旧 `maturity` 81 再减去整地那 4 日。这四段都可以从生长链里拿掉。E→A 仍关着。
+薯播、起薯走流程边。浅中耕、培土、追肥、灌溉、打秧在工坊里只改变体；`extensions.required` 为 `true` 的，玩法里仍算必要工。生长链 A→emerg→hill→bulk→haulm→D 加到 D 之前是 77 日。E→A 仍关着。
