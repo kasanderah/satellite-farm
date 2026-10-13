@@ -13,15 +13,42 @@ export { FIELD_STAGE_STORE };
 
 function isPotatoDoc(doc, key) {
   if (!doc || typeof doc !== 'object' || Array.isArray(doc)) return false;
-  const id = String(doc.cropId || key || '');
+  const keyId = String(key || '');
+  const id = String(doc.cropId || '');
   const logic = String(doc.logicId || '');
-  return id === 'potato' || id === 'crop_potato' || logic === 'crop_potato' || logic === 'potato';
+  const profile = String(doc.profile || '');
+  // 显示名有时被写进 cropId。钥匙或 profile 仍是土豆时要认下来。
+  if (keyId === 'potato' || keyId === 'crop_potato') return true;
+  if (id === 'potato' || id === 'crop_potato') return true;
+  if (logic === 'crop_potato' || logic === 'potato') return true;
+  if (profile === 'potato-b') return true;
+  return false;
+}
+
+function payloadNote(raw) {
+  if (typeof raw === 'string') return '工坊存档多包了一层字符串';
+  if (!raw || typeof raw !== 'object') return '工坊存档不是对象';
+  if (raw.crops && typeof raw.crops === 'object' && !Array.isArray(raw.crops)) {
+    const found = Object.entries(raw.crops).map(([key, doc]) => {
+      if (!doc || typeof doc !== 'object') return key;
+      return key + ':' + (doc.cropId || doc.logicId || doc.profile || '无 id');
+    });
+    return '工坊存档里没有土豆。看到 ' + (found.join('、') || '空表');
+  }
+  if (Array.isArray(raw.stages)) {
+    return '这份田间配置认不出土豆。cropId=' + (raw.cropId || '空') + ' logicId=' + (raw.logicId || '空') + ' profile=' + (raw.profile || '空');
+  }
+  return '工坊存档里没有 crops，也没有 stages';
 }
 
 export function potatoDocFromPayload(raw) {
   if (!raw || typeof raw !== 'object') return null;
   if (raw.crops && typeof raw.crops === 'object' && !Array.isArray(raw.crops)) {
     for (const [key, doc] of Object.entries(raw.crops)) {
+      if (doc && typeof doc === 'object' && doc.crops && !Array.isArray(doc.stages)) {
+        const inner = potatoDocFromPayload(doc);
+        if (inner) return inner;
+      }
       if (isPotatoDoc(doc, key)) return doc;
     }
     return null;
@@ -32,7 +59,7 @@ export function potatoDocFromPayload(raw) {
 
 export function applyStagePayload(raw) {
   const doc = potatoDocFromPayload(raw);
-  if (!doc) return { ok: false, reason: 'empty' };
+  if (!doc) return { ok: false, reason: 'empty', message: payloadNote(raw) };
   let profile;
   try { profile = potatoProfileFromRaw(doc); }
   catch (err) { return { ok: false, reason: 'parse', message: err.message || '这份田间配置读不了' }; }
@@ -50,21 +77,26 @@ export function stageBadge() {
   return cropDef('potato')?.stageOrigin === 'workshop' ? '工坊覆写' : '仓库默认';
 }
 
+function unwrapStore(parsed) {
+  let value = parsed;
+  for (let i = 0; i < 2 && typeof value === 'string'; i++) value = JSON.parse(value);
+  return value;
+}
+
 export function readStageStore(storage) {
   if (!storage) return null;
-  try {
-    const raw = storage.getItem(FIELD_STAGE_STORE);
-    if (!raw) return null;
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
+  let raw;
+  try { raw = storage.getItem(FIELD_STAGE_STORE); }
+  catch { return null; }
+  if (!raw) return null;
+  try { return unwrapStore(JSON.parse(raw)); }
+  catch (err) { return { __parseError: err.message || 'JSON 读不了' }; }
 }
 
 export function writeStageStore(storage, doc) {
   let crops = {};
   const prev = readStageStore(storage);
-  if (prev?.crops && typeof prev.crops === 'object') crops = { ...prev.crops };
+  if (prev?.crops && typeof prev.crops === 'object' && !prev.__parseError) crops = { ...prev.crops };
   crops.potato = doc;
   const payload = { schema: FIELD_STAGE_SCHEMA, cropId: 'potato', crops };
   storage.setItem(FIELD_STAGE_STORE, JSON.stringify(payload));
@@ -94,6 +126,7 @@ export function bootFieldStageSource(storage, stagesParam) {
   if (stagesParam === 'repo') return { ok: true, origin: 'repo', skipped: true };
   const payload = readStageStore(storage);
   if (!payload) return { ok: true, origin: 'repo', skipped: true };
+  if (payload.__parseError) return { ok: false, reason: 'json', message: '工坊存档不是 JSON：' + payload.__parseError };
   const applied = applyStagePayload(payload);
   if (!applied.ok) return { ...applied, origin: cropDef('potato')?.stageOrigin === 'workshop' ? 'workshop' : 'repo' };
   return applied;

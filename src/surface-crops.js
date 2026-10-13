@@ -80,22 +80,31 @@ function stageLook(stage, fallbackRidge) {
 function potatoFromProfile(raw) {
   const doc = parseFieldStageDoc(raw);
   const stageOf = id => doc.stages.find(s => s.id === id);
-  const O = stageOf('O');
-  const A = stageOf('A');
-  const emerg = stageOf('emerg');
-  const hill = stageOf('hill');
-  const bulk = stageOf('bulk');
-  const haulm = stageOf('haulm');
-  const D = stageOf('D');
-  const E = stageOf('E');
-  const d1 = D.variants.find(v => v.id === 'D1');
-  const d2 = D.variants.find(v => v.id === 'D2');
+  const need = id => {
+    const row = stageOf(id);
+    if (!row) throw new Error('土豆阶段缺 ' + id);
+    return row;
+  };
+  const O = need('O');
+  const A = need('A');
+  const emerg = need('emerg');
+  const hill = need('hill');
+  const bulk = need('bulk');
+  const haulm = need('haulm');
+  const D = need('D');
+  const E = need('E');
+  const d1 = (D.variants || []).find(v => v.id === 'D1');
+  const d2 = (D.variants || []).find(v => v.id === 'D2');
   let cursor = 0;
   const win = {};
-  for (const id of doc.chain) {
+  for (const id of doc.chain || []) {
     const row = stageOf(id);
+    if (!row) throw new Error('土豆生长链缺 ' + id);
     win[id] = { from: cursor, to: cursor + row.days, days: row.days };
     cursor += row.days;
+  }
+  if (!win.A || !win.emerg || !win.hill || !win.bulk || !win.haulm || !win.D) {
+    throw new Error('土豆生长链要有 A、emerg、hill、bulk、haulm、D');
   }
   const overFrom = win.D.to;
   const overTo = overFrom + (d1?.days || 0);
@@ -128,6 +137,7 @@ function potatoFromProfile(raw) {
     const ext = op.extensions;
     const beforeClock = ext.legacyStage === 'potato_till' || !!op.writesMask;
     const span = beforeClock ? { from: 0, to: 0 } : open[ext.legacyStage];
+    if (!span) throw new Error('作业对不上阶段 ' + (op.name || op.id || ext.legacyStage || ''));
     return {
       id: op.id, name: op.name, stage: ext.legacyStage, from: span.from, to: span.to, order: ext.order ?? 0,
       required: !!ext.required, plant: !!ext.plant, harvest: !!ext.harvest, spray: false,

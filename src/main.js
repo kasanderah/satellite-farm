@@ -361,7 +361,7 @@ float potRidgeH(int slot, float t) {
   float u = f * f * (3.0 - 2.0 * f);
   return mix(a, b, u);
 }
-vec3 potPaint(int slot, float phase, float along, float spacing, float patchy, out float rough, out float crest, out float slopeH) {
+vec3 potPaint(int slot, float phase, float along, float spacing, float patchy, float rowFw, out float rough, out float crest, out float slopeH) {
   vec4 soilPx = texelFetch(uPotTint, ivec2(0, slot), 0);
   vec4 canPx = texelFetch(uPotTint, ivec2(1, slot), 0);
   float pscale = texelFetch(uPotTint, ivec2(2, slot), 0).r;
@@ -379,6 +379,10 @@ vec3 potPaint(int slot, float phase, float along, float spacing, float patchy, o
   float clump = smoothstep(0.12, 0.42, abs(fract(al) - 0.5));
   float alongVis = 1.0 - smoothstep(0.2, 0.65, fwidth(al));
   amt *= mix(1.0, clump, alongVis * plant);
+  // 远看垄挤成一条色带。盖度再高也留出地面色，进度条上的地面色才不会只停在条上。
+  float far = smoothstep(0.16, 0.48, rowFw);
+  float aerial = clamp(cover * 0.55, 0.0, 0.62);
+  amt = mix(amt, aerial, far);
   return mix(soilC, canC, amt);
 }
 float gShadow = 1.0, gRough = 0.92; vec2 gTilt = vec2(0.); vec3 gOv = vec3(0.); float gOvA = 0.;
@@ -505,8 +509,8 @@ vec3 farmAlbedo(vec2 p){
         int nxtSlot = int(min(float(slot) + 1.0, 9.0));
         float roughA, crestA, slopeA;
         float roughB, crestB, slopeB;
-        vec3 colA = potPaint(slot, phase, uv.x, P.w, patchy, roughA, crestA, slopeA);
-        vec3 colB = potPaint(nxtSlot, phase, uv.x, P.w, patchy, roughB, crestB, slopeB);
+        vec3 colA = potPaint(slot, phase, uv.x, P.w, patchy, fw, roughA, crestA, slopeA);
+        vec3 colB = potPaint(nxtSlot, phase, uv.x, P.w, patchy, fw, roughB, crestB, slopeB);
         col = colA;
         gRough = roughA;
         gTilt = acrossW * slopeA * rowVis;
@@ -782,7 +786,8 @@ function plantPatch(s, depth) {
 ${CURVE_DECL}
 ${NOISE}
 ${FARM}
-uniform float uTime, uCutOn; uniform vec4 uPlantWin, uCut;
+uniform float uTime, uCutOn, uPotOn; uniform vec4 uPlantWin, uCut;
+uniform sampler2D uPotTint;
 varying vec3 vCropCol;`).replace('#include <begin_vertex>', `#include <begin_vertex>
   vec4 io = modelMatrix * instanceMatrix * vec4(0., 0., 0., 1.);
   ivec2 fij; vec2 loc, bl; int kind = farmCell(io.xz, fij, loc, bl);
@@ -810,11 +815,18 @@ varying vec3 vCropCol;`).replace('#include <begin_vertex>', `#include <begin_ver
   vec4 P = uCropP[c];
   float hs = P.x * pow(max(sc, 0.), 0.85) * edge, ws = P.w * 2.4 * (0.35 + 0.65 * sc) * edge;
   transformed.xz *= ws; transformed.y *= hs;
-  float sw = sin(uTime * 1.6 + io.x * 0.31 + io.z * 0.17) + 0.5 * sin(uTime * 2.7 + io.x * 0.9);
-  transformed.x += sw * 0.06 * position.y * hs; transformed.z += sw * 0.03 * position.y * hs;
   vCropCol = mix(uCropYoung[c], uCropRipe[c], smoothstep(0.45, 1.0, gg));
-  if (stage > 3.5 && stage < 4.5 && position.y > 0.48) vCropCol = vec3(0.76, 0.64, 0.86);
-  if (stage > 4.5 && stage < 5.5) vCropCol = uCropStub[c];`)
+  if (uPotOn > 0.5 && int(P.z + 0.5) == 2 && stage >= 1.0) {
+    int slot = int(clamp(stage, 1.0, 9.0));
+    float pscale = max(texelFetch(uPotTint, ivec2(2, slot), 0).r, 0.08);
+    transformed *= pscale;
+    vCropCol = texelFetch(uPotTint, ivec2(1, slot), 0).rgb;
+  } else {
+    if (stage > 3.5 && stage < 4.5 && position.y > 0.48) vCropCol = vec3(0.76, 0.64, 0.86);
+    if (stage > 4.5 && stage < 5.5) vCropCol = uCropStub[c];
+  }
+  float sw = sin(uTime * 1.6 + io.x * 0.31 + io.z * 0.17) + 0.5 * sin(uTime * 2.7 + io.x * 0.9);
+  transformed.x += sw * 0.06 * position.y * hs; transformed.z += sw * 0.03 * position.y * hs;`)
     .replace('#include <project_vertex>', CURVE_PROJECT);
   if (!depth) s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vCropCol;')
     .replace('#include <color_fragment>', '#include <color_fragment>\n diffuseColor.rgb *= vCropCol * 1.08; { float lm = dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722)); diffuseColor.rgb = max(mix(vec3(lm), diffuseColor.rgb, 1.15), 0.); }');
@@ -2525,6 +2537,7 @@ function paintStageChrome(note) {
   if (label) label.innerHTML = `土豆阶段 · <b>${stageBadge()}</b>`;
   const err = $('stage-src-err');
   if (err) err.textContent = note || '';
+  plantWin = { x: 1e9, z: 1e9, w: 0 };
   document.querySelectorAll('#selbtns button').forEach(b => {
     const def = cropDef(b.dataset.crop);
     const crop = CROPS.find(c => c.id === b.dataset.crop);
@@ -2577,12 +2590,16 @@ function stageParamIsUrl(param) {
 }
 function bootStagesSync() {
   const param = Q.get('stages');
-  if (stageParamIsUrl(param)) return;
+  if (stageParamIsUrl(param)) return '';
   const booted = bootFieldStageSource(localStorage, param === 'repo' ? 'repo' : null);
-  if (booted.origin === 'workshop') bindPotatoClock();
-  else if (!booted.ok) paintStageChrome(booted.message || '工坊存档读不了，仍用仓库默认');
+  if (booted.origin === 'workshop') {
+    bindPotatoClock();
+    return '';
+  }
+  if (!booted.ok) return booted.message || '工坊存档读不了，仍用仓库默认';
+  return '';
 }
-bootStagesSync();
+const bootStageNote = bootStagesSync();
 $('kpi').innerHTML = `<div class="k-rev"><small>营收</small><b class="hv" id="kpi-rev">0</b></div><div class="k-day"><small>世界日</small><b id="kpi-day">0</b></div><div class="k-time"><small>时刻</small><span class="clk"><i class="face" id="kpi-face" aria-hidden="true"><i id="kpi-hh"></i><i id="kpi-mh"></i></i><b id="kpi-hm">00:00</b></span></div><div class="k-act"><small>作业</small><b class="hv" id="kpi-act">0</b><em>/ ${rigs.length}</em></div>`;
 $('dock').innerHTML = `<div class="who"><b id="selid"></b><span id="selstat"></span></div><div id="bar"><i id="selbar"></i></div><div class="row" id="selbtns"></div>`;
 for (const c of CROPS) if (c.plantable) {
@@ -2694,7 +2711,7 @@ $('stage-file').addEventListener('change', () => {
   reader.onload = () => adoptStageText(String(reader.result || ''), true);
   reader.readAsText(file);
 });
-paintStageChrome('');
+paintStageChrome(bootStageNote);
 if (stageParamIsUrl(Q.get('stages'))) {
   fetch(Q.get('stages')).then(res => {
     if (!res.ok) throw new Error('取不到阶段文件');

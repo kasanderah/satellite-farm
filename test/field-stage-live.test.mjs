@@ -5,7 +5,7 @@ import { cropDef, SURFACE_CROPS, potatoDrawLooks } from '../src/surface-crops.js
 import { CROPS, bindPotatoClock } from '../src/_shared.js';
 import {
   applyStagePayload, revertPotatoStages, potatoDocFromPayload, bootFieldStageSource,
-  writeStageStore, forgetPotatoStage, stageBadge, FIELD_STAGE_STORE,
+  writeStageStore, forgetPotatoStage, stageBadge, FIELD_STAGE_STORE, readStageStore,
 } from '../src/field-stage-live.js';
 
 function edited() {
@@ -78,6 +78,7 @@ test('a workshop name and stage look reach the dock label and the field paint ta
     assert.equal(crop.name, '阿巴阿巴');
     assert.equal(cropDef('potato').planLabel, '种阿巴阿巴');
     assert.equal(cropDef('potato').displayName, '阿巴阿巴');
+    assert.ok(crop.row < 0.5);
     const draw = potatoDrawLooks();
     assert.equal(draw.workshop, true);
     assert.equal(draw.displayName, '阿巴阿巴');
@@ -95,6 +96,7 @@ test('a workshop name and stage look reach the dock label and the field paint ta
   }
   assert.equal(CROPS.find(c => c.id === 'potato').name, '中熟商品薯');
   assert.equal(cropDef('potato').planLabel, '种中熟商品薯');
+  assert.ok(Math.abs(CROPS.find(c => c.id === 'potato').row - 0.9) < 0.05);
   assert.equal(potatoDrawLooks().workshop, false);
 });
 
@@ -137,6 +139,70 @@ test('boot reads the workshop store and repo skips it', () => {
   assert.equal(store.getItem(FIELD_STAGE_STORE), null);
   const empty = bootFieldStageSource(store, null);
   assert.equal(empty.skipped, true);
+});
+
+test('a potato key still applies when cropId was overwritten with the display name', () => {
+  const doc = edited();
+  doc.cropName = '阿巴阿巴';
+  doc.name = '阿巴阿巴';
+  doc.cropId = '阿巴阿巴';
+  delete doc.logicId;
+  doc.profile = 'potato-b';
+  const applied = applyStagePayload({ schema: 'ringsheaf.field-stage/1', cropId: 'potato', crops: { potato: doc } });
+  try {
+    assert.equal(applied.ok, true, applied.message);
+    bindPotatoClock();
+    assert.equal(CROPS.find(c => c.id === 'potato').name, '阿巴阿巴');
+    assert.equal(stageBadge(), '工坊覆写');
+  } finally {
+    revertPotatoStages();
+    bindPotatoClock();
+  }
+});
+
+test('a store without a potato doc names what it found', () => {
+  const applied = applyStagePayload({ crops: { soy: { cropId: 'soy', stages: [], edges: [] } } });
+  assert.equal(applied.ok, false);
+  assert.match(applied.message, /没有土豆/);
+  assert.match(applied.message, /soy/);
+});
+
+test('a potato doc missing emerg names the stage', () => {
+  const doc = structuredClone(potatoB);
+  doc.stages = doc.stages.filter(s => s.id !== 'emerg');
+  doc.chain = doc.chain.filter(id => id !== 'emerg');
+  const applied = applyStagePayload(doc);
+  assert.equal(applied.ok, false);
+  assert.match(applied.message, /emerg/);
+  assert.equal(cropDef('potato').stageOrigin, 'repo');
+});
+
+test('broken JSON is not treated as an empty browser', () => {
+  const store = memoryStore();
+  store.setItem(FIELD_STAGE_STORE, '{');
+  const booted = bootFieldStageSource(store, null);
+  assert.equal(booted.ok, false);
+  assert.match(booted.message, /JSON/);
+  assert.equal(booted.skipped, undefined);
+});
+
+test('a string-wrapped workshop save still loads', () => {
+  const store = memoryStore();
+  const doc = edited();
+  doc.cropName = '阿巴阿巴';
+  doc.name = '阿巴阿巴';
+  writeStageStore(store, doc);
+  store.setItem(FIELD_STAGE_STORE, JSON.stringify(store.getItem(FIELD_STAGE_STORE)));
+  assert.equal(typeof readStageStore(store).crops, 'object');
+  const booted = bootFieldStageSource(store, null);
+  try {
+    assert.equal(booted.ok, true, booted.message);
+    bindPotatoClock();
+    assert.equal(CROPS.find(c => c.id === 'potato').name, '阿巴阿巴');
+  } finally {
+    revertPotatoStages();
+    bindPotatoClock();
+  }
 });
 
 test('a broken workshop doc leaves the shipped potato in place', () => {

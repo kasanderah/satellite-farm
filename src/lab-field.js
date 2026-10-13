@@ -222,16 +222,20 @@ export function createFieldWorkshop(els) {
     } catch { /* 空浏览器 */ }
   }
 
-  function persist() {
+  function flushName() {
     const nameEl = panel.querySelector('#fs-new-name');
-    if (nameEl) {
-      const name = nameEl.value.trim();
-      if (name) {
-        const doc = current();
-        doc.cropName = name;
-        doc.name = name;
-      }
-    }
+    if (!nameEl) return;
+    const name = nameEl.value.trim();
+    if (!name) return;
+    const doc = current();
+    doc.cropName = name;
+    doc.name = name;
+    const opt = panel.querySelector('#fs-crop option[value="' + cropId + '"]');
+    if (opt) opt.textContent = name;
+  }
+
+  function persist() {
+    flushName();
     const payload = { schema: FIELD_STAGE_SCHEMA, cropId, crops: docs };
     localStorage.setItem(FIELD_STAGE_STORE, JSON.stringify(payload));
     note = '已存进这台浏览器';
@@ -715,6 +719,7 @@ ${variants}
   }
 
   function paintDynamic(rebuildLists) {
+    flushName();
     if (rebuildLists) {
       listSig = '';
       editorSig = '';
@@ -889,6 +894,7 @@ ${variants}
   }
 
   function download() {
+    flushName();
     const doc = current();
     const blob = new Blob([JSON.stringify(doc, null, 2) + '\n'], { type: 'application/json' });
     const a = document.createElement('a');

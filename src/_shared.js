@@ -353,6 +353,12 @@ export function bindPotatoClock() {
   c.days = def.maturity;
   c.season = def.rotAt;
   c.name = def.displayName || '中熟商品薯';
+  const visual = def.visual || {};
+  const rows = Math.max(4, Math.min(16, Math.round(+visual.rows) || 8));
+  const plantRow = Number.isFinite(+visual.plantRow) ? +visual.plantRow : 0.9;
+  c.row = plantRow * (8 / rows);
+  c.along = Number.isFinite(+visual.plantAlong) ? +visual.plantAlong : 0.4;
+  c.height = Number.isFinite(+visual.plantHeight) ? +visual.plantHeight : 0.55;
   const decorated = decorateStages(def);
   c.stages.splice(0, c.stages.length, ...decorated);
   for (const s of c.stages) PHASE_LABEL[s.id] = s.name;
