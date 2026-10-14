@@ -142,12 +142,43 @@ export function forgetPotatoStage(storage) {
   storage.setItem(FIELD_STAGE_STORE, JSON.stringify(prev));
 }
 
-// 仓库默认只停用这一轮的土豆覆写，不删 crops.potato。旁边的 custom1 留在库里，但不能冒充土豆槽。
+function potatoSlot(payload) {
+  const crops = payload?.crops;
+  if (!crops || typeof crops !== 'object' || Array.isArray(crops)) return null;
+  const slot = crops.potato || crops.crop_potato;
+  if (slot && typeof slot === 'object' && Array.isArray(slot.stages)) return slot;
+  return null;
+}
+
+// 土豆档丢了时，用上次成功读到的副本填回 potato 槽。custom1 不能来顶这个槽。
+function reinstatePotato(payload) {
+  if (potatoSlot(payload)) return false;
+  const keep = payload?.potatoKeep;
+  if (!keep || typeof keep !== 'object' || !Array.isArray(keep.stages)) return false;
+  if (!payload.crops || typeof payload.crops !== 'object' || Array.isArray(payload.crops)) payload.crops = {};
+  payload.crops.potato = keep;
+  return true;
+}
+
+function rememberPotato(storage, doc) {
+  if (!storage || !doc || !Array.isArray(doc.stages)) return;
+  const prev = readStageStore(storage);
+  if (!prev || prev.__parseError) return;
+  if (!prev.crops || typeof prev.crops !== 'object' || Array.isArray(prev.crops)) prev.crops = {};
+  prev.potatoKeep = doc;
+  if (!potatoSlot(prev)) prev.crops.potato = doc;
+  try { storage.setItem(FIELD_STAGE_STORE, JSON.stringify(prev)); } catch { /* 无痕模式 */ }
+}
+
+// 仓库默认只停用这一轮的土豆覆写，不删 crops.potato。另存 potatoKeep，就算槽被旧页面清掉，重读也能找回来。
+// 旁边的 custom1 留在库里，但不能冒充土豆槽。
 export function suspendPotatoStage(storage) {
   if (!storage) return { kept: false };
   const prev = readStageStore(storage);
   if (!prev || prev.__parseError || !prev.crops || typeof prev.crops !== 'object' || Array.isArray(prev.crops)) return { kept: false };
-  const kept = !!(prev.crops.potato || prev.crops.crop_potato);
+  const slot = potatoSlot(prev);
+  if (slot) prev.potatoKeep = slot;
+  const kept = !!(slot || (prev.potatoKeep && Array.isArray(prev.potatoKeep.stages)));
   prev.potatoSuspended = true;
   storage.setItem(FIELD_STAGE_STORE, JSON.stringify(prev));
   return { kept };
@@ -157,6 +188,7 @@ export function resumePotatoStage(storage) {
   if (!storage) return;
   const prev = readStageStore(storage);
   if (!prev || prev.__parseError || !prev.potatoSuspended) return;
+  reinstatePotato(prev);
   delete prev.potatoSuspended;
   storage.setItem(FIELD_STAGE_STORE, JSON.stringify(prev));
 }
@@ -169,7 +201,11 @@ export function bootFieldStageSource(storage, stagesParam) {
   if (!payload) return { ok: true, origin: 'repo', skipped: true };
   if (payload.__parseError) return { ok: false, reason: 'json', message: '工坊存档不是 JSON：' + payload.__parseError };
   if (payload.potatoSuspended) return { ok: true, origin: 'repo', skipped: true, suspended: true };
+  if (reinstatePotato(payload)) {
+    try { storage.setItem(FIELD_STAGE_STORE, JSON.stringify(payload)); } catch { /* 无痕模式 */ }
+  }
   const applied = applyStagePayload(payload);
   if (!applied.ok) return { ...applied, origin: cropDef('potato')?.stageOrigin === 'workshop' ? 'workshop' : 'repo' };
+  rememberPotato(storage, applied.doc);
   return applied;
 }

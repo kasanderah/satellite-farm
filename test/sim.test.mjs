@@ -1492,3 +1492,60 @@ test('shallow till after emergence paints only the swept lanes and keeps that co
     resetGame();
   }
 });
+
+test('a finished pass keeps its color after progress is cleared, and a narrow tool paints on its own width', () => {
+  resetGame();
+  const applied = applyStagePayload({ schema: 'ringsheaf.field-stage/1', cropId: 'potato', crops: { potato: potatoB } });
+  try {
+    assert.equal(applied.ok, true, applied.message);
+    bindPotatoClock();
+    setPaused(false);
+    stores.seed = 2;
+    stores.fertilizer = 2;
+    const f = fieldAt(focus.i, focus.j);
+    assert.equal(plantField(f, 'potato').ok, true);
+    f.jobS.potato_base_fert = 999;
+    let vis = fieldVisual(f);
+    assert.equal(vis.base, 'Ob');
+    assert.equal(vis.coat, '');
+    assert.equal(vis.s, 0);
+    assert.equal(vis.mask, -1);
+    assert.equal(vis.g, 1);
+    assert.equal(cropWatch(f).work, 'rest');
+    assert.equal(cropWatch(f).label, '基肥后');
+    f.jobS.potato_base_fert = 0;
+    vis = fieldVisual(f);
+    assert.equal(vis.base, 'Ob', 'the gap keeps the last variant even if that job progress is gone');
+    assert.equal(vis.coat, '');
+    assert.equal(vis.mask, -1);
+    assert.equal(vis.s, 0);
+    assert.equal(cropWatch(f).label, '基肥后');
+    assert.equal(cropWatch(f).work, 'rest');
+    f.laneW = { potato_rotavate: 3.2 };
+    f.jobS.potato_rotavate = 0.63;
+    vis = fieldVisual(f);
+    assert.equal(vis.coat, 'O1');
+    assert.equal(vis.base, 'Ob');
+    assert.ok(Math.abs(vis.mask - (32 * 100 + 0.63)) < 1e-9, vis.mask);
+    assert.ok(vis.s > 0 && vis.s < 1, vis.s);
+    f.jobS.potato_rotavate = 999;
+    vis = fieldVisual(f);
+    assert.equal(vis.coat, '');
+    assert.equal(vis.base, 'O1');
+    assert.equal(vis.mask, -1);
+    assert.equal(cropWatch(f).label, '中耕后');
+    f.laneW.potato_plant = 12.8;
+    f.jobS.potato_plant = 0.4;
+    vis = fieldVisual(f);
+    assert.equal(vis.coat, 'sow');
+    assert.equal(vis.base, 'O1');
+    assert.equal(vis.g, 1);
+    assert.ok(Math.abs(vis.mask - (128 * 100 + 0.4)) < 1e-9, vis.mask);
+    assert.equal(cropWatch(f).work, 'sow');
+    assert.equal(f.plantedAt, null);
+  } finally {
+    revertPotatoStages();
+    bindPotatoClock();
+    resetGame();
+  }
+});

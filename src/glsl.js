@@ -65,6 +65,23 @@ bool laneCut(vec2 uv, float s){
   float fr = (s - fs) * FIELD;
   return mod(lane, 2.) < .5 ? uv.x < fr : uv.x > FIELD - fr;
 }
+// d.b < 0：整田都是上一道作业色。0–20：收割前沿，仍按 12.8 m 视觉垄。更大的数是机具实宽：百位以上是幅宽的分米，个位是这条幅宽上的趟进度。
+float harvestFront(float db){
+  return db >= 0.0 && db < 20.0 ? db : 0.0;
+}
+bool jobSwept(vec2 uv, float db){
+  if (db < -0.5) return true;
+  if (db < 20.0) return laneCut(uv, db);
+  float widthCode = floor(db / 100.0 + 0.001);
+  float prog = db - widthCode * 100.0;
+  float laneW = max(widthCode / 10.0, 0.4);
+  float fs = floor(prog + 0.0001);
+  float lane = floor(uv.y / laneW);
+  if (lane < fs) return true;
+  if (lane > fs + 0.5) return false;
+  float fr = (prog - fs) * FIELD;
+  return mod(fs, 2.0) < 0.5 ? uv.x < fr : uv.x > FIELD - fr;
+}
 // g < 1：邻区冠层沿用生长度。g >= 1：商品薯（1 整地裸土 2 播种后 3 出苗 4 培土 5 膨大 6 杀秧 7 成熟待收 8 过熟 9 烂地）
 float growthVis(float g){
   float stage = floor(g + 0.001);
@@ -87,9 +104,10 @@ float canopyAt(vec2 p){
   if (d.r < 0.) return 0.;
   vec2 uv = d.a > .5 ? loc.yx : loc;
   float stage = floor(d.g + 0.001);
-  if (laneCut(uv, d.b) && stage < 0.5) return 0.;
-  if (laneCut(uv, d.b) && stage > 5.5 && stage < 6.5) return 0.05;
-  if (laneCut(uv, d.b) && stage > 6.5 && stage < 7.5) return 0.;
+  float front = harvestFront(d.b);
+  if (laneCut(uv, front) && stage < 0.5) return 0.;
+  if (laneCut(uv, front) && stage > 5.5 && stage < 6.5) return 0.05;
+  if (laneCut(uv, front) && stage > 6.5 && stage < 7.5) return 0.;
   if (stage > 8.5) return 0.02;
   return growthVis(d.g) * uCropP[int(d.r + .5)].x;
 }

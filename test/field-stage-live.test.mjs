@@ -340,6 +340,46 @@ test('仓库默认 keeps the potato doc so a later reread does not see only cust
   }
 });
 
+test('仓库默认 keeps a potato copy so reread still finds it after the slot is removed', () => {
+  const store = memoryStore();
+  const potato = edited();
+  potato.cropName = '呀土豆';
+  potato.name = '呀土豆';
+  const fork = forkCropDocument(potato, 'custom1');
+  store.setItem(FIELD_STAGE_STORE, JSON.stringify({
+    schema: 'ringsheaf.field-stage/1',
+    cropId: 'potato',
+    crops: { potato, custom1: fork },
+  }));
+  const first = bootFieldStageSource(store, null);
+  assert.equal(first.ok, true, first.message);
+  assert.equal(readStageStore(store).potatoKeep.cropName, '呀土豆');
+  const parked = readStageStore(store);
+  delete parked.crops.potato;
+  parked.cropId = 'custom1';
+  store.setItem(FIELD_STAGE_STORE, JSON.stringify(parked));
+  const missing = applyStagePayload(readStageStore(store));
+  assert.equal(missing.ok, false);
+  assert.match(missing.message, /没有土豆/);
+  assert.match(missing.message, /custom1/);
+  const held = suspendPotatoStage(store);
+  assert.equal(held.kept, true);
+  assert.equal(readStageStore(store).crops.potato, undefined);
+  resumePotatoStage(store);
+  const again = bootFieldStageSource(store, null);
+  try {
+    assert.equal(again.ok, true, again.message);
+    assert.equal(again.doc.cropName, '呀土豆');
+    assert.notEqual(again.doc.cropId, 'custom1');
+    bindPotatoClock();
+    assert.equal(CROPS.find(c => c.id === 'potato').name, '呀土豆');
+    assert.equal(stageBadge(), '工坊覆写');
+  } finally {
+    revertPotatoStages();
+    bindPotatoClock();
+  }
+});
+
 test('a broken workshop doc leaves the shipped potato in place', () => {
   const before = cropDef('potato').maturity;
   const applied = applyStagePayload({ crops: { potato: { cropId: 'potato', stages: [{ id: 'O' }] } } });

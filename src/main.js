@@ -93,15 +93,23 @@ function writePotColor(offset, hex) {
 let potDrawNow = null;
 // 行向占 d.a 的整数部分（>0.5 即横垄）。小数是作业槽：work/128 + base/4096，不超过 0.5。
 // work 为 0 表示这会儿没有车在刷色。base 为 0 表示没有上一道变体。
+// 间隙整田铺色时，把留下的变体放进 /128。单独的 base/4096 太小，硬刷后间隙会掉成空地。
 function encodeDir(v) {
   const orient = v.dir > 0.5 ? 1 : 0;
-  if (!potDrawNow || CROPS[v.crop]?.id !== 'potato' || (!v.coat && !v.base)) return orient;
-  const work = v.coat
-    ? (v.coat === 'sow' ? potDrawNow.sowSlot : (potDrawNow.variantSlot[v.coat] || 0))
+  if (!potDrawNow || CROPS[v.crop]?.id !== 'potato') return orient;
+  let workId = v.coat || '';
+  let baseId = v.base || '';
+  if (v.mask < 0 && !workId && baseId) {
+    workId = baseId;
+    baseId = '';
+  }
+  if (!workId && !baseId) return orient;
+  const work = workId
+    ? (workId === 'sow' ? potDrawNow.sowSlot : (potDrawNow.variantSlot[workId] || 0))
     : 0;
-  const base = v.base ? (potDrawNow.variantSlot[v.base] || 0) : 0;
+  const base = baseId ? (potDrawNow.variantSlot[baseId] || 0) : 0;
   if (work <= 0 && base <= 0) return orient;
-  if (work === potDrawNow.sowSlot && base <= 0) return orient;
+  if (work === potDrawNow.sowSlot && base <= 0 && !(v.mask < 0)) return orient;
   return orient + work / 128 + base / 4096;
 }
 function syncPotatoPaint() {
@@ -156,7 +164,7 @@ function writeFields() {
   for (const f of fields) {
     const o = (f.j * NFX + f.i) * 4;
     const v = fieldVisual(f);
-    fieldData[o] = v.crop; fieldData[o + 1] = v.g; fieldData[o + 2] = v.s; fieldData[o + 3] = encodeDir(v);
+    fieldData[o] = v.crop; fieldData[o + 1] = v.g; fieldData[o + 2] = v.mask != null && v.mask !== 0 ? v.mask : v.s; fieldData[o + 3] = encodeDir(v);
   }
   fieldTex.needsUpdate = true;
 }
@@ -527,11 +535,11 @@ vec3 farmAlbedo(vec2 p){
     float prof = 0.5 + 0.5 * cos(6.2832 * ph);
     float slope = -sin(6.2832 * ph);
     float g = d.g;
-    bool cut = laneCut(uv, d.b);
+    bool cut = d.b >= 0.0 && d.b < 20.0 && laneCut(uv, d.b);
     float patchy = (n1 - 0.5) * 0.12 + (n2 - 0.5) * 0.05;
     float pst = floor(g + 0.001);
     if (pst >= 1.0 && tex == 2) {                    // 商品薯。工坊覆写时垄色、冠层、行距都读阶段表。
-      bool worked = laneCut(uv, d.b);
+      bool worked = jobSwept(uv, d.b);
       if (uPotOn > 0.5) {
         // 地头不再把跨行轴拧 90°。垄法线、地面色、冠层色带都跟田内行距走同一条 uv.y。
         float rowAcross = uv.y;
@@ -632,7 +640,7 @@ vec3 farmAlbedo(vec2 p){
         canopyHere = pst >= 2.5;
         gRough = pst < 2.5 ? 0.92 : 0.68;
       } else if (pst < 6.5) {
-        bool shredded = worked || d.b >= 9.5;
+        bool shredded = worked || (d.b >= 9.5 && d.b < 20.0);
         if (shredded) { col = stub; gTilt = acrossW * slope * 0.35 * rowVis; gRough = 0.92; }
         else { col = bloom; gTilt = acrossW * slope * 0.55 * rowVis; canopyHere = true; gRough = 0.66; }
       } else if (pst < 7.5) {
@@ -871,7 +879,7 @@ varying vec3 vCropCol;`).replace('#include <begin_vertex>', `#include <begin_ver
     vec2 uv = d.a > .5 ? loc.yx : loc;
     if (d.r >= 0.) {
       stage = floor(d.g + 0.001);
-      bool opened = laneCut(uv, d.b);
+      bool opened = harvestFront(d.b) > 0.0 && laneCut(uv, harvestFront(d.b));
       float frac = clamp(d.g - stage, 0.0, 0.999);
       float speck = step(hash12(floor(io.xz * 0.45)), frac);
       gg = mix(growthVis(stage + 0.2), growthVis(stage + 1.2), speck);

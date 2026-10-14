@@ -488,6 +488,17 @@ function seenLanes(f, jobId, prog) {
   const n = passLanes(f, jobId);
   return n > 0 ? prog / n * L.LANES : prog;
 }
+// 幅宽按分米封进百位，趟进度留在个位。3.2 m 旋耕是 3200 + 进度，不会再被压成 12.8 m 的视觉垄。
+function packMask(f, jobId, prog) {
+  const code = Math.max(1, Math.round(passWidth(f, jobId) * 10));
+  return code * 100 + Math.max(0, prog);
+}
+function settleTone(f, base, masked) {
+  if (!f) return base || '';
+  if (base) f.restTone = base;
+  else if (masked) f.restTone = '';
+  return base || (masked ? '' : (f.restTone || ''));
+}
 function jobDone(f, id) {
   return (f?.jobS?.[id] || 0) >= passLanes(f, id) - 1e-3;
 }
@@ -539,6 +550,7 @@ function groundSweep(f, def) {
   const clock = f.plantedAt != null;
   const day = clock ? fieldDay(f) : 0;
   let base = '';
+  let masked = false;
   for (const job of def.jobs) {
     if (!paintsField(job)) continue;
     const when = job.window?.when;
@@ -551,25 +563,26 @@ function groundSweep(f, def) {
     const done = prog >= passLanes(f, job.id) - 1e-3;
     if (clock && when === 'before') {
       if (!done) continue;
-      if (job.writesMask) base = '';
+      if (job.writesMask) { base = ''; masked = true; }
       else if (job.variant) base = job.variant;
       continue;
     }
     if (done) {
-      if (job.writesMask) base = '';
+      if (job.writesMask) { base = ''; masked = true; }
       else if (job.variant) base = job.variant;
       continue;
     }
     if (prog > 1e-3) {
       return {
         coat: job.writesMask ? 'sow' : (job.variant || ''),
-        base,
+        base: settleTone(f, base, masked),
         lanes: seenLanes(f, job.id, prog),
+        mask: packMask(f, job.id, prog),
       };
     }
     if (when !== 'before') break;
   }
-  return { coat: '', base, lanes: 0 };
+  return { coat: '', base: settleTone(f, base, masked), lanes: 0, mask: 0 };
 }
 // 作业前沿只跟着真正在走的那一趟。灌溉和水网不算，免得整块被涂成已收。
 // 做完的一趟不再把整块标成已扫，否则间隙和收工都会被盖成作业带。
@@ -615,19 +628,22 @@ export function fieldVisual(f) {
   const def = cropOf(f);
   if (f && f.live && !f.paid && def) {
     const sweep = groundSweep(f, def);
-    const coat = sweep.lanes > 0 ? sweep.coat : '';
+    const active = sweep.lanes > 0 && !!sweep.coat;
+    const coat = active ? sweep.coat : '';
     const base = sweep.base || '';
+    const front = !active && f.plantedAt != null ? visualFront(f) : 0;
+    const s = active ? sweep.lanes : front;
+    // 没在扫、也没有收割前沿时，整田铺上一道留下的颜色。负蒙版只给着色器，s 仍是 0。
+    const mask = active ? sweep.mask : (base && front <= 1e-3 ? -1 : 0);
     if (f.plantedAt == null || !plantJobDone(f)) {
       // g 仍是 1：蒙版还没写完，生长钟不起。没在扫的时候也停在 1，避免做完一道就掉进 g<0.01 的暗褐裸土。
-      const s = sweep.lanes > 0 ? sweep.lanes : (f.plantedAt == null ? 0 : visualFront(f));
-      return { crop: f.crop, g: potato ? 1 : 0, s, dir: f.dir, coat, base };
+      return { crop: f.crop, g: potato ? 1 : 0, s, dir: f.dir, coat, base, mask };
     }
     const day = fieldDay(f);
     // 有变体色的作业自己带垄。没变体的（起薯）仍用前沿，收工后前沿归零，不把整块涂成已扫。
-    const s = sweep.lanes > 0 ? sweep.lanes : visualFront(f);
-    if (potato) return { crop: f.crop, g: stageBlend(def, day), s, dir: f.dir, coat, base };
+    if (potato) return { crop: f.crop, g: stageBlend(def, day), s, dir: f.dir, coat, base, mask };
     const g = Math.min(0.95, def.maturity > 0 ? day / def.maturity : 0.5);
-    return { crop: f.crop, g, s, dir: f.dir, coat, base };
+    return { crop: f.crop, g, s, dir: f.dir, coat, base, mask };
   }
   return { crop: f.crop, g: f.state === 0 ? 0 : f.g, s: (f.state === 3 || f.state === 4) ? f.s : 0, dir: f.dir };
 }
@@ -643,8 +659,8 @@ export function cropWatch(f) {
     const sweep = groundSweep(f, def);
     const swept = sweep.lanes;
     const prep = def.stages.find(s => s.preplant);
-    if (prep && swept > 0) {
-      let label = PHASE_LABEL[prep.id] || prep.name;
+    if (swept > 0 && (prep || sweep.coat)) {
+      let label = prep ? (PHASE_LABEL[prep.id] || prep.name) : '整地';
       let work = 'prep';
       if (sweep.coat === 'sow') {
         const dest = clockStages(def)[0];
@@ -654,10 +670,10 @@ export function cropWatch(f) {
         label = variantName(def, sweep.coat);
         work = 'variant';
       }
-      return { day: 0, phase: prep.id, label, front: swept, days, waiting: true, work };
+      return { day: 0, phase: prep?.id || 'O', label, front: swept, days, waiting: true, work };
     }
-    if (prep && sweep.base) {
-      return { day: 0, phase: prep.id, label: variantName(def, sweep.base), front: 0, days, waiting: true, work: 'rest' };
+    if (sweep.base) {
+      return { day: 0, phase: prep?.id || 'O', label: variantName(def, sweep.base), front: 0, days, waiting: true, work: 'rest' };
     }
     return { day: 0, phase: 'plan', label: '待播种', front: 0, days, waiting: true };
   }
@@ -1048,6 +1064,8 @@ function finishPass(r) {
   const key = r.job;
   const job = f && key ? cropOf(f)?.jobs.find(j => j.id === key) : null;
   if (f?.jobS && key) f.jobS[key] = passLanes(f, key);
+  if (f && job?.writesMask) f.restTone = '';
+  else if (f && job?.variant) f.restTone = job.variant;
   noteMask(f, job);
   if (job?.spray && f && !f.sprayed) {
     f.sprayed = true;
@@ -1616,6 +1634,7 @@ function markRot(f) {
   f.failed = 'rot';
   f.cycle = false;
   delete f.jobS;
+  delete f.restTone;
   log.push({ type: 'rot', pay: 0, name: '烂在地里', i: f.i, j: f.j, t: worldDay });
 }
 function fillCycleSupplies(f, autoBuy) {
@@ -1646,6 +1665,7 @@ function releaseField(f) {
   f.harvested = false;
   f.stored = false;
   delete f.jobS;
+  delete f.restTone;
   dropPotato(f);
   f.cycle = cycle;
   f.autoBuy = autoBuy;
@@ -1680,6 +1700,7 @@ export function abandonField(f) {
   f.s = 0;
   f.yieldFactor = 1;
   delete f.jobS;
+  delete f.restTone;
   delete f.laneW;
   delete f.penalized;
   dropPotato(f);
@@ -2107,6 +2128,7 @@ export function resetGame() {
     f.yieldFactor = 1;
     f.boomBusy = false;
     delete f.jobS;
+    delete f.restTone;
     delete f.laneW;
     delete f.penalized;
     delete f.queued;
@@ -2291,6 +2313,7 @@ export function plantField(f, cropId, opts = {}) {
   f.stored = false;
   f.boomBusy = false;
   f.jobS = blankJobs(f);
+  delete f.restTone;
   trackPotato(f);
   assignIdleRigs();
   return { ok: true, payout: quote(crop), name: CROPS[crop].name, day: worldDay };

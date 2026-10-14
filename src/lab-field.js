@@ -265,7 +265,17 @@ export function createFieldWorkshop(els) {
       paintStatus();
       return false;
     }
-    const payload = { schema: FIELD_STAGE_SCHEMA, cropId, crops: docs };
+    let prev = null;
+    try { prev = JSON.parse(localStorage.getItem(FIELD_STAGE_STORE) || 'null'); } catch { prev = null; }
+    const crops = { ...docs };
+    if (prev?.crops && typeof prev.crops === 'object' && !Array.isArray(prev.crops)) {
+      if (!crops.potato && prev.crops.potato) crops.potato = prev.crops.potato;
+      if (!crops.crop_potato && prev.crops.crop_potato) crops.crop_potato = prev.crops.crop_potato;
+    }
+    const payload = { schema: FIELD_STAGE_SCHEMA, cropId, crops };
+    if (crops.potato) payload.potatoKeep = crops.potato;
+    else if (prev?.potatoKeep) payload.potatoKeep = prev.potatoKeep;
+    if (prev?.potatoSuspended) payload.potatoSuspended = true;
     localStorage.setItem(FIELD_STAGE_STORE, JSON.stringify(payload));
     note = '已存进这台浏览器';
     return true;
