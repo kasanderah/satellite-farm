@@ -221,11 +221,11 @@ export const LAB_ENTRIES = [
     name: '农机编辑器',
     size: '顶视 128 m · 一趟',
     span: 150,
-    notes: `农机编辑器 v1。顶视按工作宽度画一趟路径，巷距跟主游戏 lanesForWidth 同一算法。类别是拖拉机、挂具、一体机。能力标签用工序里的 machine id，并带上调度用的 cap。
+    notes: `农机编辑器 v2。类别下面添加模式。每个模式选一个功能，再填功率、作业宽度、作业速度、仓容。部分功能才显示特有项。通用属性右边可勾同步属性。顶视按当前模式的宽度画一趟，巷距跟主游戏 lanesForWidth 同一算法。
 
-保存写 localStorage 钥匙 ringsheaf.assetlab.machines.v1。下载的 JSON 结构见 docs/machine-lab-v1.md。主游戏本轮不读这份，种植和派单仍用原来的机具表。
+保存写 localStorage 钥匙 ringsheaf.assetlab.machines.v1。下载的 JSON 结构见 docs/machine-lab-v1.md。旧的平铺存档读进来收成一个模式。主游戏本轮不读这份，种植和派单仍用原来的机具表。
 
-占位外形用 refs/machines 里已有的低模。联合收割机整包已在「参考·外部」，来自「环穗资产」，不拆、不进田里派单。导入只记下文件名。挂接和仓容先留字段。`,
+占位外形用 refs/machines 里已有的低模，也可以直接从库里选现用剪影。联合收割机整包已在「参考·外部」，来自「环穗资产」，不拆、不进田里派单。导入文件只记下文件名。`,
   },
   { id: 'tractor', cls: 'machine', name: '拖拉机', size: '约 4.5 m', span: 16, notes: '地表农机。自由行驶，后面可换农具。' },
   { id: 'planter', cls: 'machine', name: '播种机', size: '约 6 m', span: 18, notes: '拖拉机拖着覆土起垄器。' },

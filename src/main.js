@@ -544,6 +544,12 @@ vec3 farmAlbedo(vec2 p){
           gTilt *= 0.45;
           canopyHere = false;
         }
+        // 播种没写完时 g 停在 1。扫过的垄要和裸土分开，否则蒙版在画面上是平的。
+        if (worked && pst < 1.5) {
+          vec3 seeded = mix(g_ochre, g_straw, 0.42);
+          col = mix(col, seeded, 0.72);
+          gRough = 0.88;
+        }
       } else {
       vec3 soil = g_soil * (0.78 + 0.1 * prof * rowVis) * (1. + patchy);
       float cover = pst < 1.5 ? 0.0 : pst < 2.5 ? 0.18 : pst < 3.5 ? 0.55 : pst < 4.5 ? 0.78 : pst < 5.5 ? 0.9 : 0.0;
@@ -571,8 +577,13 @@ vec3 farmAlbedo(vec2 p){
       stub = mix(stub, mix(g_ochre, g_rust, 0.35), clamp(mix(0.2, speck * 0.7 + swath * 0.45, nearS), 0., 0.75));
       if (pst < 1.5) {
         col = soil;
+        if (worked) {
+          vec3 seeded = mix(g_ochre, g_straw, 0.42);
+          float furrow = 1.0 - smoothstep(0.8, 3.6, abs(lv));
+          col = mix(soil * 0.78, seeded, 0.66 + furrow * 0.16);
+        }
         gTilt = acrossW * slope * (worked ? 0.85 : 0.35) * rowVis;
-        gRough = 0.97;
+        gRough = worked ? 0.88 : 0.97;
       } else if (pst < 5.5) {
         col = pst < 2.5 ? mix(soil, young, 0.55) : pst < 4.5 ? canopy : bloom;
         gTilt = acrossW * slope * (pst < 2.5 ? 0.7 : 0.5) * rowVis;

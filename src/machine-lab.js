@@ -1,13 +1,14 @@
-// 农机编辑器 v1。只存在工坊这台浏览器，钥匙 ringsheaf.assetlab.machines.v1。
+// 农机编辑器 v2。只存在工坊这台浏览器，钥匙仍是 ringsheaf.assetlab.machines.v1。
+// 一台农机有多个模式。每个模式选一个功能，再记功率、作业宽度、作业速度、仓容。
+// 勾上同步属性时，这一项在该农机的所有模式里是同一个数。
 // 主游戏本轮不读这份，种植和派单仍用原来的机具表。
-// 占位外形用 refs/machines 里已有的低模（Kenney、Pixor 和现用剪影）。
-// 正式模型以后向「环穗资产」要新下载再接入。结构见 docs/machine-lab-v1.md。
+// 结构见 docs/machine-lab-v1.md。v1 的平铺字段读进来时收成一个模式。
 import { OP_MACHINE_CHOICES } from './field-stages.js';
 import { MACHINE_CAP_BY_ID, IMPLEMENTS, DEFAULT_WORK_WIDTH, lanesForWidth } from './surface-crops.js';
 
 export const MACHINE_LAB_KEY = 'ringsheaf.assetlab.machines.v1';
 export const MACHINE_LAB_KIND = 'ringsheaf.assetlab.machines';
-export const MACHINE_LAB_VERSION = 1;
+export const MACHINE_LAB_VERSION = 2;
 export const PREVIEW_FIELD_M = 128;
 
 export const MACHINE_ROLES = [
@@ -16,10 +17,44 @@ export const MACHINE_ROLES = [
   ['self', '一体机'],
 ];
 
+export const SYNC_KEYS = ['power', 'workWidth', 'speed', 'bin'];
+
+// 只有这些功能带特有项。没列在这里的功能，模式里只显示通用属性。
+export const FUNCTION_EXTRAS = {
+  impl_cultivator: [{ id: 'style', name: '中耕方式', options: [['shallow', '浅耕'], ['weed', '除草'], ['hill', '培土'], ['residue', '碎秆']] }],
+  impl_seeder: [{ id: 'disc', name: '排种盘', options: [['bean', '豆'], ['grain', '谷']] }],
+  impl_sprayer: [{ id: 'mix', name: '药液', options: [['field', '大田']] }],
+  harvester_combine: [{ id: 'header', name: '收获作物', options: [['bean', '豆'], ['grain', '谷']] }],
+  drone_treat: [{ id: 'load', name: '药剂', options: [['pest', '植保']] }],
+};
+
+// 工坊和主游戏已经在用的剪影，加上 refs/machines 里的占位 glb。编辑器只记 id，不把字节写进存档。
+export const PLACEHOLDER_LIBRARY = [
+  { id: 'tractor_gen', name: '现用 · 拖拉机' },
+  { id: 'harvester_combine', name: '现用 · 联合收割' },
+  { id: 'harvester_potato', name: '现用 · 薯收获' },
+  { id: 'harvester_cabbage', name: '现用 · 结球收获' },
+  { id: 'transplanter', name: '现用 · 移栽' },
+  { id: 'impl_potato_planter', name: '现用 · 薯播' },
+  { id: 'impl_seeder', name: '现用 · 条播' },
+  { id: 'impl_cultivator', name: '现用 · 中耕' },
+  { id: 'impl_sprayer', name: '现用 · 喷雾' },
+  { id: 'impl_fertilizer', name: '现用 · 施肥' },
+  { id: 'impl_haulm', name: '现用 · 杀秧' },
+  { id: 'impl_rotavator', name: '现用 · 旋耕' },
+  { id: 'impl_subsoiler', name: '现用 · 深松' },
+  { id: 'impl_bedder', name: '现用 · 起垄' },
+  { id: 'impl_trailer', name: '现用 · 挂车' },
+  { id: 'kenney-tractor', name: 'Kenney 拖拉机', file: 'kenney-tractor.glb' },
+  { id: 'kenney-tractor-shovel', name: 'Kenney 铲', file: 'kenney-tractor-shovel.glb' },
+  { id: 'pixor-library-tractor', name: 'Pixor 拖拉机', file: 'pixor-library-tractor.glb' },
+  { id: 'low-poly-combine-harvestors', name: 'Sketchfab 收割机包', file: 'low-poly-combine-harvestors.glb' },
+];
+
 const ROLE_IDS = new Set(MACHINE_ROLES.map(([id]) => id));
 const ID_RE = /^[A-Za-z][A-Za-z0-9_-]{0,48}$/;
+const LIBRARY_IDS = new Set(PLACEHOLDER_LIBRARY.map(row => row.id));
 
-// 工序下拉里的 machine id，加上调度用的 cap。编辑器只认这一份。
 export const MACHINE_TAGS = OP_MACHINE_CHOICES.map(([id, name]) => ({
   id,
   name,
@@ -42,6 +77,10 @@ export function allocateMachineId(ids) {
 export function machineOptionLabel(machine) {
   const name = String(machine?.name || machine?.id || '').trim() || machine?.id || '';
   return `${name} · ${machine?.id || ''}`;
+}
+
+export function functionExtras(fn) {
+  return FUNCTION_EXTRAS[fn] || [];
 }
 
 function clamp(n, lo, hi, fallback) {
@@ -75,9 +114,14 @@ function capsForTags(tags) {
 }
 
 function cleanModel(raw) {
-  const source = raw && raw.source === 'file' ? 'file' : 'placeholder';
+  const asked = raw && (raw.source === 'file' || raw.source === 'library') ? raw.source : 'placeholder';
   const fileName = String(raw && raw.fileName || '').split(/[\\/]/).pop().slice(0, 180);
-  return { source, fileName: source === 'file' ? fileName : '' };
+  const libraryId = String(raw && raw.libraryId || '');
+  if (asked === 'library' && LIBRARY_IDS.has(libraryId)) {
+    return { source: 'library', fileName: '', libraryId };
+  }
+  if (asked === 'file') return { source: 'file', fileName, libraryId: '' };
+  return { source: 'placeholder', fileName: '', libraryId: '' };
 }
 
 function cleanHook(raw) {
@@ -93,24 +137,86 @@ function cleanBin(raw) {
   return Math.min(1e6, Math.round(n * 10) / 10);
 }
 
+function cleanExtra(fn, raw) {
+  const spec = functionExtras(fn);
+  const src = raw && typeof raw === 'object' ? raw : {};
+  const out = {};
+  for (const field of spec) {
+    const ids = new Set(field.options.map(([id]) => id));
+    out[field.id] = ids.has(src[field.id]) ? src[field.id] : field.options[0][0];
+  }
+  return out;
+}
+
+function cleanMode(raw, index, fallback) {
+  const src = raw && typeof raw === 'object' ? raw : {};
+  const base = fallback || {};
+  const fn = TAG_IDS.has(src.fn) ? src.fn : '';
+  const knownWidth = fn && IMPLEMENTS[fn]?.workWidth;
+  return {
+    id: `m${index + 1}`,
+    fn,
+    power: clamp(src.power != null ? src.power : base.power, 0, 2000, 0),
+    workWidth: clamp(src.workWidth != null ? src.workWidth : base.workWidth, 0.4, 64, knownWidth || DEFAULT_WORK_WIDTH),
+    speed: clamp(src.speed != null ? src.speed : base.speed, 0.2, 40, 10),
+    bin: cleanBin(src.bin != null ? src.bin : base.bin),
+    extra: cleanExtra(fn, src.extra),
+  };
+}
+
+function modesFromRaw(src) {
+  const flat = {
+    power: src.power,
+    workWidth: src.workWidth,
+    speed: src.speed,
+    bin: src.bin,
+  };
+  if (Array.isArray(src.modes) && src.modes.length) {
+    return src.modes.map((mode, i) => cleanMode(mode, i, flat));
+  }
+  const tags = cleanTags(src.tags);
+  const seeds = tags.length ? tags.map(fn => ({ ...flat, fn })) : [{ ...flat, fn: '' }];
+  return seeds.map((mode, i) => cleanMode(mode, i, flat));
+}
+
+function cleanSync(raw) {
+  const src = raw && typeof raw === 'object' ? raw : {};
+  const out = {};
+  for (const key of SYNC_KEYS) out[key] = src[key] === true;
+  return out;
+}
+
+function applySync(modes, sync) {
+  const first = modes[0];
+  for (const key of SYNC_KEYS) {
+    if (!sync[key]) continue;
+    for (const mode of modes) mode[key] = first[key];
+  }
+}
+
 export function normalizeMachine(raw, fallbackId = 'rig1') {
   const src = raw && typeof raw === 'object' ? raw : {};
   const id = isMachineId(src.id) ? String(src.id) : (isMachineId(fallbackId) ? fallbackId : 'rig1');
   const role = ROLE_IDS.has(src.role) ? src.role : 'implement';
-  const tags = cleanTags(src.tags);
+  const modes = modesFromRaw(src);
+  const sync = cleanSync(src.sync);
+  applySync(modes, sync);
+  const tags = cleanTags(modes.map(mode => mode.fn));
   const name = String(src.name || '').trim().slice(0, 48) || id;
-  const knownWidth = IMPLEMENTS[id]?.workWidth;
+  const head = modes[0];
   return {
     id,
     name,
     role,
     tags,
     caps: capsForTags(tags),
-    workWidth: clamp(src.workWidth, 0.4, 64, knownWidth || DEFAULT_WORK_WIDTH),
-    speed: clamp(src.speed, 0.2, 40, 10),
-    power: clamp(src.power, 0, 2000, 0),
+    workWidth: head.workWidth,
+    speed: head.speed,
+    power: head.power,
     hitch: cleanHook(src.hitch),
-    bin: cleanBin(src.bin),
+    bin: head.bin,
+    sync,
+    modes,
     model: cleanModel(src.model),
   };
 }
@@ -133,7 +239,7 @@ export function forkMachine(source, id) {
   copy.id = id;
   const base = String(source?.name || source?.id || id);
   copy.name = base.endsWith('副本') ? base : `${base} 副本`;
-  copy.model = { source: 'placeholder', fileName: '' };
+  copy.model = { source: 'placeholder', fileName: '', libraryId: '' };
   return copy;
 }
 
@@ -142,6 +248,10 @@ export function renameMachine(machine, name) {
   if (!next) return machine;
   machine.name = next.slice(0, 48);
   return machine;
+}
+
+export function dropMachine(list, id) {
+  return (Array.isArray(list) ? list : []).filter(item => item && item.id !== id);
 }
 
 function indexMachines(list) {
@@ -178,6 +288,5 @@ export function machineEnvelope(list) {
 export function passPreview(workWidth, field = PREVIEW_FIELD_M) {
   const width = clamp(workWidth, 0.4, 64, DEFAULT_WORK_WIDTH);
   const length = field > 0 ? field : PREVIEW_FIELD_M;
-  const lanes = lanesForWidth(width, length);
-  return { field: length, width, lanes, lane: length / lanes };
+  return { field: length, width, lanes: lanesForWidth(width, length), lane: length / lanesForWidth(width, length) };
 }

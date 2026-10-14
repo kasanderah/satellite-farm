@@ -1,13 +1,13 @@
-# 农机编辑器 v1
+# 农机编辑器 v2
 
-工坊里的农机草稿。钥匙是 `ringsheaf.assetlab.machines.v1`。主游戏本轮不读这份，种植菜单和派单仍用原来的机具表。
+工坊里的农机草稿。钥匙仍是 `ringsheaf.assetlab.machines.v1`。主游戏不读这份，种植菜单和派单仍用原来的机具表。
 
-下载的文件和存档是同一个信封：
+下载的文件和存档是同一个信封。`version` 现在是 2。v1 的平铺字段还能读：没有 `modes` 时，每个 tag 收成一个模式；没有 tag 就收成一个未选功能的模式。功率、作业宽度、作业速度、仓容抄进这些模式。`sync` 缺省是全关。
 
 ```json
 {
   "kind": "ringsheaf.assetlab.machines",
-  "version": 1,
+  "version": 2,
   "machines": [
     {
       "id": "impl_cultivator",
@@ -20,7 +20,19 @@
       "power": 40,
       "hitch": null,
       "bin": null,
-      "model": { "source": "placeholder", "fileName": "" }
+      "sync": { "power": false, "workWidth": false, "speed": false, "bin": false },
+      "modes": [
+        {
+          "id": "m1",
+          "fn": "impl_cultivator",
+          "power": 40,
+          "workWidth": 6.4,
+          "speed": 10,
+          "bin": null,
+          "extra": { "style": "shallow" }
+        }
+      ],
+      "model": { "source": "placeholder", "fileName": "", "libraryId": "" }
     }
   ]
 }
@@ -31,14 +43,19 @@
 | `id` | 稳定钥匙。显示名改不了它。新农机另起 `rig1`、`rig2`… |
 | `name` | 显示名 |
 | `role` | `tractor` 拖拉机，`implement` 挂具，`self` 一体机 |
-| `tags` | 工序里的 machine id，和阶段编辑器的机具下拉同一份 |
-| `caps` | 由 tags 推出的调度能力，例如 `cultivate`。不单独手写 |
-| `workWidth` | 工作宽度，米。顶视预览和 `lanesForWidth` 用它算 128 m 田上有几趟 |
-| `speed` | 作业速度，m/s |
-| `power` | 功率，kW。本轮只作记录 |
-| `hitch` | 挂接钩子。空着就是还没接 |
-| `bin` | 仓容钩子，升。空着就是还没接 |
-| `model.source` | `placeholder` 或 `file` |
+| `modes` | 这台农机的模式。一台可以有多个 |
+| `modes[].fn` | 功能，对应工序里的 machine id（播种、收获等）。空着就是还没选 |
+| `modes[].power` | 这一模式的功率，kW |
+| `modes[].workWidth` | 这一模式的作业宽度，米。顶视预览用当前模式的宽度，`lanesForWidth` 算 128 m 田上有几趟 |
+| `modes[].speed` | 这一模式的作业速度，m/s |
+| `modes[].bin` | 这一模式的仓容，升。空着就是还没填 |
+| `modes[].extra` | 功能特有项。只有该功能有定义时才出现，例如中耕方式、排种盘、收获作物 |
+| `sync` | 四个通用属性各自一个勾。勾上表示这台农机所有模式的该项一致，改一处写到其余模式 |
+| `tags` / `caps` | 由各模式的 `fn` 推出，和 v1 一样。不单独手写 |
+| `workWidth` / `speed` / `power` / `bin` | 第一模式的镜像，方便旧读者。真正要改的是模式里的数 |
+| `hitch` | 整机挂接。空着就是还没接 |
+| `model.source` | `placeholder`、`library` 或 `file` |
+| `model.libraryId` | 从库里选的现用剪影或 `refs/machines` 占位 glb。字节不进存档 |
 | `model.fileName` | 导入文件的名字。文件本身不进存档，也不进主游戏 |
 
-占位外形用仓库里已有的 `refs/machines`（Kenney、Pixor 和现用剪影）。正式模型以后向「环穗资产」要新下载再接入。预览优先画顶视的一趟，不换精模。
+可以删除整台农机。列表可以存成空的。占位外形仍用仓库里已有的剪影和 glb，预览画的是顶视趟数，不把模型换进主游戏。

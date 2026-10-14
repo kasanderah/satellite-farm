@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  MACHINE_LAB_KEY, MACHINE_TAGS, allocateMachineId, defaultMachines, forkMachine,
+  MACHINE_LAB_KEY, MACHINE_TAGS, allocateMachineId, defaultMachines, dropMachine, forkMachine,
   libraryFromUnknown, machineEnvelope, machineOptionLabel, passPreview, renameMachine,
 } from '../src/machine-lab.js';
 
@@ -61,4 +61,69 @@ test('a newer machine file is refused and a copied potato harvester stays itself
   assert.equal(tagged.machines[0].hitch, 'tractor_gen');
   assert.equal(tagged.machines[0].bin, 1200);
   assert.equal(tagged.machines[0].model.fileName, 'b.glb');
+  assert.equal(tagged.machines[0].modes.length, 1);
+  assert.equal(tagged.machines[0].modes[0].fn, 'harvester_potato');
+  assert.equal(tagged.machines[0].modes[0].bin, 1200);
+  assert.deepEqual(tagged.machines[0].modes[0].extra, {});
+});
+
+test('a v1 machine becomes one mode, and a synced width is shared', () => {
+  const old = libraryFromUnknown({
+    version: 1,
+    machines: [{ id: 'impl_cultivator', name: '中耕', role: 'implement', tags: ['impl_cultivator'], workWidth: 6.4, speed: 10, power: 40 }],
+  });
+  assert.equal(old.ok, true);
+  assert.equal(old.machines[0].modes.length, 1);
+  assert.equal(old.machines[0].modes[0].fn, 'impl_cultivator');
+  assert.equal(old.machines[0].modes[0].workWidth, 6.4);
+  assert.equal(old.machines[0].sync.workWidth, false);
+  assert.equal(old.machines[0].modes[0].extra.style, 'shallow');
+  const machine = old.machines[0];
+  machine.modes.push({ fn: 'impl_potato_planter', workWidth: 12.8, speed: 8, power: 50, bin: 400 });
+  machine.sync.workWidth = true;
+  machine.sync.power = true;
+  const again = libraryFromUnknown(machineEnvelope([machine]));
+  assert.equal(again.ok, true);
+  assert.equal(again.machines[0].version, undefined);
+  assert.equal(again.machines[0].modes.length, 2);
+  assert.equal(again.machines[0].modes[0].workWidth, 6.4);
+  assert.equal(again.machines[0].modes[1].workWidth, 6.4);
+  assert.equal(again.machines[0].modes[1].power, 40);
+  assert.equal(again.machines[0].modes[1].speed, 8);
+  assert.equal(again.machines[0].modes[1].bin, 400);
+  assert.equal(again.machines[0].modes[1].fn, 'impl_potato_planter');
+  assert.deepEqual(again.machines[0].modes[1].extra, {});
+  assert.deepEqual(again.machines[0].tags, ['impl_cultivator', 'impl_potato_planter']);
+  const dropped = dropMachine(again.machines, 'impl_cultivator');
+  assert.equal(dropped.length, 0);
+});
+
+test('a library placeholder is kept, and an unknown library id falls back', () => {
+  const picked = libraryFromUnknown({
+    version: 2,
+    machines: [{
+      id: 'rig3', name: '库选', role: 'self',
+      model: { source: 'library', libraryId: 'kenney-tractor' },
+      sync: { bin: true },
+      modes: [
+        { id: 'm1', fn: 'harvester_combine', workWidth: 8, speed: 6, power: 150, bin: 8000, extra: { header: 'grain' } },
+        { id: 'm2', fn: 'impl_seeder', workWidth: 4, speed: 7, power: 80, bin: 100, extra: { disc: 'nope' } },
+      ],
+    }],
+  });
+  assert.equal(picked.machines[0].model.source, 'library');
+  assert.equal(picked.machines[0].model.libraryId, 'kenney-tractor');
+  assert.equal(picked.machines[0].model.fileName, '');
+  assert.equal(picked.machines[0].modes[0].extra.header, 'grain');
+  assert.equal(picked.machines[0].modes[1].extra.disc, 'bean');
+  assert.equal(picked.machines[0].modes[1].bin, 8000);
+  assert.equal(picked.machines[0].modes[1].workWidth, 4);
+  const missing = libraryFromUnknown({
+    version: 2,
+    machines: [{ id: 'rig4', name: '空', role: 'tractor', model: { source: 'library', libraryId: 'nope' } }],
+  });
+  assert.equal(missing.machines[0].model.source, 'placeholder');
+  assert.equal(missing.machines[0].model.libraryId, '');
+  assert.equal(missing.machines[0].modes.length, 1);
+  assert.equal(missing.machines[0].modes[0].fn, '');
 });
