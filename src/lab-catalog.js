@@ -8,7 +8,7 @@ export const LAB_CLASSES = [
   { id: 'ref', label: '参考·外部' },
 ];
 
-// Sketchfab「Low Poly Combine Harvestors」可下载，但未登录的下载接口返回 401。工坊只留链接。
+// Sketchfab「Low Poly Combine Harvestors」。整包在 refs，工坊对照用，不拆、不进田里派单。
 export const REF_SKETCHFAB_COMBINE = 'https://sketchfab.com/3d-models/low-poly-combine-harvestors-84b8a341aabc421b8f7268c3a4b173f1';
 
 // 培育层空单元。农场 4 km 切成 7×7 地块，和地表同一套地块边界；中枢占正中一格，不放台。
@@ -225,7 +225,7 @@ export const LAB_ENTRIES = [
 
 保存写 localStorage 钥匙 ringsheaf.assetlab.machines.v1。下载的 JSON 结构见 docs/machine-lab-v1.md。主游戏本轮不读这份，种植和派单仍用原来的机具表。
 
-占位外形用 refs/machines 里已有的低模。正式模型以后向「环穗资产」要新下载再接入。导入只记下文件名。挂接和仓容先留字段。`,
+占位外形用 refs/machines 里已有的低模。联合收割机整包已在「参考·外部」，来自「环穗资产」，不拆、不进田里派单。导入只记下文件名。挂接和仓容先留字段。`,
   },
   { id: 'tractor', cls: 'machine', name: '拖拉机', size: '约 4.5 m', span: 16, notes: '地表农机。自由行驶，后面可换农具。' },
   { id: 'planter', cls: 'machine', name: '播种机', size: '约 6 m', span: 18, notes: '拖拉机拖着覆土起垄器。' },
@@ -277,12 +277,14 @@ Pixor：CC0。https://pixor.art/library/farm/tractor/
     id: 'ref-sketchfab-combine',
     cls: 'ref',
     name: 'Sketchfab 收割机',
-    size: '现用联合收割机 · 外部未下载',
-    span: 36,
-    notes: `Sketchfab「Low Poly Combine Harvestors」，作者 iedalton，CC-BY 4.0。未下载。
+    size: '现用联合收割机 · 整包已对齐车长',
+    span: 28,
+    notes: `Sketchfab「Low Poly Combine Harvestors」，作者 iedalton，许可 CC BY 4.0。整包已放入工坊，不拆成多台。
 
-下载要登录。未登录时接口返回 401，所以这里没有 GLB，只留链接，旁边是现用 harvester_combine。
+左边是现用 harvester_combine。右边是 refs/machines/low-poly-combine-harvestors.glb。整包缩放到现用车长，网格不拆开。只作对照，不替换田里的农机，不进机队。
 
-${REF_SKETCHFAB_COMBINE}`,
+署名：iedalton。许可 CC BY 4.0。https://creativecommons.org/licenses/by/4.0/
+来源 ${REF_SKETCHFAB_COMBINE}
+许可全文 refs/machines/low-poly-combine-harvestors.LICENSE.txt`,
   },
 ];

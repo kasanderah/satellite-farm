@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { LAB_CLASSES, LAB_ENTRIES, CULT_EMPTY, CULT_EMPTY_NOTES, CULT_B_NOTES, GRUB_TROUGH_NOTES, planGrubColumns, GRUB_DEMO_GANTRIES, GRUB_WORK_MPS, GRUB_GANTRY_OPTIONS, REF_SKETCHFAB_COMBINE } from '../src/lab-catalog.js';
 import {
   CROPS, L, PLOT, FIELD_HA, fields, fieldAt, fieldAtWorld, focus, rigs,
@@ -516,8 +517,15 @@ test('asset lab lists the workshop classes and the live placeholders', () => {
   const shovel = LAB_ENTRIES.find(e => e.id === 'ref-kenney-shovel');
   assert.match(shovel.notes, /kenney-tractor-shovel\.glb/);
   const sketch = LAB_ENTRIES.find(e => e.id === 'ref-sketchfab-combine');
-  assert.match(sketch.notes, /401/);
+  assert.match(sketch.notes, /iedalton/);
+  assert.match(sketch.notes, /CC BY 4\.0/);
+  assert.match(sketch.notes, /low-poly-combine-harvestors\.glb/);
+  assert.match(sketch.notes, /不拆/);
   assert.ok(sketch.notes.includes(REF_SKETCHFAB_COMBINE));
+  const license = fs.readFileSync('refs/machines/low-poly-combine-harvestors.LICENSE.txt', 'utf8');
+  assert.match(license, /iedalton/);
+  assert.match(license, /CC BY 4\.0/);
+  assert.ok(fs.statSync('refs/machines/low-poly-combine-harvestors.glb').size > 100000);
   for (const id of ['field-bare', 'field-road', 'field-potato-hill', 'field-potato-harvest', 'field-soy-harvest', 'field-barley-young', 'field-barley-harvest', 'field-cabbage-head', 'field-cabbage-harvest']) {
     const entry = LAB_ENTRIES.find(e => e.id === id);
     assert.ok(entry, id);

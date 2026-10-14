@@ -520,6 +520,11 @@ function frameSpan(entry) {
   eye.yaw = entry.cls === 'rail' ? 0.7 : entry.cls === 'ref' && !overhead ? 0.62 : 0.85;
   eye.pitch = overhead ? 0.95 : entry.cls === 'rail' ? 0.42 : entry.cls === 'ref' ? 0.4 : 0.46;
   if (entry.cls === 'ref' && !overhead) eye.ty = 1.15;
+  if (entry.id === 'ref-sketchfab-combine') {
+    eye.yaw = 0.8;
+    eye.pitch = 0.62;
+    eye.ty = 1.2;
+  }
   if (entry.id === 'grub-trough') {
     const occ = shown && shown.group.userData.cult && shown.group.userData.cult.occupied;
     if (occ) {

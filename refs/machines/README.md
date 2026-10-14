@@ -20,10 +20,13 @@
 
 GLB 内版权：CC0 1.0: no rights reserved. Pixor library, https://pixor.art/library/
 
-## Sketchfab — 未收入文件
+## Sketchfab — Low Poly Combine Harvestors — CC BY 4.0
 
-Low Poly Combine Harvestors，作者 iedalton，许可 CC-BY 4.0。
+- `low-poly-combine-harvestors.glb`（整包集合，未拆成多台）
+- `low-poly-combine-harvestors.LICENSE.txt`
 
-https://sketchfab.com/3d-models/low-poly-combine-harvestors-84b8a341aabc421b8f7268c3a4b173f1
+作者：iedalton。许可：CC BY 4.0。https://creativecommons.org/licenses/by/4.0/
 
-模型页标明可下载。未登录调用 `GET /v3/models/84b8a341aabc421b8f7268c3a4b173f1/download` 返回 401，要 Sketchfab 令牌。工坊里这一条只留链接，旁边摆现用联合收割机。
+来源：https://sketchfab.com/3d-models/low-poly-combine-harvestors-84b8a341aabc421b8f7268c3a4b173f1
+
+工坊「参考·外部」里的 Sketchfab 收割机把这一整包摆在现用 `harvester_combine` 旁边，并缩放到现用车长。不拆网格，不进主游戏派单。若构建里仍带这个文件，署名 iedalton、模型页和 CC BY 4.0。

@@ -5,6 +5,7 @@ import { surfaceKits } from './surface-kits.js';
 import kenneyTractorUrl from '../refs/machines/kenney-tractor.glb';
 import kenneyShovelUrl from '../refs/machines/kenney-tractor-shovel.glb';
 import pixorTractorUrl from '../refs/machines/pixor-library-tractor.glb';
+import combinePackUrl from '../refs/machines/low-poly-combine-harvestors.glb';
 import kenneyMapUrl from '../refs/machines/kenney-textures/colormap.png';
 
 // Kenney 和 Pixor 的车头都在 +Z。现用 tractor_gen 的车头在 +X。
@@ -118,6 +119,19 @@ function fitRef(scene, targetLen) {
   return sit(root);
 }
 
+// 旋转放在内层，位移放在没有旋转的外层，整包原点偏了也能落到垫上。不拆子网格。
+function fitUpright(scene, targetLen) {
+  const holder = new THREE.Group();
+  scene.rotation.y = FACE_X;
+  holder.add(scene);
+  holder.updateMatrixWorld(true);
+  const raw = worldBox(holder);
+  const len = Math.max(raw.max.x - raw.min.x, 0.001);
+  holder.scale.setScalar(targetLen / len);
+  holder.updateMatrixWorld(true);
+  return { holder, box: sit(holder) };
+}
+
 function markRef(root, label) {
   root.userData.refRoot = true;
   root.userData.refLabel = label;
@@ -127,10 +141,19 @@ function markRef(root, label) {
 export function createRefShows(api) {
   const { salmonRing, padMat, kitClone } = api;
 
-  function currentTractor() {
-    const body = kitClone(surfaceKits.tractor_gen);
+  function currentKit(id) {
+    const body = kitClone(surfaceKits[id]);
     const box = sit(body);
-    return { body, length: Math.max(box.max.x - box.min.x, 0.001), height: box.max.y };
+    return {
+      body,
+      length: Math.max(box.max.x - box.min.x, 0.001),
+      depth: Math.max(box.max.z - box.min.z, 0.001),
+      height: box.max.y,
+    };
+  }
+
+  function currentTractor() {
+    return currentKit('tractor_gen');
   }
 
   function lineup(stations, gap) {
@@ -188,31 +211,58 @@ export function createRefShows(api) {
     };
   }
 
-  function combineStub() {
+  // 整包 GLB，不拆 RootNode 里的多台。fitRef 把整包的车长缩到现用联合收割机。
+  function combinePack() {
     const g = new THREE.Group();
     g.userData.alive = true;
-    const body = kitClone(surfaceKits.harvester_combine);
-    const box = sit(body);
-    g.add(body);
-    const tag = nameTag('现用');
-    tag.position.y = box.max.y + 0.9;
-    g.add(tag);
-    const card = stubCard();
-    card.position.set(box.max.x + 4.2, Math.max(2.2, box.max.y * 0.42), 0);
-    card.rotation.y = 0.55;
-    g.add(card);
-    const width = (box.max.x - box.min.x) + 10;
-    const pad = new THREE.Mesh(new THREE.PlaneGeometry(width + 6, 16).rotateX(-Math.PI / 2), padMat);
+    const rig = currentKit('harvester_combine');
+    const left = new THREE.Group();
+    const right = new THREE.Group();
+    g.add(left, right);
+    left.add(rig.body);
+    const tagL = nameTag('现用');
+    tagL.position.y = rig.height + 0.9;
+    left.add(tagL);
+    const guessW = rig.length * 3.4;
+    const guessD = rig.length * 2.6;
+    const pad = new THREE.Mesh(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), padMat);
+    pad.scale.set(guessW, 1, guessD);
     pad.position.y = -0.03;
     pad.receiveShadow = true;
     g.add(pad);
-    const ring = salmonRing(width, 14, 0.08);
+    const ring = salmonRing(guessW * 0.96, guessD * 0.92, 0.08);
     g.add(ring);
-    const shift = (box.min.x + (box.max.x + 8)) / 2;
-    body.position.x -= shift;
-    tag.position.x -= shift;
-    card.position.x -= shift;
-    return { group: g, ring, whenRefs: Promise.resolve(), motion() {} };
+    const job = loadGltf(combinePackUrl, false).then(gltf => {
+      if (g.userData.alive === false) {
+        disposeObject(gltf.scene);
+        return;
+      }
+      const fitted = fitUpright(gltf.scene, rig.length);
+      const box = fitted.box;
+      markRef(gltf.scene, 'iedalton');
+      right.add(fitted.holder);
+      const tag = nameTag('iedalton · CC BY');
+      tag.position.y = box.max.y + 0.9;
+      right.add(tag);
+      const refLen = Math.max(box.max.x - box.min.x, 0.001);
+      const refDep = Math.max(box.max.z - box.min.z, 0.001);
+      const dist = rig.length / 2 + refLen / 2 + 3;
+      left.position.x = -dist / 2;
+      right.position.x = dist / 2;
+      const width = dist + rig.length / 2 + refLen / 2 + 4;
+      const depth = Math.max(rig.depth, refDep) + 4;
+      pad.scale.set(width, 1, depth);
+      ring.scale.set(width / guessW, 1, depth / guessD);
+    }).catch(err => {
+      g.userData.refError = String(err && err.message || err);
+      if (g.userData.alive === false) return;
+      const miss = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.2, 1.2), api.alertMat);
+      miss.position.set(rig.length + 2, 0.6, 0);
+      miss.userData.refRoot = true;
+      miss.userData.refLabel = 'iedalton 失败';
+      right.add(miss);
+    });
+    return { group: g, ring, whenRefs: job, motion() {} };
   }
 
   return {
@@ -225,42 +275,6 @@ export function createRefShows(api) {
       { kit: true, label: '现用' },
       { url: kenneyShovelUrl, texture: true, label: 'Kenney 铲' },
     ], 9),
-    combine: combineStub,
+    combine: combinePack,
   };
-}
-
-function stubCard() {
-  const c = document.createElement('canvas');
-  c.width = 1024;
-  c.height = 1280;
-  const ctx = c.getContext('2d');
-  ctx.fillStyle = '#14181c';
-  ctx.fillRect(0, 0, 1024, 1280);
-  ctx.strokeStyle = '#d8693c';
-  ctx.lineWidth = 10;
-  ctx.strokeRect(24, 24, 976, 1232);
-  ctx.fillStyle = '#e8d8d0';
-  ctx.textAlign = 'center';
-  const font = '"WenQuanYi Micro Hei", "Droid Sans Fallback", sans-serif';
-  const lines = [
-    [150, '46px ' + font, 'Sketchfab'],
-    [280, '54px ' + font, 'Low Poly Combine'],
-    [360, '54px ' + font, 'Harvestors'],
-    [500, '40px ' + font, 'iedalton · CC-BY'],
-    [640, '64px ' + font, '未下载'],
-    [760, '40px ' + font, '下载要登录'],
-    [900, '32px ' + font, 'sketchfab.com'],
-    [980, '28px ' + font, '84b8a341aabc421b'],
-  ];
-  for (const [y, face, text] of lines) {
-    ctx.font = face;
-    ctx.fillText(text, 512, y);
-  }
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.userData.dispose = true;
-  const mat = new THREE.MeshBasicMaterial({ map: tex });
-  mat.userData.dispose = true;
-  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(5.2, 6.5), mat);
-  return mesh;
 }
