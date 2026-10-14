@@ -91,12 +91,18 @@ function writePotColor(offset, hex) {
   potTintData[offset + 2] = potColor.b;
 }
 let potDrawNow = null;
-function encodeSweep(v) {
-  if (!potDrawNow || !(v.g >= 1 && v.g < 1.5) || !v.coat) return v.g;
-  const work = v.coat === 'sow' ? potDrawNow.sowSlot : (potDrawNow.variantSlot[v.coat] || potDrawNow.sowSlot);
-  const base = v.base ? (potDrawNow.variantSlot[v.base] || potDrawNow.bareSlot) : potDrawNow.bareSlot;
-  if (work === potDrawNow.sowSlot && base === potDrawNow.bareSlot) return 1;
-  return 1 + work / 64 + base / 1024;
+// 行向占 d.a 的整数部分（>0.5 即横垄）。小数是作业槽：work/128 + base/4096，不超过 0.5。
+// work 为 0 表示这会儿没有车在刷色。base 为 0 表示没有上一道变体。
+function encodeDir(v) {
+  const orient = v.dir > 0.5 ? 1 : 0;
+  if (!potDrawNow || CROPS[v.crop]?.id !== 'potato' || (!v.coat && !v.base)) return orient;
+  const work = v.coat
+    ? (v.coat === 'sow' ? potDrawNow.sowSlot : (potDrawNow.variantSlot[v.coat] || 0))
+    : 0;
+  const base = v.base ? (potDrawNow.variantSlot[v.base] || 0) : 0;
+  if (work <= 0 && base <= 0) return orient;
+  if (work === potDrawNow.sowSlot && base <= 0) return orient;
+  return orient + work / 128 + base / 4096;
 }
 function syncPotatoPaint() {
   const draw = potatoDrawLooks();
@@ -150,7 +156,7 @@ function writeFields() {
   for (const f of fields) {
     const o = (f.j * NFX + f.i) * 4;
     const v = fieldVisual(f);
-    fieldData[o] = v.crop; fieldData[o + 1] = encodeSweep(v); fieldData[o + 2] = v.s; fieldData[o + 3] = v.dir;
+    fieldData[o] = v.crop; fieldData[o + 1] = v.g; fieldData[o + 2] = v.s; fieldData[o + 3] = encodeDir(v);
   }
   fieldTex.needsUpdate = true;
 }
@@ -399,19 +405,14 @@ vec3 potPaint(int slot, float phase, float along, float spacing, float patchy, f
   amt = mix(amt, farAmt, far);
   return mix(soilC, canC, amt);
 }
-// g 停在 1 时，小数编码「扫过用哪一槽 / 没扫过用哪一槽」。0 表示播种后盖在空地上。
-vec2 sweepSlots(float g, float pst) {
-  float baseSlot = 1.0;
-  float workSlot = 2.0;
-  float marker = g - pst;
-  if (marker > 0.001) {
-    float scaled = marker * 64.0;
-    workSlot = floor(scaled);
-    baseSlot = floor((scaled - workSlot) * 16.0 + 0.5);
-    workSlot = clamp(workSlot, 1.0, 15.0);
-    baseSlot = clamp(baseSlot, 1.0, 15.0);
-  }
-  return vec2(baseSlot, workSlot);
+// d.a 的小数是作业槽。0 表示播种后盖在空地上。有标记时 x 是上一道，y 是正在扫的一道；0 表示这侧没有变体色。
+vec2 jobSlots(float dirA) {
+  float marker = fract(dirA);
+  if (marker <= 0.0004) return vec2(0.0, 0.0);
+  float scaled = marker * 128.0;
+  float workSlot = floor(scaled + 0.001);
+  float baseSlot = floor((scaled - workSlot) * 32.0 + 0.5);
+  return vec2(clamp(baseSlot, 0.0, 31.0), clamp(workSlot, 0.0, 31.0));
 }
 float gShadow = 1.0, gRough = 0.92; vec2 gTilt = vec2(0.); vec3 gOv = vec3(0.); float gOvA = 0.;
 float aaLine(float x, float w){ float fw = fwidth(x); return 1. - smoothstep(w - fw, w + fw, abs(x)); }
@@ -568,8 +569,19 @@ vec3 farmAlbedo(vec2 p){
           canopyHere = false;
         }
         // 播种没写完时 g 停在 1。扫过的垄换成这道作业的地面色，没扫到的留空地或上一道变体。
+        // 出苗以后阶段色先算完。只在扫过的垄盖上这道变体；没扫到的留上一道，没有上一道就留阶段色。
+        vec2 slots = jobSlots(d.a);
+        bool marked = fract(d.a) > 0.0004;
         if (pst < 1.5) {
-          vec2 slots = sweepSlots(g, pst);
+          float baseSlot = marked ? (slots.x < 0.5 ? 1.0 : slots.x) : 1.0;
+          float workSlot = marked ? slots.y : 2.0;
+          int useSlot = int(clamp(worked && workSlot >= 1.0 ? workSlot : baseSlot, 1.0, 31.0));
+          float roughW, crestW, slopeW;
+          col = potPaint(useSlot, phase, uv.x, P.w, patchy, rowFw, roughW, crestW, slopeW);
+          gRough = roughW;
+          gTilt = rowAcrossW * slopeW * rowSee;
+          canopyHere = crestW > 0.35;
+        } else if (marked && ((worked && slots.y >= 1.0) || (!worked && slots.x > 1.0))) {
           int useSlot = int(worked ? slots.y : slots.x);
           float roughW, crestW, slopeW;
           col = potPaint(useSlot, phase, uv.x, P.w, patchy, rowFw, roughW, crestW, slopeW);
@@ -602,9 +614,12 @@ vec3 farmAlbedo(vec2 p){
       float speck = smoothstep(0.62, 0.95, hash12(floor(rc)));
       float swath = (1. - smoothstep(1.2, 3.4, abs(lv))) * (0.55 + 0.45 * n1);
       stub = mix(stub, mix(g_ochre, g_rust, 0.35), clamp(mix(0.2, speck * 0.7 + swath * 0.45, nearS), 0., 0.75));
+      vec2 slots = jobSlots(d.a);
+      bool marked = fract(d.a) > 0.0004;
       if (pst < 1.5) {
-        vec2 slots = sweepSlots(g, pst);
-        int useSlot = int(worked ? slots.y : slots.x);
+        float baseSlot = marked ? (slots.x < 0.5 ? 1.0 : slots.x) : 1.0;
+        float workSlot = marked ? slots.y : 2.0;
+        int useSlot = int(clamp(worked && workSlot >= 1.0 ? workSlot : baseSlot, 1.0, 31.0));
         float roughW, crestW, slopeW;
         float phaseW = fract(uv.y / max(P.y, 0.05));
         col = potPaint(useSlot, phaseW, uv.x, P.w, patchy, fwidth(uv.y / max(P.y, 0.05)), roughW, crestW, slopeW);
@@ -647,6 +662,15 @@ vec3 farmAlbedo(vec2 p){
       vec3 nxt = pst < 1.5 ? soil : pst < 2.5 ? young : pst < 3.5 ? canopy : pst < 4.5 ? bloom : pst < 5.5 ? mix(bloom, stub, 0.45) : pst < 6.5 ? stub : pst < 7.5 ? mix(soil, g_straw, 0.62) : pst < 8.5 ? mix(g_straw, g_rust, 0.55) : mix(g_deep, g_rust, 0.72);
       // 整地阶段不往出苗绿点上混。播种作业没走完时 g 停在 1，这里再挡一层。
       if (pst >= 1.5 && !(worked && pst >= 5.5)) col = mix(col, nxt, blendDot);
+      if (pst >= 1.5 && marked && ((worked && slots.y >= 1.0) || (!worked && slots.x > 1.0))) {
+        int useSlot = int(worked ? slots.y : slots.x);
+        float roughW, crestW, slopeW;
+        float phaseW = fract(uv.y / max(P.y, 0.05));
+        col = potPaint(useSlot, phaseW, uv.x, P.w, patchy, fwidth(uv.y / max(P.y, 0.05)), roughW, crestW, slopeW);
+        gTilt = acrossW * slopeW * rowVis;
+        gRough = roughW;
+        canopyHere = crestW > 0.35;
+      }
       }
     } else if (cut) {                                       // 残茬：作业带一深一浅（收割方向不同），带车辙
       float lane = floor(uv.y / LANE), lv = mod(uv.y, LANE) - LANE * .5;
@@ -2561,6 +2585,7 @@ function updateDock() {
     if (!f.owned) stat = '邻区快照 · 只读';
     else if (watch?.waiting && watch.work === 'sow') stat = `${CROPS[f.crop].name} · ${watch.label} · 播种扫过，生长还没计时`;
     else if (watch?.waiting && watch.work === 'variant') stat = `${CROPS[f.crop].name} · ${watch.label} · 扫过的垄换上这道作业的地面色`;
+    else if (watch?.waiting && watch.work === 'rest') stat = `${CROPS[f.crop].name} · ${watch.label} · 上一道色留在田上，等下一趟`;
     else if (watch?.waiting && watch.phase === 'O') stat = `${CROPS[f.crop].name} · 整地空田 · 生长链要等播种写完`;
     else if (watch?.waiting) stat = `${CROPS[f.crop].name} · 已规划 · 等第一趟作业，生长还没计时`;
     else if (watch?.failed) stat = `${CROPS[f.crop].name} · 烂在地里 · 没人收，不入仓`;

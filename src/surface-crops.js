@@ -236,8 +236,8 @@ export function resetSurfaceCrop(id) {
 }
 
 // 画面阶段下标和 fieldVisual 的 g 对齐：1 是整地裸土，2 起是生长链。
-// 10 号以后留给整地变体（中耕后、撒石灰）。播种扫过的垄用 2 号，也就是链上的第一段。
-export const POTATO_PAINT_SLOTS = 16;
+// 变体从 10 号起（或生长链之后），浅中耕、培土、杀秧和整地变体共用这一段。播种扫过的垄用 2 号。
+export const POTATO_PAINT_SLOTS = 32;
 export function potatoDrawLooks() {
   const def = SURFACE_CROPS.potato;
   const clock = def.stages.filter(s => !s.preplant && !s.after);
@@ -249,12 +249,17 @@ export function potatoDrawLooks() {
     if (i + 2 < slots.length && stage.look) slots[i + 2] = stage.look;
   });
   const variantSlot = {};
-  let next = Math.min(POTATO_PAINT_SLOTS - 1, 2 + clock.length);
-  for (const variant of till.variants || []) {
-    if (next >= POTATO_PAINT_SLOTS || !variant.look) break;
-    slots[next] = variant.look;
-    variantSlot[variant.id] = next;
-    next += 1;
+  const seen = new Set();
+  let next = Math.max(10, 2 + clock.length);
+  for (const stage of def.stages) {
+    for (const variant of stage.variants || []) {
+      if (!variant?.id || seen.has(variant.id) || !variant.look) continue;
+      if (next >= POTATO_PAINT_SLOTS) break;
+      seen.add(variant.id);
+      slots[next] = variant.look;
+      variantSlot[variant.id] = next;
+      next += 1;
+    }
   }
   const visual = def.visual || {};
   const rows = visual.rows || 8;

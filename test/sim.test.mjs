@@ -5,7 +5,7 @@ import { LAB_CLASSES, LAB_ENTRIES, CULT_EMPTY, CULT_EMPTY_NOTES, CULT_B_NOTES, G
 import {
   CROPS, L, PLOT, FIELD_HA, fields, fieldAt, fieldAtWorld, focus, rigs,
   plantField, abandonField, step, economy, quote, log, exportSnapshot, applySnapshot, RING,
-  stores, worldDay, cropWatch, fieldVisual, setPaused, setTimeScale, formatTimeScale,
+  stores, worldDay, cropWatch, fieldVisual, setPaused, setTimeScale, formatTimeScale, bindPotatoClock,
   DAY_SECONDS, MACHINE_MPS, WORLD_MIN_PER_REAL_MIN, warehouse, sellLot, sellStack, warehouseCapacity, placeBuilding, removeBuilding, buildings, rigReadout,
   SHOP, buySeed, buyItem, SEED_PER_FIELD, resetGame, paused, onHubParcel, HUB_SITES, POTATO_STAGES, POTATO_ROT_AT, POTATO_DAYS, cropDef, cropDossier,
   seasonAllowsSow, fieldOps,
@@ -16,6 +16,8 @@ import {
 } from '../src/_shared.js';
 import { productById, recipeById, deviceById, flowModel, LOOP_OFFSETS } from '../src/products.js';
 import { auditDispatch, rigCan, rigHas, hitchPlan, workWidthOf, lanesForWidth, potatoDrawLooks } from '../src/surface-crops.js';
+import { applyStagePayload, revertPotatoStages } from '../src/field-stage-live.js';
+import potatoB from '../data/field-stages/potato-b.json' with { type: 'json' };
 
 test('one colonist plot is about 4 km on the ring', () => {
   assert.ok(PLOT.along > 3500 && PLOT.along < 4500, PLOT.along);
@@ -758,7 +760,10 @@ test('planning a potato does not start the growth clock until sowing writes the 
   assert.equal(b.plantedAt, null);
   assert.equal(cropWatch(b).waiting, true);
   assert.equal(cropWatch(b).day, 0);
-  assert.equal(fieldVisual(b).g, 0);
+  assert.equal(b.plantedAt, null);
+  assert.equal(fieldVisual(b).g, 1);
+  assert.equal(fieldVisual(b).coat, '');
+  assert.equal(fieldVisual(b).s, 0);
   const held = worldDay;
   const kind = planter.kind;
   planter.kind = 'held';
@@ -1402,6 +1407,88 @@ test('sowing progress paints past an idle preplant job, and a variant keeps its 
   } finally {
     def.jobs.shift();
     delete f.jobS.zzz_pre;
+    resetGame();
+  }
+});
+
+test('shallow till after emergence paints only the swept lanes and keeps that color when the pass ends', () => {
+  resetGame();
+  const applied = applyStagePayload({ schema: 'ringsheaf.field-stage/1', cropId: 'potato', crops: { potato: potatoB } });
+  try {
+    assert.equal(applied.ok, true);
+    bindPotatoClock();
+    setPaused(false);
+    stores.seed = 2;
+    stores.fertilizer = 2;
+    const f = fieldAt(focus.i, focus.j);
+    assert.equal(plantField(f, 'potato').ok, true);
+    const draw = potatoDrawLooks();
+    assert.ok(draw.variantSlot.Em1 >= 10, draw.variantSlot.Em1);
+    assert.equal(draw.slots[draw.variantSlot.Em1].color, '#4a4844');
+    assert.ok(draw.variantSlot.Hi1 > draw.variantSlot.Em1);
+    assert.ok(draw.variantSlot.Ha1 >= 10);
+    assert.equal(draw.sowSlot, 2);
+    assert.notEqual(draw.variantSlot.Em1, 3);
+
+    f.jobS.potato_base_fert = 999;
+    let vis = fieldVisual(f);
+    assert.equal(vis.g, 1, 'a finished preplant pass stays on the bare band');
+    assert.equal(vis.coat, '');
+    assert.equal(vis.base, 'Ob');
+    assert.equal(vis.s, 0);
+    assert.equal(f.plantedAt, null);
+    assert.equal(cropWatch(f).work, 'rest');
+    assert.equal(cropWatch(f).label, '基肥后');
+
+    const emerg = cropDef('potato').jobs.find(j => j.id === 'potato_shallow');
+    f.plantedAt = worldDay - (emerg.window.from + 0.4);
+    f.jobS.potato_plant = 999;
+    vis = fieldVisual(f);
+    assert.ok(vis.g >= 3 && vis.g < 4, vis.g);
+    assert.equal(vis.coat, '');
+    assert.equal(vis.base, '');
+    assert.equal(vis.s, 0);
+
+    f.jobS.potato_shallow = 1;
+    vis = fieldVisual(f);
+    assert.equal(vis.coat, 'Em1');
+    assert.equal(vis.base, '');
+    assert.ok(vis.s > 0 && vis.s < L.LANES, vis.s);
+    const during = vis.g;
+    assert.ok(during >= 3 && during < 4, during);
+
+    f.jobS.potato_shallow = 999;
+    vis = fieldVisual(f);
+    assert.equal(vis.coat, '');
+    assert.equal(vis.base, 'Em1');
+    assert.equal(vis.s, 0);
+    assert.ok(Math.abs(vis.g - during) < 0.05, vis.g);
+
+    const hill = cropDef('potato').jobs.find(j => j.id === 'potato_hill');
+    f.plantedAt = worldDay - (hill.window.from + 0.2);
+    f.jobS.potato_hill = 1;
+    vis = fieldVisual(f);
+    assert.equal(vis.coat, 'Hi1');
+    assert.equal(vis.base, 'Em1');
+    assert.ok(vis.s > 0 && vis.s < L.LANES, vis.s);
+    assert.ok(vis.g >= 4 && vis.g < 5, vis.g);
+
+    f.jobS.potato_hill = 999;
+    f.jobS.potato_topdress = 999;
+    const irrigate = cropDef('potato').jobs.find(j => j.id === 'potato_irrigate');
+    f.plantedAt = worldDay - (irrigate.window.from + 0.2);
+    vis = fieldVisual(f);
+    assert.equal(vis.coat, '');
+    assert.equal(vis.base, 'Hi2');
+    assert.equal(vis.s, 0);
+    f.jobS.potato_irrigate = 1;
+    vis = fieldVisual(f);
+    assert.equal(vis.coat, 'Bu1');
+    assert.equal(vis.base, 'Hi2');
+    assert.ok(vis.s > 0 && vis.s < L.LANES, vis.s);
+  } finally {
+    revertPotatoStages();
+    bindPotatoClock();
     resetGame();
   }
 });

@@ -520,8 +520,59 @@ function preplantFront(f, def) {
   }
   return idle;
 }
+function variantName(def, id) {
+  if (!id) return '';
+  for (const stage of def.stages || []) {
+    const hit = (stage.variants || []).find(v => v.id === id);
+    if (hit) return hit.name || id;
+  }
+  return id;
+}
+// 有变体色或会写蒙版的工序才刷田面，灌溉这种自动工序也算。车没动不提前换色。
+// 做完的一道留在 base，下一道只盖扫过的垄。
+function paintsField(job) {
+  if (!job) return false;
+  return !!(job.variant || job.writesMask);
+}
+function groundSweep(f, def) {
+  ensureJobs(f);
+  const clock = f.plantedAt != null;
+  const day = clock ? fieldDay(f) : 0;
+  let base = '';
+  for (const job of def.jobs) {
+    if (!paintsField(job)) continue;
+    const when = job.window?.when;
+    if (when === 'after') {
+      if (!f.harvested) break;
+    } else if (when === 'clock') {
+      if (!clock || day < (job.window?.from || 0)) break;
+    } else if (when !== 'before') continue;
+    const prog = f.jobS[job.id] || 0;
+    const done = prog >= passLanes(f, job.id) - 1e-3;
+    if (clock && when === 'before') {
+      if (!done) continue;
+      if (job.writesMask) base = '';
+      else if (job.variant) base = job.variant;
+      continue;
+    }
+    if (done) {
+      if (job.writesMask) base = '';
+      else if (job.variant) base = job.variant;
+      continue;
+    }
+    if (prog > 1e-3) {
+      return {
+        coat: job.writesMask ? 'sow' : (job.variant || ''),
+        base,
+        lanes: seenLanes(f, job.id, prog),
+      };
+    }
+    if (when !== 'before') break;
+  }
+  return { coat: '', base, lanes: 0 };
+}
 // 作业前沿只跟着真正在走的那一趟。灌溉和水网不算，免得整块被涂成已收。
-// 钟还没起时，画整地或薯播扫过的垄。钟起了以后，没做完的基肥不再挡住出苗。
+// 做完的一趟不再把整块标成已扫，否则间隙和收工都会被盖成作业带。
 function visualFront(f) {
   const def = cropOf(f);
   if (!def) return 0;
@@ -531,7 +582,6 @@ function visualFront(f) {
     return front ? front.lanes : 0;
   }
   const day = fieldDay(f);
-  let front = 0;
   for (const job of def.jobs) {
     if (job.auto || job.spray || job.drone || job.window?.when === 'before') continue;
     if (job.window?.when === 'after') {
@@ -539,9 +589,8 @@ function visualFront(f) {
     } else if (day < job.window.from) break;
     const prog = f.jobS[job.id] || 0;
     if (prog < passLanes(f, job.id) - 1e-3) return seenLanes(f, job.id, prog);
-    front = prog;
   }
-  return front;
+  return 0;
 }
 // 整地（preplant）和清田（after）不占生长链。土豆的画面阶段从 2 起：1 是还没写完蒙版的裸土。
 function clockStages(def) {
@@ -565,19 +614,20 @@ export function fieldVisual(f) {
   }
   const def = cropOf(f);
   if (f && f.live && !f.paid && def) {
-    if (f.plantedAt == null) {
-      const front = preplantFront(f, def);
-      const swept = front ? front.lanes : 0;
-      const coat = front?.job ? (front.job.writesMask ? 'sow' : (front.job.variant || '')) : '';
-      // g 仍是 1：测试和生长钟都把它当成「蒙版还没写完」。作业色写在 coat / base，贴图时再编码。
-      return { crop: f.crop, g: potato && swept > 0 ? 1 : 0, s: swept, dir: f.dir, coat, base: front?.base || '' };
+    const sweep = groundSweep(f, def);
+    const coat = sweep.lanes > 0 ? sweep.coat : '';
+    const base = sweep.base || '';
+    if (f.plantedAt == null || !plantJobDone(f)) {
+      // g 仍是 1：蒙版还没写完，生长钟不起。没在扫的时候也停在 1，避免做完一道就掉进 g<0.01 的暗褐裸土。
+      const s = sweep.lanes > 0 ? sweep.lanes : (f.plantedAt == null ? 0 : visualFront(f));
+      return { crop: f.crop, g: potato ? 1 : 0, s, dir: f.dir, coat, base };
     }
-    // 播种或移栽没走完：整块保持裸土。机器走过的垄仍由 s 画出来。
-    if (!plantJobDone(f)) return { crop: f.crop, g: potato ? 1 : 0, s: visualFront(f), dir: f.dir };
     const day = fieldDay(f);
-    if (potato) return { crop: f.crop, g: stageBlend(def, day), s: visualFront(f), dir: f.dir };
+    // 有变体色的作业自己带垄。没变体的（起薯）仍用前沿，收工后前沿归零，不把整块涂成已扫。
+    const s = sweep.lanes > 0 ? sweep.lanes : visualFront(f);
+    if (potato) return { crop: f.crop, g: stageBlend(def, day), s, dir: f.dir, coat, base };
     const g = Math.min(0.95, def.maturity > 0 ? day / def.maturity : 0.5);
-    return { crop: f.crop, g, s: visualFront(f), dir: f.dir };
+    return { crop: f.crop, g, s, dir: f.dir, coat, base };
   }
   return { crop: f.crop, g: f.state === 0 ? 0 : f.g, s: (f.state === 3 || f.state === 4) ? f.s : 0, dir: f.dir };
 }
@@ -590,22 +640,24 @@ export function cropWatch(f) {
   if (!f?.live || f.paid || !def) return null;
   const days = def.rotAt;
   if (f.plantedAt == null) {
-    const front = preplantFront(f, def);
-    const swept = front ? front.lanes : 0;
+    const sweep = groundSweep(f, def);
+    const swept = sweep.lanes;
     const prep = def.stages.find(s => s.preplant);
     if (prep && swept > 0) {
       let label = PHASE_LABEL[prep.id] || prep.name;
       let work = 'prep';
-      if (front.job?.writesMask) {
+      if (sweep.coat === 'sow') {
         const dest = clockStages(def)[0];
-        label = dest?.name || front.job.name;
+        label = dest?.name || '播种后';
         work = 'sow';
-      } else if (front.job?.variant) {
-        const hit = (prep.variants || []).find(v => v.id === front.job.variant);
-        label = hit?.name || front.job.name;
+      } else if (sweep.coat) {
+        label = variantName(def, sweep.coat);
         work = 'variant';
       }
       return { day: 0, phase: prep.id, label, front: swept, days, waiting: true, work };
+    }
+    if (prep && sweep.base) {
+      return { day: 0, phase: prep.id, label: variantName(def, sweep.base), front: 0, days, waiting: true, work: 'rest' };
     }
     return { day: 0, phase: 'plan', label: '待播种', front: 0, days, waiting: true };
   }
