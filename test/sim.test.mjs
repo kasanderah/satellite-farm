@@ -4,7 +4,7 @@ import { LAB_CLASSES, LAB_ENTRIES, CULT_EMPTY, CULT_EMPTY_NOTES, CULT_B_NOTES, G
 import {
   CROPS, L, PLOT, FIELD_HA, fields, fieldAt, fieldAtWorld, focus, rigs,
   plantField, abandonField, step, economy, quote, log, exportSnapshot, applySnapshot, RING,
-  stores, worldDay, cropWatch, fieldVisual, setPaused, setTimeScale,
+  stores, worldDay, cropWatch, fieldVisual, setPaused, setTimeScale, formatTimeScale,
   DAY_SECONDS, MACHINE_MPS, WORLD_MIN_PER_REAL_MIN, warehouse, sellLot, sellStack, warehouseCapacity, placeBuilding, removeBuilding, buildings, rigReadout,
   SHOP, buySeed, buyItem, SEED_PER_FIELD, resetGame, paused, onHubParcel, HUB_SITES, POTATO_STAGES, POTATO_ROT_AT, POTATO_DAYS, cropDef, cropDossier,
   seasonAllowsSow, fieldOps,
@@ -150,6 +150,10 @@ test('a potato follows the placeholder clock through stages and a paid harvest',
   assert.ok(Math.abs(worldDay - day - 8) < 1e-6, '4× moves the same world clock');
   setTimeScale(2.5);
   assert.equal(economy.timeScale, 2.5);
+  assert.equal(formatTimeScale(), '2.5×');
+  setTimeScale(4);
+  assert.equal(formatTimeScale(economy.timeScale), '4×');
+  setTimeScale(2.5);
   setTimeScale(0);
   assert.equal(economy.timeScale, 2.5);
   setPaused(true);
@@ -517,8 +521,15 @@ test('asset lab lists the workshop classes and the live placeholders', () => {
   for (const id of ['field-bare', 'field-road', 'field-potato-hill', 'field-potato-harvest', 'field-soy-harvest', 'field-barley-young', 'field-barley-harvest', 'field-cabbage-head', 'field-cabbage-harvest']) {
     const entry = LAB_ENTRIES.find(e => e.id === id);
     assert.ok(entry, id);
-    assert.equal(entry.cls, 'unit', id);
+    assert.equal(entry.cls, 'ref', id);
+    assert.match(entry.notes, /参考外观/);
   }
+  const editorRig = LAB_ENTRIES.find(e => e.id === 'machine-editor');
+  assert.equal(editorRig.cls, 'machine');
+  assert.match(editorRig.notes, /ringsheaf\.assetlab\.machines\.v1/);
+  assert.match(editorRig.notes, /环穗资产/);
+  assert.equal(LAB_ENTRIES.find(e => e.id === 'field').cls, 'unit');
+  assert.equal(LAB_ENTRIES.find(e => e.id === 'deck').cls, 'unit');
   const ids = new Set(LAB_ENTRIES.map(e => e.id));
   for (const id of ['field', 'deck', 'hub', 'tank', 'arm', 'tractor']) assert.ok(ids.has(id), id);
   const cls = new Set(LAB_CLASSES.map(c => c.id));

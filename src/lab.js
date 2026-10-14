@@ -10,6 +10,7 @@ import {
   cultureTankKit, warehouseKit, garageKit, processKit, armKit, irrigatorKit,
 } from './prefabs.js';
 import { createFieldWorkshop } from './lab-field.js';
+import { createMachineWorkshop } from './lab-machine-editor.js';
 
 const $ = id => document.getElementById(id);
 const STORE = 'ringsheaf.assetlab.briefs';
@@ -18,12 +19,11 @@ const C = hex => new THREE.Color(hex);
 const viewEl = $('view');
 const fieldShop = createFieldWorkshop({
   viewEl,
-  briefForm: $('brief-form'),
   panel: $('field-panel'),
   bar: $('fieldbar'),
-  statesEl: $('states'),
-  hintEl: $('hint'),
-  mainEl: document.querySelector('main'),
+});
+const machineShop = createMachineWorkshop({
+  panel: $('machine-panel'),
 });
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance', preserveDrawingBuffer: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
@@ -484,6 +484,7 @@ const BUILD = {
   'ref-kenney-shovel': () => refShows.shovel(),
   'ref-sketchfab-combine': () => refShows.combine(),
   'field-stage': () => fieldShop.build(),
+  'machine-editor': () => machineShop.build(),
 };
 for (const entry of LAB_ENTRIES) {
   if (entry.road) BUILD[entry.id] = buildRoad;
@@ -512,12 +513,13 @@ function frameSpan(entry) {
   const hfov = 2 * Math.atan(Math.tan(vfov / 2) * Math.max(cam.aspect, 0.4));
   const half = entry.span * 0.56;
   eye.dist = Math.max(half / Math.tan(vfov / 2), half / Math.tan(hfov / 2)) * 1.12;
+  const overhead = entry.cls === 'unit' || entry.look || entry.road;
   eye.tx = 0;
-  eye.ty = entry.cls === 'unit' ? 0 : Math.min(entry.span * 0.08, 5);
+  eye.ty = overhead ? 0 : Math.min(entry.span * 0.08, 5);
   eye.tz = 0;
-  eye.yaw = entry.cls === 'rail' ? 0.7 : entry.cls === 'ref' ? 0.62 : 0.85;
-  eye.pitch = entry.cls === 'unit' ? 0.95 : entry.cls === 'rail' ? 0.42 : entry.cls === 'ref' ? 0.4 : 0.46;
-  if (entry.cls === 'ref') eye.ty = 1.15;
+  eye.yaw = entry.cls === 'rail' ? 0.7 : entry.cls === 'ref' && !overhead ? 0.62 : 0.85;
+  eye.pitch = overhead ? 0.95 : entry.cls === 'rail' ? 0.42 : entry.cls === 'ref' ? 0.4 : 0.46;
+  if (entry.cls === 'ref' && !overhead) eye.ty = 1.15;
   if (entry.id === 'grub-trough') {
     const occ = shown && shown.group.userData.cult && shown.group.userData.cult.occupied;
     if (occ) {
@@ -550,6 +552,14 @@ function frameSpan(entry) {
     eye.tz = 0;
     eye.dist = 24;
   }
+  if (entry.id === 'machine-editor') {
+    eye.yaw = 0.02;
+    eye.pitch = 1.2;
+    eye.ty = 0;
+    eye.tx = 0;
+    eye.tz = 0;
+    eye.dist = 220;
+  }
   if (entry.id === 'cult-a' || entry.id === 'cult-b') {
     eye.yaw = entry.id === 'cult-b' ? 0.58 : 0.46;
     eye.pitch = entry.id === 'cult-b' ? 0.58 : 0.72;
@@ -558,11 +568,29 @@ function frameSpan(entry) {
   }
 }
 
+function applyEditorChrome(kind) {
+  const on = kind === 'field' || kind === 'machine';
+  const main = document.querySelector('main');
+  if (main) main.classList.toggle('field-on', on);
+  const brief = $('brief-form');
+  if (brief) brief.hidden = on;
+  const states = $('states');
+  if (states) states.style.display = on ? 'none' : '';
+  const hint = $('hint');
+  if (!hint) return;
+  if (kind === 'field') hint.innerHTML = '拖动 旋转 · 右键 平移 · 滚轮 缩放<br>空格 播放 / 暂停';
+  else if (kind === 'machine') hint.innerHTML = '拖动 旋转 · 右键 平移 · 滚轮 缩放<br>顶视一趟 · 宽度即巷距';
+  else hint.innerHTML = '拖动 旋转 · 右键 平移 · 滚轮 缩放<br>1–4 状态 · 灯组可关';
+}
+
 function show(id) {
   const entry = LAB_ENTRIES.find(e => e.id === id) || LAB_ENTRIES[0];
   curId = entry.id;
   disposeStage();
-  fieldShop.setActive(entry.id === 'field-stage');
+  const editor = entry.id === 'field-stage' ? 'field' : entry.id === 'machine-editor' ? 'machine' : '';
+  fieldShop.setActive(editor === 'field');
+  machineShop.setActive(editor === 'machine');
+  applyEditorChrome(editor);
   const built = BUILD[entry.id]();
   stage.add(built.group);
   shown = built;
@@ -804,6 +832,7 @@ addEventListener('keydown', (e) => {
     }
     return;
   }
+  if (machineShop.active) return;
   const map = { 1: 'idle', 2: 'job', 3: 'sel', 4: 'break' };
   if (map[e.key]) setState(map[e.key]);
 });
@@ -912,4 +941,5 @@ window.__lab = {
   },
   draw() { placeCam(); renderer.render(scene, cam); },
   field: fieldShop.api,
+  machine: machineShop.api,
 };

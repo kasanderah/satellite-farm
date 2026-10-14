@@ -134,19 +134,19 @@ export const HUB_PLOT_NOTES = `中枢地块。农场 7×7 的正中一格。不�
 选中：地块有选中圈，指示更亮。
 损坏：警示变红，能源收暗，轿厢停在设备层。`;
 
-// 地表田块的当前外观。工坊里用现有田块网格加阶段色，方便对裸土、四作物和田路，不在这里重画正式美术。
+// 闲置的阶段色块。只作参考外观，放在 ref。阶段数据仍只在田间 → 阶段编辑器。
 function fieldLook(id, name, notes, look) {
   return {
-    id, cls: 'unit', name, size: '48 × 48 m', span: 52, notes, look,
+    id, cls: 'ref', name, size: '48 × 48 m', span: 52, notes, look,
   };
 }
 function fieldSeries() {
-  const bare = '现有田块网格。垄和田埂是现在这套，冠层是阶段色块，不是最终植株。';
+  const bare = '参考外观，不是阶段数据。阶段在田间 → 阶段编辑器里改。现有田块网格加阶段色，冠层是色块，不是最终植株。';
   return [
     fieldLook('field-bare', '裸土', `${bare} 还没出苗，只有土垄。`, { cover: 0, canopy: '#6f6a61', cut: 0 }),
     {
-      id: 'field-road', cls: 'unit', name: '田路', size: '64 × 40 m', span: 72,
-      notes: '两块田之间的路。路面和田肩用现在的土色和金属色，没有新模型。',
+      id: 'field-road', cls: 'ref', name: '田路', size: '64 × 40 m', span: 72,
+      notes: '参考外观。两块田之间的路。路面和田肩用现在的土色和金属色，没有新模型。阶段数据不在这里。',
       road: true,
     },
     fieldLook('field-potato-till', '商品薯 · 整地', `${bare} 整地空田，垄还是裸的。`, { cover: 0.04, canopy: '#6f6a61', cut: 0 }),
@@ -188,7 +188,6 @@ export const LAB_ENTRIES = [
     notes: CULT_B_NOTES,
   },
   { id: 'field', cls: 'unit', name: '地表田块', size: '128 × 128 m', span: 128, notes: '露天小格。地面是垄，四周是田埂。没有顶。' },
-  ...fieldSeries(),
   {
     id: 'field-stage',
     cls: 'field',
@@ -216,6 +215,18 @@ export const LAB_ENTRIES = [
     span: 640,
     notes: HUB_PLOT_NOTES,
   },
+  {
+    id: 'machine-editor',
+    cls: 'machine',
+    name: '农机编辑器',
+    size: '顶视 128 m · 一趟',
+    span: 150,
+    notes: `农机编辑器 v1。顶视按工作宽度画一趟路径，巷距跟主游戏 lanesForWidth 同一算法。类别是拖拉机、挂具、一体机。能力标签用工序里的 machine id，并带上调度用的 cap。
+
+保存写 localStorage 钥匙 ringsheaf.assetlab.machines.v1。下载的 JSON 结构见 docs/machine-lab-v1.md。主游戏本轮不读这份，种植和派单仍用原来的机具表。
+
+占位外形用 refs/machines 里已有的低模。正式模型以后向「环穗资产」要新下载再接入。导入只记下文件名。挂接和仓容先留字段。`,
+  },
   { id: 'tractor', cls: 'machine', name: '拖拉机', size: '约 4.5 m', span: 16, notes: '地表农机。自由行驶，后面可换农具。' },
   { id: 'planter', cls: 'machine', name: '播种机', size: '约 6 m', span: 18, notes: '拖拉机拖着覆土起垄器。' },
   { id: 'hiller', cls: 'machine', name: '培土机', size: '约 6 m', span: 18, notes: '圆盘把土抛回垄脊。' },
@@ -235,6 +246,7 @@ export const LAB_ENTRIES = [
   { id: 'process', cls: 'equip', name: '加工棚', size: '12 × 8 m', span: 28, notes: '中枢上的加工。只建在中枢。' },
   { id: 'arm', cls: 'rail', name: '收获臂', size: '沿槽排', span: 42, notes: '龙门臂。沿轨道走，作业时探向槽。' },
   { id: 'irrigator', cls: 'rail', name: '喷灌桁架', size: '跨 124 m', span: 140, notes: '沿田块往返的桁架。' },
+  ...fieldSeries(),
   {
     id: 'ref-tractor-compare',
     cls: 'ref',

@@ -186,7 +186,7 @@ function makeMachine() {
 }
 
 export function createFieldWorkshop(els) {
-  const { viewEl, briefForm, panel, bar, statesEl, hintEl, mainEl } = els;
+  const { panel, bar } = els;
   const builtin = CROPS.filter(c => c.plantable).map(cropVisual);
   let docs = { potato: potatoDoc() };
   let cropId = 'potato';
@@ -1272,16 +1272,8 @@ ${variants}
 
   function setActive(on) {
     active = on;
-    if (mainEl) mainEl.classList.toggle('field-on', on);
-    if (briefForm) briefForm.hidden = on;
     if (panel) panel.hidden = !on;
     if (bar) bar.hidden = !on;
-    if (statesEl) statesEl.style.display = on ? 'none' : '';
-    if (hintEl) {
-      hintEl.innerHTML = on
-        ? '拖动 旋转 · 右键 平移 · 滚轮 缩放<br>空格 播放 / 暂停'
-        : '拖动 旋转 · 右键 平移 · 滚轮 缩放<br>1–4 状态 · 灯组可关';
-    }
     if (on) {
       paintDynamic(true);
       curveDirty = true;

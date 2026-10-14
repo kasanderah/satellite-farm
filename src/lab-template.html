@@ -39,7 +39,7 @@ main{display:grid;grid-template-columns:220px 1fr 268px;min-height:0}
 #brief .foot{margin-top:8px;font-size:11px;letter-spacing:.06em;color:var(--mut);line-height:1.55}
 main.field-on{grid-template-columns:200px 1fr 320px}
 #brief-form{display:flex;flex-direction:column;gap:10px;min-height:0}
-#brief-form[hidden],#field-panel[hidden],#fieldbar[hidden]{display:none !important}
+#brief-form[hidden],#field-panel[hidden],#fieldbar[hidden],#machine-panel[hidden]{display:none !important}
 #fieldbar{position:absolute;left:12px;right:12px;bottom:12px;z-index:2;display:flex;flex-direction:column;gap:6px;background:rgba(10,12,20,.82);border:1px solid var(--line);padding:8px 10px}
 #fieldbar button,#field-panel button{font:inherit;color:var(--fg);background:transparent;border:1px solid var(--line);padding:4px 8px;letter-spacing:.08em;cursor:pointer;font-size:12px}
 #fieldbar button.on,#field-panel button.on{border-color:var(--sig);color:var(--zone)}
@@ -62,6 +62,10 @@ main.field-on{grid-template-columns:200px 1fr 320px}
 .fs-job{display:flex;flex-direction:column;gap:4px;padding:6px 0;border-top:1px solid var(--line)}
 .fs-job b{font-weight:500;font-size:12px;letter-spacing:.06em}
 #fs-status{font-size:12px;letter-spacing:.06em;line-height:1.45}
+.me-tags{display:flex;flex-direction:column;gap:3px;max-height:168px;overflow:auto;border:1px solid var(--line);padding:6px}
+.me-tags label{flex-direction:row !important;align-items:center;gap:6px;letter-spacing:.04em;font-size:12px;color:var(--fg)}
+.me-tags small{color:var(--mut);letter-spacing:.04em}
+#me-status{font-size:12px;letter-spacing:.04em;line-height:1.45}
 </style></head><body>
 <header>
   <div class="brand"><i></i><div><b>环穗 · 资产工坊</b><small>设计沙盒 · 定稿后由主进度接入</small></div></div>
@@ -90,6 +94,7 @@ main.field-on{grid-template-columns:200px 1fr 320px}
     <div class="foot">备注只留在这台浏览器里，不写入环穗存档。</div>
     </div>
     <div id="field-panel" class="fs" hidden></div>
+    <div id="machine-panel" class="fs" hidden></div>
   </aside>
 </main>
 <script>__BUNDLE__</script>

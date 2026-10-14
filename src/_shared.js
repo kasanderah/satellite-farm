@@ -315,6 +315,13 @@ export function setTimeScale(v) {
   if (!Number.isFinite(n) || n <= 0) return;
   economy.timeScale = Math.min(10000, n);
 }
+// 右上角和 F2 都读 economy.timeScale。整数不带小数，2.5 仍显示 2.5×。
+export function formatTimeScale(v = economy.timeScale) {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return '1×';
+  const shown = Math.abs(n - Math.round(n)) < 1e-6 ? String(Math.round(n)) : String(Math.round(n * 100) / 100);
+  return `${shown}×`;
+}
 export const PHASE_LABEL = { plan: '待播种', rot: '烂在地里' };
 function decorateStages(def) {
   return def.stages.map(s => {

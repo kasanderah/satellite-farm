@@ -42,6 +42,11 @@ const MACHINE_JOB = {
   drone_treat: { cap: 'pest_treat', load: 'pest', drone: true },
 };
 
+// 工序里的 machine id → 调度能力。农机编辑器的标签跟这份对齐，不另起一套词。
+export const MACHINE_CAP_BY_ID = Object.fromEntries(
+  Object.entries(MACHINE_JOB).map(([id, row]) => [id, row.cap]),
+);
+
 function faceStage(row, from, to, doc, extra = {}) {
   const days = extra.days ?? (to - from);
   return {

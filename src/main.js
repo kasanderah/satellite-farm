@@ -11,7 +11,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { HorizontalTiltShiftShader } from 'three/addons/shaders/HorizontalTiltShiftShader.js';
 import { VerticalTiltShiftShader } from 'three/addons/shaders/VerticalTiltShiftShader.js';
-import { PALETTE, CROPS, TEX_ID, L, fields, harvesters, haulers, drones, step, TRUNKS_X, TRUNKS_Z, depots, inCrater, ROADS, RING, LAYERS, CUT, wrapX, PLOT, economy, focus, signals, log, plantField, abandonField, quote, setTimeScale, setPaused, paused, exportSnapshot, applySnapshot, fieldAtWorld, fieldAt, fieldOrigin, simTime, worldDay, stores, rigs, fieldVisual, cropWatch, POTATO_DAYS, POTATO_STAGES, warehouse, buildings, sellLot, sellStack, warehouseStacks, warehouseCapacity, placeBuilding, removeBuilding, rigReadout, SHOP, buySeed, buyItem, SEED_PER_FIELD, FERT_PER_FIELD, resetGame, CULTURES, DECK_CLIMATE, tanks, cultureWatch, startCulture, tendCulture, harvestCulture, BUILDING_KINDS, CULTURE_CELLS, tankSite, devices, potatoStock, fertPlan, cultureFeedPlan, millWatch, startMill, removeMill, orderProcess, HUB_SITES, cropDossier, MACHINE_SHOP, buyMachine, cropDef, boomWatch, rigProfile, DRONE_SHOP, workDrones, buyDrone, sectorLight, sectorWord, dayCenter, setWorldDay, RING_OMEGA, bindPotatoClock, bindSurfaceClock } from './_shared.js';
+import { PALETTE, CROPS, TEX_ID, L, fields, harvesters, haulers, drones, step, TRUNKS_X, TRUNKS_Z, depots, inCrater, ROADS, RING, LAYERS, CUT, wrapX, PLOT, economy, focus, signals, log, plantField, abandonField, quote, setTimeScale, setPaused, paused, exportSnapshot, applySnapshot, fieldAtWorld, fieldAt, fieldOrigin, simTime, worldDay, stores, rigs, fieldVisual, cropWatch, POTATO_DAYS, POTATO_STAGES, warehouse, buildings, sellLot, sellStack, warehouseStacks, warehouseCapacity, placeBuilding, removeBuilding, rigReadout, SHOP, buySeed, buyItem, SEED_PER_FIELD, FERT_PER_FIELD, resetGame, CULTURES, DECK_CLIMATE, tanks, cultureWatch, startCulture, tendCulture, harvestCulture, BUILDING_KINDS, CULTURE_CELLS, tankSite, devices, potatoStock, fertPlan, cultureFeedPlan, millWatch, startMill, removeMill, orderProcess, HUB_SITES, cropDossier, MACHINE_SHOP, buyMachine, cropDef, boomWatch, rigProfile, DRONE_SHOP, workDrones, buyDrone, sectorLight, sectorWord, dayCenter, setWorldDay, RING_OMEGA, bindPotatoClock, bindSurfaceClock, formatTimeScale } from './_shared.js';
 import { applyStagePayload, revertPotatoStages, bootFieldStageSource, writeStageStore, forgetPotatoStage, stageBadge } from './field-stage-live.js';
 import { potatoDrawLooks } from './surface-crops.js';
 import { ridgeCrestT } from './field-stages.js';
@@ -2502,6 +2502,9 @@ function paintWorldClock() {
   const minute = $('kpi-mh');
   if (hour) hour.style.transform = `rotate(${((c.hh % 12) + c.mm / 60) * 30}deg)`;
   if (minute) minute.style.transform = `rotate(${c.mm * 6}deg)`;
+  const rate = $('kpi-rate');
+  if (rate) rate.textContent = formatTimeScale(economy.timeScale);
+  paintRates();
   const clock = $('clock');
   if (clock) {
     const band = viewLayer === 'surface' && !camS.deck ? ` · ${sectorWord(camS.x, worldDay)}` : '';
@@ -2648,7 +2651,7 @@ function bootStagesSync() {
   return '';
 }
 const bootStageNote = bootStagesSync();
-$('kpi').innerHTML = `<div class="k-rev"><small>营收</small><b class="hv" id="kpi-rev">0</b></div><div class="k-day"><small>世界日</small><b id="kpi-day">0</b></div><div class="k-time"><small>时刻</small><span class="clk"><i class="face" id="kpi-face" aria-hidden="true"><i id="kpi-hh"></i><i id="kpi-mh"></i></i><b id="kpi-hm">00:00</b></span></div><div class="k-act"><small>作业</small><b class="hv" id="kpi-act">0</b><em>/ ${rigs.length}</em></div>`;
+$('kpi').innerHTML = `<div class="k-rev"><small>营收</small><b class="hv" id="kpi-rev">0</b></div><div class="k-day"><small>世界日</small><b id="kpi-day">0</b></div><div class="k-time"><small>时刻</small><span class="clk"><i class="face" id="kpi-face" aria-hidden="true"><i id="kpi-hh"></i><i id="kpi-mh"></i></i><b id="kpi-hm">00:00</b><b id="kpi-rate">1×</b></span></div><div class="k-act"><small>作业</small><b class="hv" id="kpi-act">0</b><em>/ ${rigs.length}</em></div>`;
 $('dock').innerHTML = `<div class="who"><b id="selid"></b><span id="selstat"></span></div><div id="dock-legend" class="legend" hidden></div><div id="bar"><i id="selbar"></i></div><div class="ops"><button type="button" id="act-plant"><b>种植</b><small>再选作物</small></button><button type="button" id="act-clear"><b>清地</b><small>已种也弃收</small></button></div><div class="row" id="selbtns"></div>`;
 for (const c of CROPS) if (c.plantable) {
   const b = document.createElement('button');
@@ -2678,10 +2681,10 @@ $('act-clear').addEventListener('click', () => {
 $('rates').innerHTML = `<span>1×：1 分 = 2 世界时</span>` + [1, 4, 12].map(r => `<button type="button" data-rate="${r}">${r}×</button>`).join('') + `<input id="rate-in" type="text" inputmode="decimal" value="1" aria-label="世界钟倍率" autocomplete="off">`;
 function applyTypedRate() {
   const v = +$('rate-in').value;
-  if (!(v > 0)) { paintRates(); return; }
-  setTimeScale(v); paintRates(); saveSoon();
+  if (!(v > 0)) { paintWorldClock(); return; }
+  setTimeScale(v); paintWorldClock(); saveSoon();
 }
-$('rates').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; setTimeScale(+b.dataset.rate); paintRates(); saveSoon(); });
+$('rates').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; setTimeScale(+b.dataset.rate); paintWorldClock(); saveSoon(); });
 $('rate-in').addEventListener('focus', e => e.target.select());
 $('rate-in').addEventListener('mouseup', e => e.preventDefault());
 $('rate-in').addEventListener('change', applyTypedRate);
@@ -2955,6 +2958,8 @@ if (!VIEW && !Q.has('fresh')) {
   loadNow();
   if (holdSave) offerUnreadableSave();
 }
+paintRates();
+paintWorldClock();
 addEventListener('beforeunload', saveNow);
 writeFields();
 function frame(now) {
