@@ -142,12 +142,33 @@ export function forgetPotatoStage(storage) {
   storage.setItem(FIELD_STAGE_STORE, JSON.stringify(prev));
 }
 
+// 仓库默认只停用这一轮的土豆覆写，不删 crops.potato。旁边的 custom1 留在库里，但不能冒充土豆槽。
+export function suspendPotatoStage(storage) {
+  if (!storage) return { kept: false };
+  const prev = readStageStore(storage);
+  if (!prev || prev.__parseError || !prev.crops || typeof prev.crops !== 'object' || Array.isArray(prev.crops)) return { kept: false };
+  const kept = !!(prev.crops.potato || prev.crops.crop_potato);
+  prev.potatoSuspended = true;
+  storage.setItem(FIELD_STAGE_STORE, JSON.stringify(prev));
+  return { kept };
+}
+
+export function resumePotatoStage(storage) {
+  if (!storage) return;
+  const prev = readStageStore(storage);
+  if (!prev || prev.__parseError || !prev.potatoSuspended) return;
+  delete prev.potatoSuspended;
+  storage.setItem(FIELD_STAGE_STORE, JSON.stringify(prev));
+}
+
 // stagesParam 为 repo 时忽略浏览器里的工坊存档。其余值留给地址栏上的 JSON 地址，由页面自己去取。
+// potatoSuspended 是「仓库默认」留下的：土豆文档还在，这一轮先不套上。重读会先清掉这个标记。
 export function bootFieldStageSource(storage, stagesParam) {
   if (stagesParam === 'repo') return { ok: true, origin: 'repo', skipped: true };
   const payload = readStageStore(storage);
   if (!payload) return { ok: true, origin: 'repo', skipped: true };
   if (payload.__parseError) return { ok: false, reason: 'json', message: '工坊存档不是 JSON：' + payload.__parseError };
+  if (payload.potatoSuspended) return { ok: true, origin: 'repo', skipped: true, suspended: true };
   const applied = applyStagePayload(payload);
   if (!applied.ok) return { ...applied, origin: cropDef('potato')?.stageOrigin === 'workshop' ? 'workshop' : 'repo' };
   return applied;

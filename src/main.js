@@ -12,7 +12,7 @@ import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { HorizontalTiltShiftShader } from 'three/addons/shaders/HorizontalTiltShiftShader.js';
 import { VerticalTiltShiftShader } from 'three/addons/shaders/VerticalTiltShiftShader.js';
 import { PALETTE, CROPS, TEX_ID, L, fields, harvesters, haulers, drones, step, TRUNKS_X, TRUNKS_Z, depots, inCrater, ROADS, RING, LAYERS, CUT, wrapX, PLOT, economy, focus, signals, log, plantField, abandonField, quote, setTimeScale, setPaused, paused, exportSnapshot, applySnapshot, fieldAtWorld, fieldAt, fieldOrigin, simTime, worldDay, stores, rigs, fieldVisual, cropWatch, POTATO_DAYS, POTATO_STAGES, warehouse, buildings, sellLot, sellStack, warehouseStacks, warehouseCapacity, placeBuilding, removeBuilding, rigReadout, SHOP, buySeed, buyItem, SEED_PER_FIELD, FERT_PER_FIELD, resetGame, CULTURES, DECK_CLIMATE, tanks, cultureWatch, startCulture, tendCulture, harvestCulture, BUILDING_KINDS, CULTURE_CELLS, tankSite, devices, potatoStock, fertPlan, cultureFeedPlan, millWatch, startMill, removeMill, orderProcess, HUB_SITES, cropDossier, MACHINE_SHOP, buyMachine, cropDef, boomWatch, rigProfile, DRONE_SHOP, workDrones, buyDrone, sectorLight, sectorWord, dayCenter, setWorldDay, RING_OMEGA, bindPotatoClock, bindSurfaceClock, formatTimeScale } from './_shared.js';
-import { applyStagePayload, revertPotatoStages, bootFieldStageSource, writeStageStore, forgetPotatoStage, stageBadge } from './field-stage-live.js';
+import { applyStagePayload, revertPotatoStages, bootFieldStageSource, writeStageStore, suspendPotatoStage, resumePotatoStage, stageBadge } from './field-stage-live.js';
 import { potatoDrawLooks, POTATO_PAINT_SLOTS } from './surface-crops.js';
 import { ridgeCrestT } from './field-stages.js';
 import { migrateSave } from './save-contract.js';
@@ -2656,6 +2656,7 @@ function adoptStageText(text, persist) {
   return applied;
 }
 function reloadStageStore() {
+  try { resumePotatoStage(localStorage); } catch { /* 无痕模式 */ }
   const booted = bootFieldStageSource(localStorage, null);
   bindPlayableClocks();
   if (!booted.ok) {
@@ -2669,10 +2670,11 @@ function reloadStageStore() {
   return booted;
 }
 function useRepoStages() {
-  try { forgetPotatoStage(localStorage); } catch { /* 无痕模式 */ }
+  let kept = false;
+  try { kept = suspendPotatoStage(localStorage).kept; } catch { /* 无痕模式 */ }
   revertPotatoStages();
   bindPlayableClocks();
-  paintStageChrome('');
+  paintStageChrome(kept ? '已改用仓库默认。土豆工坊档还在这台浏览器里，重读即可恢复，不用回工坊再存。' : '');
 }
 function bindPlayableClocks() {
   bindPotatoClock();

@@ -6,7 +6,7 @@ import { CROPS, bindPotatoClock, bindSurfaceClock } from '../src/_shared.js';
 import { placeholderFieldDoc, forkCropDocument } from '../src/field-stages.js';
 import {
   applyStagePayload, revertPotatoStages, potatoDocFromPayload, bootFieldStageSource,
-  writeStageStore, forgetPotatoStage, stageBadge, FIELD_STAGE_STORE, readStageStore,
+  writeStageStore, forgetPotatoStage, suspendPotatoStage, resumePotatoStage, stageBadge, FIELD_STAGE_STORE, readStageStore,
 } from '../src/field-stage-live.js';
 
 function edited() {
@@ -295,6 +295,45 @@ test('a forked workshop crop does not replace potato or the plant menu', () => {
     assert.equal(CROPS.find(c => c.id === 'potato').name, '中熟商品薯');
     assert.deepEqual(CROPS.filter(c => c.plantable).map(c => c.id), ['soy', 'potato', 'cabbage', 'feed_barley']);
     assert.equal(potatoDocFromPayload({ crops: { custom1: fork, potato } }).cropId, 'potato');
+  } finally {
+    revertPotatoStages();
+    bindPotatoClock();
+  }
+});
+
+test('仓库默认 keeps the potato doc so a later reread does not see only custom1', () => {
+  const store = memoryStore();
+  const potato = edited();
+  potato.cropName = '芽土豆';
+  potato.name = '芽土豆';
+  const fork = forkCropDocument(potato, 'custom1');
+  store.setItem(FIELD_STAGE_STORE, JSON.stringify({
+    schema: 'ringsheaf.field-stage/1',
+    cropId: 'potato',
+    crops: { potato, custom1: fork },
+  }));
+  const held = suspendPotatoStage(store);
+  assert.equal(held.kept, true);
+  const parked = readStageStore(store);
+  assert.equal(parked.potatoSuspended, true);
+  assert.equal(parked.cropId, 'potato');
+  assert.equal(parked.crops.potato.cropId, 'potato');
+  assert.equal(parked.crops.custom1.cropId, 'custom1');
+  const skipped = bootFieldStageSource(store, null);
+  assert.equal(skipped.suspended, true);
+  assert.equal(skipped.skipped, true);
+  assert.equal(cropDef('potato').stageOrigin, 'repo');
+  resumePotatoStage(store);
+  assert.equal(readStageStore(store).potatoSuspended, undefined);
+  assert.equal(readStageStore(store).crops.potato.cropName, '芽土豆');
+  const booted = bootFieldStageSource(store, null);
+  try {
+    assert.equal(booted.ok, true, booted.message);
+    assert.equal(booted.origin, 'workshop');
+    assert.equal(booted.doc.cropId, 'potato');
+    bindPotatoClock();
+    assert.equal(CROPS.find(c => c.id === 'potato').name, '芽土豆');
+    assert.equal(stageBadge(), '工坊覆写');
   } finally {
     revertPotatoStages();
     bindPotatoClock();
