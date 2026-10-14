@@ -13,7 +13,7 @@ import { HorizontalTiltShiftShader } from 'three/addons/shaders/HorizontalTiltSh
 import { VerticalTiltShiftShader } from 'three/addons/shaders/VerticalTiltShiftShader.js';
 import { PALETTE, CROPS, TEX_ID, L, fields, harvesters, haulers, drones, step, TRUNKS_X, TRUNKS_Z, depots, inCrater, ROADS, RING, LAYERS, CUT, wrapX, PLOT, economy, focus, signals, log, plantField, abandonField, quote, setTimeScale, setPaused, paused, exportSnapshot, applySnapshot, fieldAtWorld, fieldAt, fieldOrigin, simTime, worldDay, stores, rigs, fieldVisual, cropWatch, POTATO_DAYS, POTATO_STAGES, warehouse, buildings, sellLot, sellStack, warehouseStacks, warehouseCapacity, placeBuilding, removeBuilding, rigReadout, SHOP, buySeed, buyItem, SEED_PER_FIELD, FERT_PER_FIELD, resetGame, CULTURES, DECK_CLIMATE, tanks, cultureWatch, startCulture, tendCulture, harvestCulture, BUILDING_KINDS, CULTURE_CELLS, tankSite, devices, potatoStock, fertPlan, cultureFeedPlan, millWatch, startMill, removeMill, orderProcess, HUB_SITES, cropDossier, MACHINE_SHOP, buyMachine, cropDef, boomWatch, rigProfile, DRONE_SHOP, workDrones, buyDrone, sectorLight, sectorWord, dayCenter, setWorldDay, RING_OMEGA, bindPotatoClock, bindSurfaceClock, formatTimeScale } from './_shared.js';
 import { applyStagePayload, revertPotatoStages, bootFieldStageSource, writeStageStore, forgetPotatoStage, stageBadge } from './field-stage-live.js';
-import { potatoDrawLooks } from './surface-crops.js';
+import { potatoDrawLooks, POTATO_PAINT_SLOTS } from './surface-crops.js';
 import { ridgeCrestT } from './field-stages.js';
 import { migrateSave } from './save-contract.js';
 import { productById } from './products.js';
@@ -71,7 +71,7 @@ const U = {
   uMirrorOn: { value: 1 },
   uLockDay: { value: 0 },
 };
-const POT_SLOTS = 10;
+const POT_SLOTS = POTATO_PAINT_SLOTS;
 const potTintData = new Float32Array(POT_SLOTS * 3 * 4);
 const potRidgeData = new Float32Array(POT_SLOTS * 2 * 4);
 const potTintTex = new THREE.DataTexture(potTintData, 3, POT_SLOTS, THREE.RGBAFormat, THREE.FloatType);
@@ -90,8 +90,17 @@ function writePotColor(offset, hex) {
   potTintData[offset + 1] = potColor.g;
   potTintData[offset + 2] = potColor.b;
 }
+let potDrawNow = null;
+function encodeSweep(v) {
+  if (!potDrawNow || !(v.g >= 1 && v.g < 1.5) || !v.coat) return v.g;
+  const work = v.coat === 'sow' ? potDrawNow.sowSlot : (potDrawNow.variantSlot[v.coat] || potDrawNow.sowSlot);
+  const base = v.base ? (potDrawNow.variantSlot[v.base] || potDrawNow.bareSlot) : potDrawNow.bareSlot;
+  if (work === potDrawNow.sowSlot && base === potDrawNow.bareSlot) return 1;
+  return 1 + work / 64 + base / 1024;
+}
 function syncPotatoPaint() {
   const draw = potatoDrawLooks();
+  potDrawNow = draw;
   U.uPotOn.value = draw.workshop ? 1 : 0;
   const potato = CROPS.findIndex(c => c.id === 'potato');
   const packed = U.uCropP.value[potato];
@@ -141,7 +150,7 @@ function writeFields() {
   for (const f of fields) {
     const o = (f.j * NFX + f.i) * 4;
     const v = fieldVisual(f);
-    fieldData[o] = v.crop; fieldData[o + 1] = v.g; fieldData[o + 2] = v.s; fieldData[o + 3] = v.dir;
+    fieldData[o] = v.crop; fieldData[o + 1] = encodeSweep(v); fieldData[o + 2] = v.s; fieldData[o + 3] = v.dir;
   }
   fieldTex.needsUpdate = true;
 }
@@ -390,6 +399,20 @@ vec3 potPaint(int slot, float phase, float along, float spacing, float patchy, f
   amt = mix(amt, farAmt, far);
   return mix(soilC, canC, amt);
 }
+// g 停在 1 时，小数编码「扫过用哪一槽 / 没扫过用哪一槽」。0 表示播种后盖在空地上。
+vec2 sweepSlots(float g, float pst) {
+  float baseSlot = 1.0;
+  float workSlot = 2.0;
+  float marker = g - pst;
+  if (marker > 0.001) {
+    float scaled = marker * 64.0;
+    workSlot = floor(scaled);
+    baseSlot = floor((scaled - workSlot) * 16.0 + 0.5);
+    workSlot = clamp(workSlot, 1.0, 15.0);
+    baseSlot = clamp(baseSlot, 1.0, 15.0);
+  }
+  return vec2(baseSlot, workSlot);
+}
 float gShadow = 1.0, gRough = 0.92; vec2 gTilt = vec2(0.); vec3 gOv = vec3(0.); float gOvA = 0.;
 float aaLine(float x, float w){ float fw = fwidth(x); return 1. - smoothstep(w - fw, w + fw, abs(x)); }
 float mirrorDay(float x){
@@ -544,11 +567,15 @@ vec3 farmAlbedo(vec2 p){
           gTilt *= 0.45;
           canopyHere = false;
         }
-        // 播种没写完时 g 停在 1。扫过的垄要和裸土分开，否则蒙版在画面上是平的。
-        if (worked && pst < 1.5) {
-          vec3 seeded = mix(g_ochre, g_straw, 0.42);
-          col = mix(col, seeded, 0.72);
-          gRough = 0.88;
+        // 播种没写完时 g 停在 1。扫过的垄换成这道作业的地面色，没扫到的留空地或上一道变体。
+        if (pst < 1.5) {
+          vec2 slots = sweepSlots(g, pst);
+          int useSlot = int(worked ? slots.y : slots.x);
+          float roughW, crestW, slopeW;
+          col = potPaint(useSlot, phase, uv.x, P.w, patchy, rowFw, roughW, crestW, slopeW);
+          gRough = roughW;
+          gTilt = rowAcrossW * slopeW * rowSee;
+          canopyHere = crestW > 0.35;
         }
       } else {
       vec3 soil = g_soil * (0.78 + 0.1 * prof * rowVis) * (1. + patchy);
@@ -576,14 +603,14 @@ vec3 farmAlbedo(vec2 p){
       float swath = (1. - smoothstep(1.2, 3.4, abs(lv))) * (0.55 + 0.45 * n1);
       stub = mix(stub, mix(g_ochre, g_rust, 0.35), clamp(mix(0.2, speck * 0.7 + swath * 0.45, nearS), 0., 0.75));
       if (pst < 1.5) {
-        col = soil;
-        if (worked) {
-          vec3 seeded = mix(g_ochre, g_straw, 0.42);
-          float furrow = 1.0 - smoothstep(0.8, 3.6, abs(lv));
-          col = mix(soil * 0.78, seeded, 0.66 + furrow * 0.16);
-        }
-        gTilt = acrossW * slope * (worked ? 0.85 : 0.35) * rowVis;
-        gRough = worked ? 0.88 : 0.97;
+        vec2 slots = sweepSlots(g, pst);
+        int useSlot = int(worked ? slots.y : slots.x);
+        float roughW, crestW, slopeW;
+        float phaseW = fract(uv.y / max(P.y, 0.05));
+        col = potPaint(useSlot, phaseW, uv.x, P.w, patchy, fwidth(uv.y / max(P.y, 0.05)), roughW, crestW, slopeW);
+        gTilt = acrossW * slopeW * (worked ? 0.85 : 0.35) * rowVis;
+        gRough = roughW;
+        canopyHere = crestW > 0.35;
       } else if (pst < 5.5) {
         col = pst < 2.5 ? mix(soil, young, 0.55) : pst < 4.5 ? canopy : bloom;
         gTilt = acrossW * slope * (pst < 2.5 ? 0.7 : 0.5) * rowVis;
@@ -2532,6 +2559,8 @@ function updateDock() {
   let stat = selNote;
   if (!stat) {
     if (!f.owned) stat = '邻区快照 · 只读';
+    else if (watch?.waiting && watch.work === 'sow') stat = `${CROPS[f.crop].name} · ${watch.label} · 播种扫过，生长还没计时`;
+    else if (watch?.waiting && watch.work === 'variant') stat = `${CROPS[f.crop].name} · ${watch.label} · 扫过的垄换上这道作业的地面色`;
     else if (watch?.waiting && watch.phase === 'O') stat = `${CROPS[f.crop].name} · 整地空田 · 生长链要等播种写完`;
     else if (watch?.waiting) stat = `${CROPS[f.crop].name} · 已规划 · 等第一趟作业，生长还没计时`;
     else if (watch?.failed) stat = `${CROPS[f.crop].name} · 烂在地里 · 没人收，不入仓`;

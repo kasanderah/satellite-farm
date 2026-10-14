@@ -47,8 +47,23 @@ export const MACHINE_CAP_BY_ID = Object.fromEntries(
   Object.entries(MACHINE_JOB).map(([id, row]) => [id, row.cap]),
 );
 
+function variantLook(row, variant, doc) {
+  return stageLook({
+    ...row,
+    ...variant,
+    color: variant.color || row.color,
+    canopy: variant.canopy || row.canopy,
+    ridge: variant.ridge || row.ridge,
+  }, doc.ridge);
+}
+
 function faceStage(row, from, to, doc, extra = {}) {
   const days = extra.days ?? (to - from);
+  const variants = (row.variants || []).filter(v => v && v.id).map(v => ({
+    id: v.id,
+    name: v.name || v.id,
+    look: variantLook(row, v, doc),
+  }));
   return {
     id: row.id,
     name: row.name || row.id,
@@ -56,6 +71,7 @@ function faceStage(row, from, to, doc, extra = {}) {
     color: row.color || soil,
     effect: row.effect || '',
     look: stageLook(row, doc.ridge),
+    variants,
     preplant: !!extra.preplant,
     after: !!extra.after,
   };
@@ -109,6 +125,7 @@ export function compilePlayable(raw, meta = {}) {
       drone,
       preplant: window.when === 'before' && !writesMask,
       writesMask,
+      variant: op.variant || null,
       impl: ext.impl || (machine && String(machine).startsWith('impl_') ? machine : null),
       implAny: ext.implAny || null,
       self: ext.self || (machine && !String(machine).startsWith('impl_') && !drone ? machine : null),
@@ -219,16 +236,26 @@ export function resetSurfaceCrop(id) {
 }
 
 // 画面阶段下标和 fieldVisual 的 g 对齐：1 是整地裸土，2 起是生长链。
+// 10 号以后留给整地变体（中耕后、撒石灰）。播种扫过的垄用 2 号，也就是链上的第一段。
+export const POTATO_PAINT_SLOTS = 16;
 export function potatoDrawLooks() {
   const def = SURFACE_CROPS.potato;
   const clock = def.stages.filter(s => !s.preplant && !s.after);
   const till = def.stages.find(s => s.preplant) || clock[0];
   const blank = till.look;
-  const slots = Array.from({ length: 10 }, () => blank);
+  const slots = Array.from({ length: POTATO_PAINT_SLOTS }, () => blank);
   slots[1] = blank;
   clock.forEach((stage, i) => {
     if (i + 2 < slots.length && stage.look) slots[i + 2] = stage.look;
   });
+  const variantSlot = {};
+  let next = Math.min(POTATO_PAINT_SLOTS - 1, 2 + clock.length);
+  for (const variant of till.variants || []) {
+    if (next >= POTATO_PAINT_SLOTS || !variant.look) break;
+    slots[next] = variant.look;
+    variantSlot[variant.id] = next;
+    next += 1;
+  }
   const visual = def.visual || {};
   const rows = visual.rows || 8;
   return {
@@ -238,6 +265,9 @@ export function potatoDrawLooks() {
     along: visual.plantAlong || 0.4,
     height: visual.plantHeight || 0.55,
     slots,
+    variantSlot,
+    sowSlot: 2,
+    bareSlot: 1,
   };
 }
 export function potatoProfileFromRaw(raw) {

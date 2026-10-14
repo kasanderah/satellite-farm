@@ -499,6 +499,27 @@ function plantJobDone(f) {
   if (!job) return true;
   return jobDone(f, job.id);
 }
+function preplantJob(job) {
+  if (!job || job.auto || job.spray || job.drone || job.window?.when === 'after') return false;
+  return job.window?.when === 'before' || !!job.writesMask;
+}
+// 钟还没起时，已经走起来的那一趟优先。排在前面但进度还是 0 的工，不能把后面的薯播蒙版盖住。
+function preplantFront(f, def) {
+  let idle = null;
+  let base = '';
+  for (const job of def.jobs) {
+    if (!preplantJob(job)) continue;
+    const prog = f.jobS[job.id] || 0;
+    const done = prog >= passLanes(f, job.id) - 1e-3;
+    if (done) {
+      if (job.variant) base = job.variant;
+      continue;
+    }
+    if (prog > 1e-3) return { job, lanes: seenLanes(f, job.id, prog), base };
+    if (!idle) idle = { job, lanes: 0, base };
+  }
+  return idle;
+}
 // 作业前沿只跟着真正在走的那一趟。灌溉和水网不算，免得整块被涂成已收。
 // 钟还没起时，画整地或薯播扫过的垄。钟起了以后，没做完的基肥不再挡住出苗。
 function visualFront(f) {
@@ -506,13 +527,8 @@ function visualFront(f) {
   if (!def) return 0;
   ensureJobs(f);
   if (f.plantedAt == null) {
-    for (const job of def.jobs) {
-      if (job.auto || job.spray || job.drone || job.window?.when === 'after') continue;
-      if (job.window?.when !== 'before' && !job.writesMask) continue;
-      const prog = f.jobS[job.id] || 0;
-      if (prog < passLanes(f, job.id) - 1e-3) return seenLanes(f, job.id, prog);
-    }
-    return 0;
+    const front = preplantFront(f, def);
+    return front ? front.lanes : 0;
   }
   const day = fieldDay(f);
   let front = 0;
@@ -550,8 +566,11 @@ export function fieldVisual(f) {
   const def = cropOf(f);
   if (f && f.live && !f.paid && def) {
     if (f.plantedAt == null) {
-      const swept = visualFront(f);
-      return { crop: f.crop, g: potato && swept > 0 ? 1 : 0, s: swept, dir: f.dir };
+      const front = preplantFront(f, def);
+      const swept = front ? front.lanes : 0;
+      const coat = front?.job ? (front.job.writesMask ? 'sow' : (front.job.variant || '')) : '';
+      // g 仍是 1：测试和生长钟都把它当成「蒙版还没写完」。作业色写在 coat / base，贴图时再编码。
+      return { crop: f.crop, g: potato && swept > 0 ? 1 : 0, s: swept, dir: f.dir, coat, base: front?.base || '' };
     }
     // 播种或移栽没走完：整块保持裸土。机器走过的垄仍由 s 画出来。
     if (!plantJobDone(f)) return { crop: f.crop, g: potato ? 1 : 0, s: visualFront(f), dir: f.dir };
@@ -571,10 +590,22 @@ export function cropWatch(f) {
   if (!f?.live || f.paid || !def) return null;
   const days = def.rotAt;
   if (f.plantedAt == null) {
-    const swept = visualFront(f);
+    const front = preplantFront(f, def);
+    const swept = front ? front.lanes : 0;
     const prep = def.stages.find(s => s.preplant);
     if (prep && swept > 0) {
-      return { day: 0, phase: prep.id, label: PHASE_LABEL[prep.id] || prep.name, front: swept, days, waiting: true };
+      let label = PHASE_LABEL[prep.id] || prep.name;
+      let work = 'prep';
+      if (front.job?.writesMask) {
+        const dest = clockStages(def)[0];
+        label = dest?.name || front.job.name;
+        work = 'sow';
+      } else if (front.job?.variant) {
+        const hit = (prep.variants || []).find(v => v.id === front.job.variant);
+        label = hit?.name || front.job.name;
+        work = 'variant';
+      }
+      return { day: 0, phase: prep.id, label, front: swept, days, waiting: true, work };
     }
     return { day: 0, phase: 'plan', label: '待播种', front: 0, days, waiting: true };
   }

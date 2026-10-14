@@ -15,7 +15,7 @@ import {
   devices, potatoStock, fertPlan, cultureFeedPlan, millWatch, startMill, orderProcess, removeMill,
 } from '../src/_shared.js';
 import { productById, recipeById, deviceById, flowModel, LOOP_OFFSETS } from '../src/products.js';
-import { auditDispatch, rigCan, rigHas, hitchPlan, workWidthOf, lanesForWidth } from '../src/surface-crops.js';
+import { auditDispatch, rigCan, rigHas, hitchPlan, workWidthOf, lanesForWidth, potatoDrawLooks } from '../src/surface-crops.js';
 
 test('one colonist plot is about 4 km on the ring', () => {
   assert.ok(PLOT.along > 3500 && PLOT.along < 4500, PLOT.along);
@@ -91,6 +91,8 @@ test('a potato follows the placeholder clock through stages and a paid harvest',
   assert.equal(planterNow.f, bare);
   assert.ok(Math.abs(fieldVisual(bare).s - 1) < 0.08, fieldVisual(bare).s);
   assert.equal(cropWatch(bare).phase, 'O');
+  assert.equal(cropWatch(bare).label, '播种后');
+  assert.equal(fieldVisual(bare).coat, 'sow');
   assert.equal(fieldVisual(bare).g, 1);
   const lifterHold = rigs.find(r => r.kind === 'lifter');
   lifterHold.kind = 'held';
@@ -1356,4 +1358,50 @@ test('clearing a planted field abandons the season and sends machines off', () =
   assert.equal(stores.seed, seedLeft);
   assert.ok(rigs.every(r => r.f !== f));
   resetGame();
+});
+
+test('sowing progress paints past an idle preplant job, and a variant keeps its ground name', () => {
+  resetGame();
+  setPaused(false);
+  stores.seed = 2;
+  stores.fertilizer = 2;
+  const f = fieldAt(focus.i, focus.j);
+  assert.equal(plantField(f, 'potato').ok, true);
+  const def = cropDef('potato');
+  const sow = def.jobs.find(j => j.writesMask);
+  const dummy = {
+    id: 'zzz_pre', name: '占位整地', auto: false, spray: false, drone: false,
+    writesMask: false, variant: 'O1', window: { when: 'before', stage: 'O', from: 0, to: 0 },
+  };
+  def.jobs.unshift(dummy);
+  f.jobS.zzz_pre = 0;
+  f.jobS[sow.id] = 1;
+  try {
+    const vis = fieldVisual(f);
+    assert.equal(vis.g, 1);
+    assert.equal(vis.coat, 'sow');
+    assert.ok(vis.s > 0.5, vis.s);
+    assert.equal(cropWatch(f).phase, 'O');
+    assert.equal(cropWatch(f).label, '播种后');
+    f.jobS.zzz_pre = 999;
+    const covered = fieldVisual(f);
+    assert.equal(covered.base, 'O1');
+    assert.equal(covered.coat, 'sow');
+    assert.equal(covered.g, 1);
+    f.jobS[sow.id] = 0;
+    f.jobS.zzz_pre = 1;
+    const mid = fieldVisual(f);
+    assert.equal(mid.coat, 'O1');
+    assert.equal(mid.g, 1);
+    assert.equal(cropWatch(f).work, 'variant');
+    assert.equal(cropWatch(f).label, '中耕后');
+    const draw = potatoDrawLooks();
+    assert.ok(draw.variantSlot.O1 >= 2, draw.variantSlot.O1);
+    assert.equal(draw.slots[draw.variantSlot.O1].color, '#4a4844');
+    assert.equal(draw.sowSlot, 2);
+  } finally {
+    def.jobs.shift();
+    delete f.jobS.zzz_pre;
+    resetGame();
+  }
 });
