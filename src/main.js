@@ -11,7 +11,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { HorizontalTiltShiftShader } from 'three/addons/shaders/HorizontalTiltShiftShader.js';
 import { VerticalTiltShiftShader } from 'three/addons/shaders/VerticalTiltShiftShader.js';
-import { PALETTE, CROPS, TEX_ID, L, fields, harvesters, haulers, drones, step, TRUNKS_X, TRUNKS_Z, depots, inCrater, ROADS, RING, LAYERS, CUT, wrapX, PLOT, economy, focus, signals, log, plantField, abandonField, quote, setTimeScale, setPaused, paused, exportSnapshot, applySnapshot, fieldAtWorld, fieldAt, fieldOrigin, simTime, worldDay, stores, rigs, fieldVisual, cropWatch, POTATO_DAYS, POTATO_STAGES, warehouse, buildings, sellLot, sellStack, warehouseStacks, warehouseCapacity, placeBuilding, removeBuilding, rigReadout, SHOP, buySeed, buyItem, SEED_PER_FIELD, FERT_PER_FIELD, resetGame, CULTURES, DECK_CLIMATE, tanks, cultureWatch, startCulture, tendCulture, harvestCulture, BUILDING_KINDS, CULTURE_CELLS, tankSite, devices, potatoStock, fertPlan, cultureFeedPlan, millWatch, startMill, removeMill, orderProcess, HUB_SITES, cropDossier, MACHINE_SHOP, buyMachine, cropDef, boomWatch, rigProfile, DRONE_SHOP, workDrones, buyDrone, sectorLight, sectorWord, dayCenter, setWorldDay, RING_OMEGA, bindPotatoClock, bindSurfaceClock, formatTimeScale } from './_shared.js';
+import { PALETTE, CROPS, TEX_ID, L, fields, harvesters, haulers, drones, step, TRUNKS_X, TRUNKS_Z, depots, inCrater, ROADS, RING, LAYERS, CUT, wrapX, PLOT, economy, focus, signals, log, plantField, abandonField, quote, setTimeScale, setPaused, paused, exportSnapshot, applySnapshot, fieldAtWorld, fieldAt, fieldOrigin, simTime, worldDay, stores, rigs, fieldVisual, cropWatch, stageBoard, POTATO_DAYS, POTATO_STAGES, warehouse, buildings, sellLot, sellStack, warehouseStacks, warehouseCapacity, placeBuilding, removeBuilding, rigReadout, SHOP, buySeed, buyItem, SEED_PER_FIELD, FERT_PER_FIELD, resetGame, CULTURES, DECK_CLIMATE, tanks, cultureWatch, startCulture, tendCulture, harvestCulture, BUILDING_KINDS, CULTURE_CELLS, tankSite, devices, potatoStock, fertPlan, cultureFeedPlan, millWatch, startMill, removeMill, orderProcess, HUB_SITES, cropDossier, MACHINE_SHOP, buyMachine, cropDef, boomWatch, rigProfile, DRONE_SHOP, workDrones, buyDrone, sectorLight, sectorWord, dayCenter, setWorldDay, RING_OMEGA, bindPotatoClock, bindSurfaceClock, formatTimeScale } from './_shared.js';
 import { applyStagePayload, revertPotatoStages, bootFieldStageSource, writeStageStore, suspendPotatoStage, resumePotatoStage, stageBadge } from './field-stage-live.js';
 import { potatoDrawLooks, POTATO_PAINT_SLOTS } from './surface-crops.js';
 import { ridgeCrestT } from './field-stages.js';
@@ -93,13 +93,14 @@ function writePotColor(offset, hex) {
 let potDrawNow = null;
 // 行向占 d.a 的整数部分（>0.5 即横垄）。小数是作业槽：work/128 + base/4096，不超过 0.5。
 // work 为 0 表示这会儿没有车在刷色。base 为 0 表示没有上一道变体。
-// 间隙整田铺色时，把留下的变体放进 /128。单独的 base/4096 太小，硬刷后间隙会掉成空地。
+// 没有正在扫的变体时，把留下的颜色放进 /128。单独的 base/4096 太小，硬刷后会掉成空地。
+// 间隙（mask < 0）和收割前沿都走这条，不单给播种前。
 function encodeDir(v) {
   const orient = v.dir > 0.5 ? 1 : 0;
   if (!potDrawNow || CROPS[v.crop]?.id !== 'potato') return orient;
   let workId = v.coat || '';
   let baseId = v.base || '';
-  if (v.mask < 0 && !workId && baseId) {
+  if (!workId && baseId) {
     workId = baseId;
     baseId = '';
   }
@@ -559,43 +560,51 @@ vec3 farmAlbedo(vec2 p){
         gRough = roughA;
         gTilt = rowAcrossW * slopeA * rowSee;
         canopyHere = crestA > 0.35;
+        // 钟没起（g 停在 1）不散点。钟一起，每一档都往下一档散点，培土→膨大和杀秧→待收同一条，不看阶段号。
         float fracW = clamp(g - pst, 0.0, 0.999);
         float blendDotW = step(hash12(floor(uv * vec2(0.58, 0.47)) + pst), fracW);
-        if (pst >= 1.5 && !(worked && pst >= 5.5)) {
+        bool clockOn = pst >= 1.5;
+        vec2 slots = jobSlots(d.a);
+        bool marked = fract(d.a) > 0.0004;
+        bool gap = d.b < -0.5;
+        bool harvestBand = d.b >= 0.0 && d.b < 20.0;
+        bool swept = !gap && worked;
+        if (!clockOn) {
+          float baseSlot = marked ? (slots.x < 0.5 ? 1.0 : slots.x) : 1.0;
+          float workSlot = marked ? slots.y : 2.0;
+          int useSlot = 1;
+          if (gap && marked && slots.y >= 1.0) useSlot = int(clamp(slots.y, 1.0, 31.0));
+          else if (swept && workSlot >= 1.0) useSlot = int(clamp(workSlot, 1.0, 31.0));
+          else useSlot = int(clamp(baseSlot, 1.0, 31.0));
+          float roughW, crestW, slopeW;
+          col = potPaint(useSlot, phase, uv.x, P.w, patchy, rowFw, roughW, crestW, slopeW);
+          gRough = roughW;
+          gTilt = rowAcrossW * slopeW * rowSee;
+          canopyHere = crestW > 0.35;
+        } else if (harvestBand && swept) {
+          vec3 soilLane = texelFetch(uPotTint, ivec2(0, slot), 0).rgb;
+          col = mix(col, soilLane * 0.72, 0.62);
+          gRough = max(gRough, 0.9);
+          gTilt *= 0.35;
+          canopyHere = false;
+        } else {
+          int coat = 0;
+          if (swept && marked && slots.y >= 1.0) coat = int(slots.y);
+          else if (!swept && marked && slots.x > 1.0) coat = int(slots.x);
+          else if (gap && marked && slots.y >= 1.0) coat = int(slots.y);
+          if (coat > 0) {
+            float roughW, crestW, slopeW;
+            col = potPaint(coat, phase, uv.x, P.w, patchy, rowFw, roughW, crestW, slopeW);
+            gRough = roughW;
+            gTilt = rowAcrossW * slopeW * rowSee;
+            canopyHere = crestW > 0.35;
+          }
           col = mix(col, colB, blendDotW);
           if (blendDotW > 0.5) {
             gRough = roughB;
             gTilt = rowAcrossW * slopeB * rowSee;
             canopyHere = crestB > 0.35;
           }
-        }
-        if (worked && pst >= 5.5) {
-          vec3 soilLane = texelFetch(uPotTint, ivec2(0, slot), 0).rgb;
-          col = mix(col, soilLane * 0.82, 0.55);
-          gRough = max(gRough, 0.9);
-          gTilt *= 0.45;
-          canopyHere = false;
-        }
-        // 播种没写完时 g 停在 1。扫过的垄换成这道作业的地面色，没扫到的留空地或上一道变体。
-        // 出苗以后阶段色先算完。只在扫过的垄盖上这道变体；没扫到的留上一道，没有上一道就留阶段色。
-        vec2 slots = jobSlots(d.a);
-        bool marked = fract(d.a) > 0.0004;
-        if (pst < 1.5) {
-          float baseSlot = marked ? (slots.x < 0.5 ? 1.0 : slots.x) : 1.0;
-          float workSlot = marked ? slots.y : 2.0;
-          int useSlot = int(clamp(worked && workSlot >= 1.0 ? workSlot : baseSlot, 1.0, 31.0));
-          float roughW, crestW, slopeW;
-          col = potPaint(useSlot, phase, uv.x, P.w, patchy, rowFw, roughW, crestW, slopeW);
-          gRough = roughW;
-          gTilt = rowAcrossW * slopeW * rowSee;
-          canopyHere = crestW > 0.35;
-        } else if (marked && ((worked && slots.y >= 1.0) || (!worked && slots.x > 1.0))) {
-          int useSlot = int(worked ? slots.y : slots.x);
-          float roughW, crestW, slopeW;
-          col = potPaint(useSlot, phase, uv.x, P.w, patchy, rowFw, roughW, crestW, slopeW);
-          gRough = roughW;
-          gTilt = rowAcrossW * slopeW * rowSee;
-          canopyHere = crestW > 0.35;
         }
       } else {
       vec3 soil = g_soil * (0.78 + 0.1 * prof * rowVis) * (1. + patchy);
@@ -624,14 +633,20 @@ vec3 farmAlbedo(vec2 p){
       stub = mix(stub, mix(g_ochre, g_rust, 0.35), clamp(mix(0.2, speck * 0.7 + swath * 0.45, nearS), 0., 0.75));
       vec2 slots = jobSlots(d.a);
       bool marked = fract(d.a) > 0.0004;
+      bool restFill = d.b < -0.5;
+      bool harvestBand = d.b >= 0.0 && d.b < 20.0;
+      bool sweptNow = !restFill && worked;
       if (pst < 1.5) {
         float baseSlot = marked ? (slots.x < 0.5 ? 1.0 : slots.x) : 1.0;
         float workSlot = marked ? slots.y : 2.0;
-        int useSlot = int(clamp(worked && workSlot >= 1.0 ? workSlot : baseSlot, 1.0, 31.0));
+        int useSlot = 1;
+        if (restFill && marked && slots.y >= 1.0) useSlot = int(clamp(slots.y, 1.0, 31.0));
+        else if (sweptNow && workSlot >= 1.0) useSlot = int(clamp(workSlot, 1.0, 31.0));
+        else useSlot = int(clamp(baseSlot, 1.0, 31.0));
         float roughW, crestW, slopeW;
         float phaseW = fract(uv.y / max(P.y, 0.05));
         col = potPaint(useSlot, phaseW, uv.x, P.w, patchy, fwidth(uv.y / max(P.y, 0.05)), roughW, crestW, slopeW);
-        gTilt = acrossW * slopeW * (worked ? 0.85 : 0.35) * rowVis;
+        gTilt = acrossW * slopeW * (sweptNow ? 0.85 : 0.35) * rowVis;
         gRough = roughW;
         canopyHere = crestW > 0.35;
       } else if (pst < 5.5) {
@@ -664,20 +679,24 @@ vec3 farmAlbedo(vec2 p){
         gTilt = acrossW * slope * 0.12 * rowVis;
         gRough = 0.96;
       }
-      // 自然阶段用散点铺开，不整块换色。杀秧、起薯这些作业色盖在上面。
+      // 仓库默认的色阶也按同一条：钟起之后每一档都散点。间隙先铺上一道变体，散点盖在上面。收割前沿扫过的垄才挖开，不按阶段号整田关掉散点。
       float frac = clamp(g - pst, 0.0, 0.999);
       float blendDot = step(hash12(floor(uv * vec2(0.58, 0.47)) + pst), frac);
       vec3 nxt = pst < 1.5 ? soil : pst < 2.5 ? young : pst < 3.5 ? canopy : pst < 4.5 ? bloom : pst < 5.5 ? mix(bloom, stub, 0.45) : pst < 6.5 ? stub : pst < 7.5 ? mix(soil, g_straw, 0.62) : pst < 8.5 ? mix(g_straw, g_rust, 0.55) : mix(g_deep, g_rust, 0.72);
-      // 整地阶段不往出苗绿点上混。播种作业没走完时 g 停在 1，这里再挡一层。
-      if (pst >= 1.5 && !(worked && pst >= 5.5)) col = mix(col, nxt, blendDot);
-      if (pst >= 1.5 && marked && ((worked && slots.y >= 1.0) || (!worked && slots.x > 1.0))) {
-        int useSlot = int(worked ? slots.y : slots.x);
-        float roughW, crestW, slopeW;
-        float phaseW = fract(uv.y / max(P.y, 0.05));
-        col = potPaint(useSlot, phaseW, uv.x, P.w, patchy, fwidth(uv.y / max(P.y, 0.05)), roughW, crestW, slopeW);
-        gTilt = acrossW * slopeW * rowVis;
-        gRough = roughW;
-        canopyHere = crestW > 0.35;
+      if (pst >= 1.5 && !(harvestBand && sweptNow)) {
+        int coat = 0;
+        if (sweptNow && marked && slots.y >= 1.0) coat = int(slots.y);
+        else if (!sweptNow && marked && slots.x > 1.0) coat = int(slots.x);
+        else if (restFill && marked && slots.y >= 1.0) coat = int(slots.y);
+        if (coat > 0) {
+          float roughW, crestW, slopeW;
+          float phaseW = fract(uv.y / max(P.y, 0.05));
+          col = potPaint(coat, phaseW, uv.x, P.w, patchy, fwidth(uv.y / max(P.y, 0.05)), roughW, crestW, slopeW);
+          gTilt = acrossW * slopeW * rowVis;
+          gRough = roughW;
+          canopyHere = crestW > 0.35;
+        }
+        col = mix(col, nxt, blendDot);
       }
       }
     } else if (cut) {                                       // 残茬：作业带一深一浅（收割方向不同），带车辙
@@ -873,7 +892,7 @@ uniform sampler2D uPotTint;
 varying vec3 vCropCol;`).replace('#include <begin_vertex>', `#include <begin_vertex>
   vec4 io = modelMatrix * instanceMatrix * vec4(0., 0., 0., 1.);
   ivec2 fij; vec2 loc, bl; int kind = farmCell(io.xz, fij, loc, bl);
-  float sc = 0.; int c = 0; float gg = 0.; vec4 d = vec4(0.); float stage = 0.;
+  float sc = 0.; int c = 0; float gg = 0.; vec4 d = vec4(0.); float stage = 0.; float speck = 0.;
   if (kind == 3) {
     d = texelFetch(uField, fij, 0); c = int(d.r + .5);
     vec2 uv = d.a > .5 ? loc.yx : loc;
@@ -881,12 +900,13 @@ varying vec3 vCropCol;`).replace('#include <begin_vertex>', `#include <begin_ver
       stage = floor(d.g + 0.001);
       bool opened = harvestFront(d.b) > 0.0 && laneCut(uv, harvestFront(d.b));
       float frac = clamp(d.g - stage, 0.0, 0.999);
-      float speck = step(hash12(floor(io.xz * 0.45)), frac);
+      speck = step(hash12(floor(io.xz * 0.45)), frac);
       gg = mix(growthVis(stage + 0.2), growthVis(stage + 1.2), speck);
-      if (stage < 0.5 && opened) gg = 0.;
-      if (opened && stage > 4.5 && stage < 5.5) gg = 0.08;
-      if (opened && stage > 5.5) gg = 0.;
-      if (stage > 7.5 && stage < 8.5) gg *= 0.4;
+      if (stage < 1.5) gg = 0.;
+      if (uPotOn > 0.5 && stage >= 1.5 && stage < 8.5 && !opened) {
+        if (int(uCropP[c].z + 0.5) == 2) gg = 1.;
+      }
+      if (opened) gg = 0.;
       if (stage > 8.5) gg = 0.04;
       sc = gg;
     }
@@ -900,9 +920,12 @@ varying vec3 vCropCol;`).replace('#include <begin_vertex>', `#include <begin_ver
   vCropCol = mix(uCropYoung[c], uCropRipe[c], smoothstep(0.45, 1.0, gg));
   if (uPotOn > 0.5 && int(P.z + 0.5) == 2 && stage >= 1.0) {
     int slot = int(clamp(stage, 1.0, 9.0));
-    float pscale = max(texelFetch(uPotTint, ivec2(2, slot), 0).r, 0.08);
+    int nxt = int(min(float(slot) + 1.0, 9.0));
+    float p0 = texelFetch(uPotTint, ivec2(2, slot), 0).r;
+    float p1 = texelFetch(uPotTint, ivec2(2, nxt), 0).r;
+    float pscale = stage < 1.5 ? 0.0 : mix(max(p0, 0.0), max(p1, 0.0), speck);
     transformed *= pscale;
-    vCropCol = texelFetch(uPotTint, ivec2(1, slot), 0).rgb;
+    vCropCol = texelFetch(uPotTint, ivec2(1, speck > 0.5 && stage >= 1.5 ? nxt : slot), 0).rgb;
   } else {
     if (stage > 3.5 && stage < 4.5 && position.y > 0.48) vCropCol = vec3(0.76, 0.64, 0.86);
     if (stage > 4.5 && stage < 5.5) vCropCol = uCropStub[c];
@@ -1858,6 +1881,9 @@ addEventListener('keydown', e => {
     return;
   }
   keys[e.key.toLowerCase()] = true;
+  if (e.key === 'p' || e.key === 'P') { setPaused(!paused); paintPause(); }
+  if (e.key === '[' || e.key === '【' || (e.code === 'BracketLeft' && e.key !== '{')) stepRate(-1);
+  if (e.key === ']' || e.key === '】' || (e.code === 'BracketRight' && e.key !== '}')) stepRate(1);
   if (e.key === 'n' || e.key === 'N') nightT = nightT > 0.5 ? 0 : 1;
   if (e.key === 'm' || e.key === 'M') mapT = mapT > 0.5 ? 0 : 1;
   if (e.key === 'h' || e.key === 'H') document.body.classList.toggle('nohud');
@@ -2609,6 +2635,15 @@ function updateDock() {
   const showStages = !!(watch && f.crop >= 0);
   const day = watch && !watch.waiting ? watch.day : 0;
   const stages = (f.crop >= 0 && CROPS[f.crop].stages?.length) ? CROPS[f.crop].stages : [];
+  const jobsHost = $('dock-jobs');
+  if (jobsHost) {
+    const board = f.live ? stageBoard(f) : null;
+    const rows = board?.jobs || [];
+    jobsHost.hidden = !rows.length;
+    jobsHost.innerHTML = rows.length
+      ? `<div class="cap">${board.stageName}</div>` + rows.map(job => `<div class="jb${job.status === '执行中' ? ' run' : ''}"><b>${job.name}</b><span>${job.status}</span></div>`).join('')
+      : '';
+  }
   const legendHost = $('dock-legend');
   if (legendHost) {
     const chips = showStages ? stages.filter(s => !s.preplant && !s.after) : [];
@@ -2727,7 +2762,7 @@ function bootStagesSync() {
 }
 const bootStageNote = bootStagesSync();
 $('kpi').innerHTML = `<div class="k-rev"><small>营收</small><b class="hv" id="kpi-rev">0</b></div><div class="k-day"><small>世界日</small><b id="kpi-day">0</b></div><div class="k-time"><small>时刻</small><span class="clk"><i class="face" id="kpi-face" aria-hidden="true"><i id="kpi-hh"></i><i id="kpi-mh"></i></i><b id="kpi-hm">00:00</b><b id="kpi-rate">1×</b></span></div><div class="k-act"><small>作业</small><b class="hv" id="kpi-act">0</b><em>/ ${rigs.length}</em></div>`;
-$('dock').innerHTML = `<div class="who"><b id="selid"></b><span id="selstat"></span></div><div id="dock-legend" class="legend" hidden></div><div id="bar"><i id="selbar"></i></div><div class="ops"><button type="button" id="act-plant"><b>种植</b><small>再选作物</small></button><button type="button" id="act-clear"><b>清地</b><small>已种也弃收</small></button></div><div class="row" id="selbtns"></div>`;
+$('dock').innerHTML = `<div class="who"><b id="selid"></b><span id="selstat"></span></div><div id="dock-jobs" class="jobs" hidden></div><div id="dock-legend" class="legend" hidden></div><div id="bar"><i id="selbar"></i></div><div class="ops"><button type="button" id="act-plant"><b>种植</b><small>再选作物</small></button><button type="button" id="act-clear"><b>清地</b><small>已种也弃收</small></button></div><div class="row" id="selbtns"></div>`;
 for (const c of CROPS) if (c.plantable) {
   const b = document.createElement('button');
   b.dataset.crop = c.id;
@@ -2753,13 +2788,36 @@ $('act-clear').addEventListener('click', () => {
   updateDock();
   saveSoon();
 });
-$('rates').innerHTML = `<span>1×：1 分 = 2 世界时</span>` + [1, 4, 12].map(r => `<button type="button" data-rate="${r}">${r}×</button>`).join('') + `<input id="rate-in" type="text" inputmode="decimal" value="1" aria-label="世界钟倍率" autocomplete="off">`;
+const RATE_STOPS = [1, 4, 12, 120, 1000];
+$('rates').innerHTML = `<span>1×：1 分 = 2 世界时</span>` + RATE_STOPS.map(r => `<button type="button" data-rate="${r}">${r}×</button>`).join('') + `<input id="rate-in" type="text" inputmode="decimal" value="1" aria-label="世界钟倍率" autocomplete="off">`;
+function stepRate(dir) {
+  const cur = economy.timeScale;
+  let i;
+  if (dir > 0) {
+    i = RATE_STOPS.findIndex(r => r > cur + 1e-6);
+    if (i < 0) i = 0;
+  } else {
+    i = -1;
+    for (let k = 0; k < RATE_STOPS.length; k++) if (RATE_STOPS[k] < cur - 1e-6) i = k;
+    if (i < 0) i = RATE_STOPS.length - 1;
+  }
+  setTimeScale(RATE_STOPS[i]);
+  paintWorldClock();
+  saveSoon();
+}
 function applyTypedRate() {
   const v = +$('rate-in').value;
   if (!(v > 0)) { paintWorldClock(); return; }
   setTimeScale(v); paintWorldClock(); saveSoon();
 }
 $('rates').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; setTimeScale(+b.dataset.rate); paintWorldClock(); saveSoon(); });
+$('stage-help')?.addEventListener('click', () => {
+  const note = $('stage-help-note');
+  if (!note) return;
+  const open = note.hidden;
+  note.hidden = !open;
+  $('stage-help').setAttribute('aria-expanded', open ? 'true' : 'false');
+});
 $('rate-in').addEventListener('focus', e => e.target.select());
 $('rate-in').addEventListener('mouseup', e => e.preventDefault());
 $('rate-in').addEventListener('change', applyTypedRate);

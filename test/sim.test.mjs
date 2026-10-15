@@ -5,7 +5,7 @@ import { LAB_CLASSES, LAB_ENTRIES, CULT_EMPTY, CULT_EMPTY_NOTES, CULT_B_NOTES, G
 import {
   CROPS, L, PLOT, FIELD_HA, fields, fieldAt, fieldAtWorld, focus, rigs,
   plantField, abandonField, step, economy, quote, log, exportSnapshot, applySnapshot, RING,
-  stores, worldDay, cropWatch, fieldVisual, setPaused, setTimeScale, formatTimeScale, bindPotatoClock,
+  stores, worldDay, cropWatch, stageBoard, fieldVisual, setPaused, setTimeScale, formatTimeScale, bindPotatoClock,
   DAY_SECONDS, MACHINE_MPS, WORLD_MIN_PER_REAL_MIN, warehouse, sellLot, sellStack, warehouseCapacity, placeBuilding, removeBuilding, buildings, rigReadout,
   SHOP, buySeed, buyItem, SEED_PER_FIELD, resetGame, paused, onHubParcel, HUB_SITES, POTATO_STAGES, POTATO_ROT_AT, POTATO_DAYS, cropDef, cropDossier,
   seasonAllowsSow, fieldOps,
@@ -1543,6 +1543,59 @@ test('a finished pass keeps its color after progress is cleared, and a narrow to
     assert.ok(Math.abs(vis.mask - (128 * 100 + 0.4)) < 1e-9, vis.mask);
     assert.equal(cropWatch(f).work, 'sow');
     assert.equal(f.plantedAt, null);
+  } finally {
+    revertPotatoStages();
+    bindPotatoClock();
+    resetGame();
+  }
+});
+
+test('hill keeps its color until topdress sweeps, and the dock lists that stage', () => {
+  resetGame();
+  const applied = applyStagePayload({ schema: 'ringsheaf.field-stage/1', cropId: 'potato', crops: { potato: potatoB } });
+  try {
+    assert.equal(applied.ok, true, applied.message);
+    bindPotatoClock();
+    setPaused(false);
+    stores.seed = 2;
+    stores.fertilizer = 2;
+    const f = fieldAt(focus.i, focus.j);
+    assert.equal(plantField(f, 'potato').ok, true);
+    const bare = stageBoard(f);
+    assert.equal(bare.stageName, '空地');
+    assert.deepEqual(bare.jobs.map(job => job.name), ['基肥', '撒石灰', '旋耕', '薯播']);
+    assert.equal(bare.jobs[0].status, '执行中');
+    assert.ok(bare.jobs.slice(1).every(job => job.status === '未执行'));
+    const hill = cropDef('potato').jobs.find(j => j.id === 'potato_hill');
+    f.plantedAt = worldDay - (hill.window.from + 0.2);
+    for (const id of ['potato_base_fert', 'lime', 'potato_rotavate', 'potato_plant', 'potato_shallow', 'potato_hill']) {
+      f.jobS[id] = 999;
+    }
+    f.jobS.potato_topdress = 0;
+    let vis = fieldVisual(f);
+    assert.equal(vis.coat, '');
+    assert.equal(vis.base, 'Hi1');
+    assert.equal(vis.mask, -1);
+    assert.ok(vis.g >= 4 && vis.g < 5, vis.g);
+    const resting = stageBoard(f);
+    assert.equal(resting.stageName, '培土');
+    assert.equal(resting.jobs.find(job => job.id === 'potato_hill').status, '执行完');
+    assert.equal(resting.jobs.find(job => job.id === 'potato_topdress').status, '未执行');
+    f.jobS.potato_topdress = 0.4;
+    vis = fieldVisual(f);
+    assert.equal(vis.coat, 'Hi2');
+    assert.equal(vis.base, 'Hi1');
+    assert.ok(vis.mask > 20, vis.mask);
+    assert.ok(Math.abs(vis.mask - (128 * 100 + 0.4)) < 1, vis.mask);
+    const rig = rigs.find(r => r.kind === 'planter') || rigs[0];
+    const prev = { f: rig.f, job: rig.job, mode: rig.mode };
+    rig.f = f;
+    rig.job = 'potato_topdress';
+    rig.mode = 'work';
+    assert.equal(stageBoard(f).jobs.find(job => job.id === 'potato_topdress').status, '执行中');
+    rig.f = prev.f;
+    rig.job = prev.job;
+    rig.mode = prev.mode;
   } finally {
     revertPotatoStages();
     bindPotatoClock();

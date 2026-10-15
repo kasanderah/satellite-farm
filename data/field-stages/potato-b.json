@@ -557,16 +557,16 @@
       "sweepDays": 1.6,
       "id": "lime",
       "name": "撒石灰",
-      "kind": "optional",
+      "kind": "required",
       "stage": "O",
       "machine": "impl_fertilizer",
       "extensions": {
-        "required": false,
+        "required": true,
         "impl": "impl_fertilizer",
         "implAny": null,
         "self": null,
         "mode": null,
-        "cap": null,
+        "cap": "fertilize",
         "caps": null,
         "load": null,
         "drone": false,
@@ -574,10 +574,10 @@
         "plant": false,
         "harvest": false,
         "afterHarvest": false,
-        "penalty": 0,
-        "order": 90,
-        "framework": true,
-        "note": "O2 变体仍留着。旧土豆日历没有这道工。"
+        "penalty": 0.15,
+        "order": 0.5,
+        "framework": false,
+        "note": "空地按编辑顺序派。施肥机撒石灰，盖 O2。仍不是 framework。"
       }
     },
     {

@@ -8,7 +8,8 @@ import { CROPS, PALETTE } from './_shared.js';
 import {
   FIELD_STAGE_SCHEMA, FIELD_STAGE_STORE, placeholderFieldDoc, parseFieldStageDoc,
   createSim, stepSim, startJob, cancelWorkOrder, sampleRidge, appearanceOf,
-  stageById, setGrowthChain, insertGrowthStage, removeGrowthStage, dominant, tally,
+  stageById, stageByGroup, insertGrowthStage, removeGrowthStage, dominant, tally,
+  renameStageId, renameStageName, setStageGroup, orderedStageOps, moveStageOp, SEQUENCE_GROUPS,
   alignFieldCalendar, jobWindows, PLANTABLE_CROP_IDS, allocateCropId, cropOptionLabel,
   indexCropLibrary, renameCropDisplay, forkCropDocument, setHarvestExit,
   OP_MACHINE_CHOICES, addStageOp, removeStageOp, patchStageOp,
@@ -75,18 +76,18 @@ function clampNum(value, min, max, fallback) {
 function timeline(doc) {
   const items = [];
   const push = (id, variant, name, days) => items.push({ id, variant, name, days: Math.max(0.25, Number(days) || 0.25) });
-  const bare = stageById(doc, 'O');
-  push('O', '', bare.name, bare.days);
+  const bare = stageByGroup(doc, 'O');
+  if (bare) push(bare.id, '', bare.name, bare.days);
   for (const id of doc.chain) {
     const st = stageById(doc, id);
     if (!st) continue;
     push(id, '', st.name, st.days);
-    if (id === 'D') {
-      for (const v of st.variants.filter(item => item.auto)) push('D', v.id, v.name, v.days || 1);
+    if (st.group === 'D') {
+      for (const v of st.variants.filter(item => item.auto)) push(st.id, v.id, v.name, v.days || 1);
     }
   }
-  const post = stageById(doc, 'E');
-  push('E', '', post.name, post.days);
+  const post = stageByGroup(doc, 'E');
+  if (post) push(post.id, '', post.name, post.days);
   return items;
 }
 
@@ -651,7 +652,16 @@ export function createFieldWorkshop(els) {
 <label>${v.id} ${v.name}${v.auto ? ' · 自动' : ''}<input data-vcolor="${v.id}" type="color" value="${v.color || st.color}"></label>
 ${v.auto ? `<label>停留日<input data-vdays="${v.id}" type="number" min="0.25" max="80" step="0.25" value="${v.days || 1}"></label>` : '<span></span>'}
 </div>`).join('');
+    const groupOptions = SEQUENCE_GROUPS.map(group => {
+      const label = group === 'M' ? '中间' : group;
+      return `<option value="${group}"${st.group === group ? ' selected' : ''}>${label}</option>`;
+    }).join('');
     panel.querySelector('#fs-edit').innerHTML = `<div class="fs-split">
+<label>名称<input id="fs-name" type="text" maxlength="24" value="${esc(st.name)}"></label>
+<label>id<input id="fs-id" type="text" maxlength="48" value="${esc(st.id)}" spellcheck="false"></label>
+</div>
+<label>序列组<select id="fs-group">${groupOptions}</select></label>
+<div class="fs-split">
 <label>地面色<input id="fs-color" type="color" value="${st.color}"></label>
 <label>冠层色<input id="fs-canopy" type="color" value="${st.canopy}"></label>
 </div>
@@ -668,6 +678,28 @@ ${variants}
 </div>`;
     const edit = panel.querySelector('#fs-edit');
     const touch = () => { dirty = true; curveDirty = true; persist(); };
+    edit.querySelector('#fs-name').addEventListener('input', (e) => {
+      renameStageName(doc, st.id, e.target.value);
+      listSig = '';
+      touch();
+    });
+    edit.querySelector('#fs-id').addEventListener('change', (e) => {
+      const next = renameStageId(doc, st.id, e.target.value);
+      if (!next) e.target.value = st.id;
+      else selected = stageById(doc, e.target.value.trim())?.id || st.id;
+      listSig = '';
+      editorSig = '';
+      jobsSig = '';
+      touch();
+      paintDynamic(false);
+    });
+    edit.querySelector('#fs-group').addEventListener('change', (e) => {
+      setStageGroup(doc, st.id, e.target.value);
+      listSig = '';
+      editorSig = '';
+      touch();
+      paintDynamic(false);
+    });
     edit.querySelector('#fs-color').addEventListener('input', (e) => { st.color = e.target.value; touch(); });
     edit.querySelector('#fs-canopy').addEventListener('input', (e) => { st.canopy = e.target.value; touch(); });
     edit.querySelector('#fs-rough').addEventListener('input', (e) => { st.roughness = clampNum(e.target.value, 0.04, 1, st.roughness); touch(); });
@@ -705,7 +737,7 @@ ${variants}
     });
     edit.querySelector('#fs-drop').addEventListener('click', () => {
       removeGrowthStage(doc, selected);
-      if (!stageById(doc, selected)) selected = 'A';
+      if (!stageById(doc, selected)) selected = stageByGroup(doc, 'A')?.id || doc.stages[0].id;
       listSig = '';
       editorSig = '';
       dirty = true;
@@ -716,19 +748,13 @@ ${variants}
 
   function paintChain() {
     const doc = current();
-    const mids = doc.stages.filter(s => s.kind === 'growth' && s.id !== 'A' && s.id !== 'D');
-    panel.querySelector('#fs-chain').innerHTML = `<div class="fs-row">生长链 ${mids.map(s => `<label class="fs-row"><input type="checkbox" data-mid="${s.id}" ${doc.chain.includes(s.id) ? 'checked' : ''}> ${s.id}</label>`).join('')}</div>`;
-    panel.querySelector('#fs-chain').querySelectorAll('[data-mid]').forEach(input => {
-      input.addEventListener('change', () => {
-        const ids = [...panel.querySelectorAll('[data-mid]')].filter(el => el.checked).map(el => el.dataset.mid);
-        const order = doc.stages.map(s => s.id).filter(id => ids.includes(id));
-        setGrowthChain(doc, order);
-        listSig = '';
-        dirty = true;
-        paintDynamic(false);
-        persist();
-      });
-    });
+    const ordered = [
+      stageByGroup(doc, 'O'),
+      ...doc.chain.map(id => stageById(doc, id)),
+      stageByGroup(doc, 'E'),
+    ].filter(Boolean);
+    const line = ordered.map(s => `${s.group === 'M' ? '中间' : s.group} ${s.name}`).join(' → ');
+    panel.querySelector('#fs-chain').innerHTML = `<p class="fs-note">序列 ${line}。必有 O、A、B、D、E。C 和中间段可删，插在 B 与 C 之间。</p>`;
   }
 
   function paintEdges() {
@@ -761,12 +787,12 @@ ${variants}
     const host = panel.querySelector('#fs-jobs');
     if (!host) return;
     const doc = current();
-    const ops = (doc.ops || []).filter(op => op.stage === selected);
+    const ops = orderedStageOps(doc, selected);
     const sig = selected + '|' + ops.map(op => op.id).join(',');
     if (sig === jobsSig && host.childElementCount) return;
     jobsSig = sig;
     const stageIds = doc.stages.map(st => st.id);
-    const onChain = selected === 'O' || selected === 'E' || (doc.chain || []).includes(selected);
+    const onChain = stageById(doc, selected)?.group === 'O' || stageById(doc, selected)?.group === 'E' || (doc.chain || []).includes(selected);
     const machines = OP_MACHINE_CHOICES.map(([id, name]) => ({ id, name }));
     for (const op of doc.ops || []) {
       if (op.machine && !machines.some(row => row.id === op.machine)) machines.push({ id: op.machine, name: op.machine });
@@ -779,7 +805,7 @@ ${variants}
       return rows.map(([id, name]) => `<option value="${id}"${op.kind === id ? ' selected' : ''}>${name}</option>`).join('');
     };
     const cards = ops.map(op => `<div class="fs-job" data-job="${esc(op.id)}">
-<div class="fs-row"><b>${esc(op.name)}</b><span class="fs-note">${esc(op.id)}</span><button type="button" data-drop-job="${esc(op.id)}">删除</button></div>
+<div class="fs-row"><b>${esc(op.name)}</b><span class="fs-note">${esc(op.id)}</span>${op.extensions?.framework || op.reserved ? '<span class="fs-note">预留，不派</span>' : ''}<button type="button" data-up-job="${esc(op.id)}">上移</button><button type="button" data-down-job="${esc(op.id)}">下移</button><button type="button" data-drop-job="${esc(op.id)}">删除</button></div>
 <div class="fs-split">
 <label>名称<input data-job-name="${esc(op.id)}" type="text" maxlength="24" value="${esc(op.name)}"></label>
 <label>机具<select data-job-machine="${esc(op.id)}">${machineOptions(op.machine)}</select></label>
@@ -806,6 +832,19 @@ ${variants}
       paintJobs();
       paintTransport();
       persist();
+    });
+    const shiftJob = (opId, dir) => {
+      moveStageOp(doc, opId, dir);
+      jobsSig = '';
+      dirty = true;
+      paintJobs();
+      persist();
+    };
+    host.querySelectorAll('[data-up-job]').forEach(btn => {
+      btn.addEventListener('click', () => shiftJob(btn.dataset.upJob, -1));
+    });
+    host.querySelectorAll('[data-down-job]').forEach(btn => {
+      btn.addEventListener('click', () => shiftJob(btn.dataset.downJob, 1));
     });
     host.querySelectorAll('[data-drop-job]').forEach(btn => {
       btn.addEventListener('click', () => {

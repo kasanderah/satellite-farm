@@ -6,7 +6,7 @@ import {
   startJob, cancelWorkOrder, sampleRidge, ridgeCrestT, setGrowthChain, insertGrowthStage,
   removeGrowthStage, tally, appearanceOf, alignFieldCalendar, jobWindows,
   allocateCropId, forkCropDocument, indexCropLibrary, setHarvestExit, addStageOp,
-  removeStageOp, patchStageOp,
+  removeStageOp, patchStageOp, renameStageId, moveStageOp,
 } from '../src/field-stages.js';
 import { compilePlayable, SURFACE_CROPS } from '../src/surface-crops.js';
 
@@ -68,8 +68,9 @@ test('parse keeps the reserved exit and rejects a document without edges', () =>
   });
   assert.equal(d.schema, FIELD_STAGE_SCHEMA);
   assert.ok(d.edges.some(e => e.via === 'resow' && e.to === 'A' && e.enabled === false));
-  assert.deepEqual(d.chain, ['A', 'D']);
-  assert.ok(d.edges.some(e => e.when === 'natural' && e.from === 'A' && e.to === 'D'));
+  assert.deepEqual(d.chain, ['A', 'B', 'D']);
+  assert.ok(d.edges.some(e => e.when === 'natural' && e.from === 'A' && e.to === 'B'));
+  assert.ok(d.edges.some(e => e.when === 'natural' && e.from === 'B' && e.to === 'D'));
 });
 
 test('ridge crest phase is the highest sample', () => {
@@ -211,24 +212,25 @@ test('till breaks the mask and cancel locks the rest of a sow', () => {
   assert.equal(startJob(sim2, d, 'sow', 1).reason, 'empty');
 });
 
-test('growth chain can drop B and accept an inserted stage', () => {
+test('growth chain keeps B and inserts extras between B and C', () => {
   const d = doc();
   setGrowthChain(d, ['C']);
-  assert.deepEqual(d.chain, ['A', 'C', 'D']);
-  assert.equal(d.cycle, 39);
-  assert.equal(alignFieldCalendar(d).cycle, 39);
-  assert.ok(d.edges.some(e => e.when === 'natural' && e.from === 'A' && e.to === 'C'));
-  assert.ok(!d.edges.some(e => e.when === 'natural' && e.to === 'B'));
-  assert.equal(jobWindows(d, alignFieldCalendar(d)).some(w => w.op.stage === 'B'), false);
+  assert.deepEqual(d.chain, ['A', 'B', 'C', 'D']);
+  assert.equal(d.cycle, 51);
+  assert.equal(alignFieldCalendar(d).cycle, 51);
+  assert.ok(d.edges.some(e => e.when === 'natural' && e.from === 'A' && e.to === 'B'));
+  assert.equal(jobWindows(d, alignFieldCalendar(d)).some(w => w.op.stage === 'B'), true);
   insertGrowthStage(d, 'A');
-  assert.equal(d.chain[1], 'X1');
-  assert.equal(d.cycle, 45);
-  assert.ok(d.stages.some(s => s.id === 'X1'));
+  assert.deepEqual(d.chain, ['A', 'B', 'X1', 'C', 'D']);
+  assert.equal(d.stages.find(s => s.id === 'X1').group, 'M');
+  assert.equal(d.cycle, 57);
   removeGrowthStage(d, 'X1');
   assert.ok(!d.chain.includes('X1'));
-  assert.equal(d.cycle, 39);
+  assert.equal(d.cycle, 51);
   removeGrowthStage(d, 'A');
   assert.ok(d.chain.includes('A'));
+  removeGrowthStage(d, 'B');
+  assert.ok(d.chain.includes('B'));
 });
 
 test('a cycle that does not match the stage sum is refused', () => {
@@ -247,19 +249,25 @@ test('an op whose stage was removed is not a window', () => {
   assert.equal(windows.some(w => w.op.id === 'sow'), true);
 });
 
-test('dropping emerg and haulm keeps a savable potato calendar without those jobs', () => {
+test('B stays on the potato chain and C can be removed', () => {
   const raw = JSON.parse(fs.readFileSync(new URL('../data/field-stages/potato-b.json', import.meta.url)));
   const d = parseFieldStageDoc(raw);
   assert.equal(d.cycle, 88);
+  assert.equal(d.stages.find(s => s.id === 'emerg').group, 'B');
+  assert.equal(d.stages.find(s => s.id === 'hill').group, 'M');
+  assert.equal(d.stages.find(s => s.id === 'bulk').group, 'M');
+  assert.equal(d.stages.find(s => s.id === 'haulm').group, 'C');
   removeGrowthStage(d, 'emerg');
+  assert.equal(d.chain.includes('emerg'), true);
   removeGrowthStage(d, 'haulm');
-  assert.equal(d.chain.includes('emerg'), false);
   assert.equal(d.chain.includes('haulm'), false);
-  assert.equal(d.ops.some(op => op.stage === 'haulm' || op.stage === 'emerg'), false);
-  assert.equal(d.cycle, 66);
+  assert.equal(d.ops.some(op => op.stage === 'haulm'), false);
+  assert.equal(d.ops.some(op => op.stage === 'emerg'), true);
+  assert.equal(d.cycle, 81);
   const play = compilePlayable(d, { id: 'potato', name: '中熟商品薯', seed: 'seed', slotted: true });
-  assert.equal(play.cycle, 66);
-  assert.equal(play.jobs.some(j => j.stage === 'emerg' || j.stage === 'haulm' || j.cap === 'haulm'), false);
+  assert.equal(play.cycle, 81);
+  assert.equal(play.jobs.some(j => j.stage === 'haulm' || j.cap === 'haulm'), false);
+  assert.equal(play.jobs.some(j => j.stage === 'emerg'), true);
   assert.equal(play.jobs.some(j => j.id === 'potato_plant' && j.window.when === 'before'), true);
   assert.equal(play.jobs.some(j => j.id === 'potato_harvest' && j.window.when === 'clock'), true);
 });
@@ -314,7 +322,11 @@ test('potato B and the four placeholders compile through stage windows', () => {
   assert.equal(hill[0].window.from, hill[1].window.from);
   assert.equal(hill[0].window.to, hill[1].window.to);
   assert.equal(hill[0].window.when, 'clock');
-  assert.ok(!play.jobs.some(j => j.id === 'lime' || j.id === 'till' || j.id === 'resow'));
+  const prep = play.jobs.filter(j => j.window.when === 'before').map(j => j.id);
+  assert.deepEqual(prep, ['potato_base_fert', 'lime', 'potato_rotavate', 'potato_plant']);
+  assert.equal(play.jobs.find(j => j.id === 'lime').cap, 'fertilize');
+  assert.equal(play.jobs.find(j => j.id === 'lime').required, true);
+  assert.ok(!play.jobs.some(j => j.id === 'till' || j.id === 'resow'));
   const harvest = play.jobs.find(j => j.id === 'potato_harvest');
   assert.match(harvest.note, /收获机侧/);
   assert.match(harvest.note, /侧卸/);
@@ -427,4 +439,18 @@ test('a stage job can be added, windowed, and removed', () => {
   assert.equal(row.op.kind, 'required');
   removeStageOp(d, 'job1');
   assert.equal(jobWindows(d, alignFieldCalendar(d)).some(item => item.op.id === 'job1'), false);
+});
+
+test('renaming a stage id rewrites jobs, and order follows the editor', () => {
+  const raw = JSON.parse(fs.readFileSync(new URL('../data/field-stages/potato-b.json', import.meta.url)));
+  const d = parseFieldStageDoc(raw);
+  assert.equal(renameStageId(d, 'emerg', 'emerge2')?.stages.find(s => s.id === 'emerge2').group, 'B');
+  assert.equal(d.ops.find(op => op.id === 'potato_shallow').stage, 'emerge2');
+  assert.ok(d.chain.includes('emerge2'));
+  assert.equal(d.chain.includes('emerg'), false);
+  moveStageOp(d, 'lime', -1);
+  const prep = d.ops.filter(op => op.stage === 'O' && !op.extensions?.framework && op.stage !== '*');
+  const ordered = prep.slice().sort((a, b) => a.extensions.order - b.extensions.order).map(op => op.id);
+  assert.equal(ordered[0], 'lime');
+  assert.ok(ordered.indexOf('lime') < ordered.indexOf('potato_base_fert'));
 });

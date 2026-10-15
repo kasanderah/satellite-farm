@@ -65,12 +65,14 @@ bool laneCut(vec2 uv, float s){
   float fr = (s - fs) * FIELD;
   return mod(lane, 2.) < .5 ? uv.x < fr : uv.x > FIELD - fr;
 }
-// d.b < 0：整田都是上一道作业色。0–20：收割前沿，仍按 12.8 m 视觉垄。更大的数是机具实宽：百位以上是幅宽的分米，个位是这条幅宽上的趟进度。
+// d.b < -0.5：工序间隙。整田铺着上一道变体，但没有车在扫，不能当成已扫。
+// 0–20：收割前沿，仍按 12.8 m 视觉垄。更大的数是机具实宽：百位以上是幅宽的分米，个位是这条幅宽上的趟进度。
+// 跟车刷色、间隙保色对每个阶段同一套，不单给整地或播种前。
 float harvestFront(float db){
   return db >= 0.0 && db < 20.0 ? db : 0.0;
 }
 bool jobSwept(vec2 uv, float db){
-  if (db < -0.5) return true;
+  if (db < -0.5) return false;
   if (db < 20.0) return laneCut(uv, db);
   float widthCode = floor(db / 100.0 + 0.001);
   float prog = db - widthCode * 100.0;
@@ -105,9 +107,7 @@ float canopyAt(vec2 p){
   vec2 uv = d.a > .5 ? loc.yx : loc;
   float stage = floor(d.g + 0.001);
   float front = harvestFront(d.b);
-  if (laneCut(uv, front) && stage < 0.5) return 0.;
-  if (laneCut(uv, front) && stage > 5.5 && stage < 6.5) return 0.05;
-  if (laneCut(uv, front) && stage > 6.5 && stage < 7.5) return 0.;
+  if (front > 0.0 && laneCut(uv, front)) return 0.02;
   if (stage > 8.5) return 0.02;
   return growthVis(d.g) * uCropP[int(d.r + .5)].x;
 }

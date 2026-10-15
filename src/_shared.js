@@ -685,6 +685,32 @@ export function cropWatch(f) {
   }
   return { day, phase, label: PHASE_LABEL[phase] || phase, front: visualFront(f), days, waiting: false, planted: plantJobDone(f) };
 }
+// 选中田块时，当前阶段里要派的工。执行中看车或无人机是不是还在这道工上。
+export function stageBoard(f) {
+  const def = cropOf(f);
+  if (!f?.live || f.paid || !def) return null;
+  const watch = cropWatch(f);
+  let stageId = watch?.phase;
+  if (watch?.waiting || f.plantedAt == null) {
+    stageId = def.stages.find(s => s.preplant)?.id || stageId;
+  } else if (f.harvested) {
+    stageId = def.stages.find(s => s.after)?.id || stageId;
+  }
+  const stage = def.stages.find(s => s.id === stageId);
+  const jobs = def.jobs.filter(j => j.stage === stageId).slice().sort((a, b) => (a.order || 0) - (b.order || 0));
+  return {
+    stageId,
+    stageName: stage?.name || watch?.label || stageId || '',
+    jobs: jobs.map(job => {
+      const rigOn = rigs.some(r => r.f === f && r.job === job.id && (r.mode === 'work' || r.mode === 'turn' || r.mode === 'travel'));
+      const droneOn = workDrones.some(d => d.f === f && d.job === job.id && d.mode !== 'park');
+      let status = '未执行';
+      if (jobDone(f, job.id)) status = '执行完';
+      if (rigOn || droneOn) status = '执行中';
+      return { id: job.id, name: job.name, status };
+    }),
+  };
+}
 // 农时。这一站没有季节，播种窗口始终开着。以后接到地球历，在这里按日拦住。
 export function seasonAllowsSow(_field, _day = worldDay) {
   return true;
@@ -816,8 +842,8 @@ function pickAssignment(r) {
         f.plantedAt == null ? 1 : 0,
         f.plantedAt == null ? (f.planSeq || f.idx) : f.plantedAt,
         job.window ? job.window.from : job.from,
-        job.required ? 0 : 1,
         job.order,
+        job.required ? 0 : 1,
         f.idx,
         plan.swap || (job.load && r.load !== job.load) ? 1 : 0,
         Math.hypot((f.x0 + L.FIELD / 2) - r.x, (f.z0 + L.FIELD / 2) - r.z),

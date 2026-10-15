@@ -20,7 +20,10 @@ export const FIELD_STAGE_STORE = 'ringsheaf.assetlab.fieldStages.v1';
 // 1× 播放：1 游戏日 = 1 真实秒。加速只乘这个比例。
 export const FIELD_STAGE_SECONDS_PER_DAY = 1;
 
-const GROWTH_KEEP = new Set(['A', 'D']);
+// 序列组是 O/A/B/C/D/E，不是阶段 id。必有 O、A、B、D、E。C 和标成 M 的中间段可以增减，并且排在 B 和 C 之间。
+export const SEQUENCE_GROUPS = ['O', 'A', 'B', 'M', 'C', 'D', 'E'];
+const REQUIRED_GROUPS = ['O', 'A', 'B', 'D', 'E'];
+const GROUP_OK = new Set(SEQUENCE_GROUPS);
 
 export function hash01(row, along, salt = 0) {
   let n = (row + 1) * 374761393 + (along + 1) * 668265263 + (salt + 1) * 1442695041;
@@ -241,9 +244,15 @@ export function alignFieldCalendar(doc) {
     throw new Error('田间配置对不齐：缺阶段或生长链');
   }
   const byId = new Map(doc.stages.map(s => [s.id, s]));
+  assignSequenceGroups(doc);
   const chain = doc.chain;
-  if (!chain.length || chain[0] !== 'A' || chain[chain.length - 1] !== 'D') {
-    throw new Error('生长链要从 A 排到 D');
+  const head = stageByGroup(doc, 'A');
+  const tail = stageByGroup(doc, 'D');
+  if (!head || !tail || !chain.length || chain[0] !== head.id || chain[chain.length - 1] !== tail.id) {
+    throw new Error('生长链要从序列组 A 排到 D');
+  }
+  for (const group of REQUIRED_GROUPS) {
+    if (!stageByGroup(doc, group)) throw new Error('阶段缺序列组 ' + group);
   }
   const seen = new Set();
   const placed = [];
@@ -269,10 +278,10 @@ export function alignFieldCalendar(doc) {
   if (Number.isFinite(+doc.cycle) && Math.abs(+doc.cycle - cycle) > 0.001) {
     throw new Error('总周期和阶段加总对不上');
   }
-  const idle = byId.get('O');
-  const post = byId.get('E');
-  if (!idle) throw new Error('阶段缺 O');
-  if (!post) throw new Error('阶段缺 E');
+  const idle = stageByGroup(doc, 'O');
+  const post = stageByGroup(doc, 'E');
+  if (!idle) throw new Error('阶段缺序列组 O');
+  if (!post) throw new Error('阶段缺序列组 E');
   const hold = placed[placed.length - 1];
   const variants = hold.row.variants || [];
   const d1 = variants.find(v => v.id === 'D1' && v.auto);
@@ -306,12 +315,13 @@ export function jobWindows(doc, aligned) {
     const writesMask = !!op.writesMask;
     const harvest = ext.harvest === true || op.via === 'harvest';
     let window;
-    if (writesMask || op.stage === 'O') {
-      window = { when: 'before', stage: 'O', from: 0, to: 0 };
-    } else if (op.stage === 'E' || ext.afterHarvest === true) {
+    const stageGroup = doc.stages.find(s => s.id === op.stage)?.group || '';
+    if (writesMask || stageGroup === 'O') {
+      window = { when: 'before', stage: aligned.idle.id, from: 0, to: 0 };
+    } else if (stageGroup === 'E' || ext.afterHarvest === true) {
       const from = hold.to;
       const days = Number(aligned.post.days) || 0;
-      window = { when: 'after', stage: 'E', from, to: from + days };
+      window = { when: 'after', stage: aligned.post.id, from, to: from + days };
     } else {
       const placed = stageOf(op.stage);
       // 阶段已经删掉、或不在生长链上：这道工不进调度，也不把整份作物挡回去。
@@ -341,10 +351,65 @@ export function jobWindows(doc, aligned) {
   return out;
 }
 
+export function stageByGroup(doc, group) {
+  return (doc?.stages || []).find(s => s.group === group) || null;
+}
+
+// 旧文档没有 group。id 正好是 O/A/B/C/D/E 的沿用。生长链上剩下的：第一段是 B，最后一段是 C，夹在中间的是 M。
+export function assignSequenceGroups(doc) {
+  const stages = doc.stages || [];
+  for (const row of stages) {
+    if (GROUP_OK.has(row.group)) continue;
+    if (GROUP_OK.has(row.id) && row.id !== 'M') row.group = row.id;
+  }
+  const has = (group) => stages.some(row => row.group === group);
+  const chain = doc.chain || [];
+  if (!has('O')) {
+    const row = stages.find(s => s.kind === 'idle' && !GROUP_OK.has(s.group)) || stages.find(s => !GROUP_OK.has(s.group));
+    if (row) row.group = 'O';
+  }
+  if (!has('E')) {
+    const row = stages.find(s => s.kind === 'post' && !GROUP_OK.has(s.group));
+    if (row) row.group = 'E';
+  }
+  if (!has('A')) {
+    const row = stages.find(s => s.id === chain[0] && !GROUP_OK.has(s.group));
+    if (row) row.group = 'A';
+  }
+  if (!has('D')) {
+    const row = stages.find(s => s.id === chain[chain.length - 1] && !GROUP_OK.has(s.group));
+    if (row) row.group = 'D';
+  }
+  const open = chain.map(id => stages.find(s => s.id === id)).filter(s => s && !GROUP_OK.has(s.group));
+  if (!has('B') && open.length) open.shift().group = 'B';
+  if (!has('C') && open.length) open.pop().group = 'C';
+  for (const row of open) if (!GROUP_OK.has(row.group)) row.group = 'M';
+  for (const row of stages) if (!GROUP_OK.has(row.group)) row.group = 'M';
+  return doc;
+}
+
 export function rebuildNaturalEdges(doc) {
-  const known = new Set(doc.stages.map(s => s.id));
-  const middle = (doc.chain || []).filter(id => known.has(id) && !GROWTH_KEEP.has(id) && id !== 'O' && id !== 'E');
-  doc.chain = ['A', ...middle, 'D'];
+  assignSequenceGroups(doc);
+  const head = stageByGroup(doc, 'A');
+  const bud = stageByGroup(doc, 'B');
+  const close = stageByGroup(doc, 'C');
+  const tail = stageByGroup(doc, 'D');
+  const prev = doc.chain || [];
+  const extras = [];
+  const seen = new Set();
+  for (const id of prev) {
+    const row = stageById(doc, id);
+    if (!row || row.group !== 'M' || seen.has(row.id)) continue;
+    seen.add(row.id);
+    extras.push(row.id);
+  }
+  const ids = [];
+  if (head) ids.push(head.id);
+  if (bud) ids.push(bud.id);
+  ids.push(...extras);
+  if (close && prev.includes(close.id)) ids.push(close.id);
+  if (tail && !ids.includes(tail.id)) ids.push(tail.id);
+  doc.chain = ids;
   const natural = [];
   for (let i = 0; i < doc.chain.length - 1; i++) {
     natural.push({
@@ -426,11 +491,16 @@ export function parseFieldStageDoc(input) {
     })),
     chain: input.chain || seed.chain,
   };
-  if (!doc.edges.some(e => e.via === 'resow' && e.from === 'E' && e.to === 'A')) {
-    doc.edges.push({ from: 'E', fromVariant: '', to: 'A', toVariant: '', via: 'resow', when: 'process', enabled: false, breaksMask: false });
+  assignSequenceGroups(doc);
+  const idleId = stageByGroup(doc, 'O')?.id || 'O';
+  const sowId = stageByGroup(doc, 'A')?.id || 'A';
+  const postId = stageByGroup(doc, 'E')?.id || 'E';
+  const groupOf = (id) => doc.stages.find(s => s.id === id)?.group || id;
+  if (!doc.edges.some(e => e.via === 'resow' && groupOf(e.from) === 'E' && groupOf(e.to) === 'A')) {
+    doc.edges.push({ from: postId, fromVariant: '', to: sowId, toVariant: '', via: 'resow', when: 'process', enabled: false, breaksMask: false });
   }
-  if (!doc.edges.some(e => e.via === 'clear' && e.from === 'E' && e.to === 'O')) {
-    doc.edges.push({ from: 'E', fromVariant: '', to: 'O', toVariant: '', via: 'clear', when: 'process', enabled: true, breaksMask: true });
+  if (!doc.edges.some(e => e.via === 'clear' && groupOf(e.from) === 'E' && groupOf(e.to) === 'O')) {
+    doc.edges.push({ from: postId, fromVariant: '', to: idleId, toVariant: '', via: 'clear', when: 'process', enabled: true, breaksMask: true });
   }
   const shapes = new Set(['ear', 'stalk', 'bush', 'tuft', 'rosette']);
   if (!shapes.has(doc.plant.shape)) doc.plant.shape = 'bush';
@@ -519,9 +589,15 @@ export function indexCropLibrary(pairs) {
   return docs;
 }
 
+function exitEdge(doc, edge, via, fromGroup, toGroup) {
+  if (!edge || edge.via !== via) return false;
+  const groupOf = (id) => doc.stages.find(s => s.id === id)?.group || id;
+  return groupOf(edge.from) === fromGroup && groupOf(edge.to) === toGroup;
+}
+
 function exclusiveHarvestExits(doc) {
-  const clear = (doc.edges || []).filter(e => e.via === 'clear' && e.from === 'E' && e.to === 'O');
-  const resow = (doc.edges || []).filter(e => e.via === 'resow' && e.from === 'E' && e.to === 'A');
+  const clear = (doc.edges || []).filter(e => exitEdge(doc, e, 'clear', 'E', 'O'));
+  const resow = (doc.edges || []).filter(e => exitEdge(doc, e, 'resow', 'E', 'A'));
   const clearOn = clear.some(e => e.enabled);
   const resowOn = resow.some(e => e.enabled);
   if (clearOn && resowOn) {
@@ -536,8 +612,8 @@ function exclusiveHarvestExits(doc) {
 export function setHarvestExit(doc, via) {
   const want = via === 'resow' ? 'resow' : 'clear';
   for (const edge of doc.edges || []) {
-    if (edge.via === 'clear' && edge.from === 'E' && edge.to === 'O') edge.enabled = want === 'clear';
-    if (edge.via === 'resow' && edge.from === 'E' && edge.to === 'A') edge.enabled = want === 'resow';
+    if (exitEdge(doc, edge, 'clear', 'E', 'O')) edge.enabled = want === 'clear';
+    if (exitEdge(doc, edge, 'resow', 'E', 'A')) edge.enabled = want === 'resow';
   }
   return doc;
 }
@@ -560,10 +636,11 @@ export const OP_MACHINE_CHOICES = [
 ];
 
 export function addStageOp(doc, stageId) {
-  const stage = String(stageId || 'A');
+  const stage = String(stageId || stageByGroup(doc, 'A')?.id || 'A');
   const ids = new Set((doc.ops || []).map(op => op.id));
   let n = 1;
   while (ids.has('job' + n)) n += 1;
+  const idle = stageById(doc, stage)?.group === 'O';
   const op = {
     id: 'job' + n,
     name: '新作业',
@@ -571,12 +648,12 @@ export function addStageOp(doc, stageId) {
     via: null,
     stage,
     variant: null,
-    requiresMask: stage !== 'O',
+    requiresMask: !idle,
     requiresUnlocked: false,
     writesMask: false,
     locksUnswept: false,
     sweepDays: 1.4,
-    machine: stage === 'D' ? 'harvester_potato' : 'impl_cultivator',
+    machine: stageById(doc, stage)?.group === 'D' ? 'harvester_potato' : 'impl_cultivator',
     drone: false,
   };
   doc.ops = doc.ops || [];
@@ -888,57 +965,144 @@ export function tally(sim) {
   return { phases, variants, mask, locked, total: sim.cells.length, day: sim.day, job: sim.job ? { opId: sim.job.opId, applied: sim.job.applied, count: sim.job.queue.length, p: sim.job.p } : null };
 }
 
+const STAGE_ID_OK = /^[A-Za-z][A-Za-z0-9_-]{0,48}$/;
+
+export function renameStageName(doc, id, name) {
+  const row = stageById(doc, id);
+  if (!row) return null;
+  const next = String(name ?? '').trim();
+  if (next) row.name = next;
+  return row;
+}
+
+export function renameStageId(doc, from, to) {
+  const next = String(to ?? '').trim();
+  if (!STAGE_ID_OK.test(next)) return null;
+  if (from === next) return stageById(doc, from);
+  if ((doc.stages || []).some(s => s.id === next)) return null;
+  const row = stageById(doc, from);
+  if (!row) return null;
+  row.id = next;
+  doc.chain = (doc.chain || []).map(id => id === from ? next : id);
+  for (const op of doc.ops || []) if (op.stage === from) op.stage = next;
+  for (const edge of doc.edges || []) {
+    if (edge.from === from) edge.from = next;
+    if (edge.to === from) edge.to = next;
+  }
+  return rebuildNaturalEdges(doc);
+}
+
+export function setStageGroup(doc, id, group) {
+  const row = stageById(doc, id);
+  if (!row || !GROUP_OK.has(group) || row.group === group) return row;
+  const other = (doc.stages || []).find(s => s !== row && s.group === group);
+  if (REQUIRED_GROUPS.includes(row.group)) {
+    if (!other) return row;
+    other.group = row.group;
+  } else if (other && group !== 'M') {
+    other.group = 'M';
+  }
+  row.group = group;
+  if ((group === 'M' || group === 'C') && !(doc.chain || []).includes(row.id)) {
+    const chain = (doc.chain || []).slice();
+    const after = stageByGroup(doc, 'B')?.id;
+    const at = after ? chain.indexOf(after) : 0;
+    chain.splice(Math.max(0, at) + 1, 0, row.id);
+    doc.chain = chain;
+  }
+  return rebuildNaturalEdges(doc);
+}
+
 export function setGrowthChain(doc, middleIds) {
+  assignSequenceGroups(doc);
   const prev = new Set(doc.chain || []);
-  const nextMiddle = middleIds || [];
-  const next = new Set(['A', ...nextMiddle, 'D']);
+  const head = stageByGroup(doc, 'A');
+  const bud = stageByGroup(doc, 'B');
+  const tail = stageByGroup(doc, 'D');
+  const mids = [];
+  for (const id of middleIds || []) {
+    if (!id || id === head?.id || id === tail?.id || id === bud?.id) continue;
+    if (stageById(doc, id) && !mids.includes(id)) mids.push(id);
+  }
+  const nextIds = [head?.id, bud?.id, ...mids, tail?.id].filter(Boolean);
   if (Number.isFinite(+doc.cycle)) {
     let delta = 0;
     for (const id of prev) {
-      if (next.has(id) || id === 'O' || id === 'E') continue;
-      delta -= Number(stageById(doc, id)?.days) || 0;
+      const row = stageById(doc, id);
+      if (!row || nextIds.includes(id) || row.group === 'O' || row.group === 'E') continue;
+      delta -= Number(row.days) || 0;
     }
-    for (const id of next) {
-      if (prev.has(id) || id === 'O' || id === 'E') continue;
+    for (const id of nextIds) {
+      if (prev.has(id)) continue;
       delta += Number(stageById(doc, id)?.days) || 0;
     }
     doc.cycle = Math.round((+doc.cycle + delta) * 100) / 100;
   }
-  doc.chain = ['A', ...nextMiddle, 'D'];
+  doc.chain = nextIds;
   return rebuildNaturalEdges(doc);
 }
 
 export function insertGrowthStage(doc, afterId) {
+  assignSequenceGroups(doc);
   let n = 1;
   while (doc.stages.some(s => s.id === 'X' + n)) n += 1;
   const id = 'X' + n;
-  const after = stageById(doc, afterId) || stageById(doc, 'A');
-  const atStage = Math.max(0, doc.stages.findIndex(s => s.id === 'D'));
+  const after = stageById(doc, afterId) || stageByGroup(doc, 'B') || stageByGroup(doc, 'A');
+  const atStage = Math.max(0, doc.stages.findIndex(s => s.group === 'D'));
   if (Number.isFinite(+doc.cycle)) doc.cycle = Math.round((+doc.cycle + 6) * 100) / 100;
-  doc.stages.splice(atStage, 0, stage({
-    id, name: '插入阶段', kind: 'growth', days: 6, optional: true, inserted: true,
+  doc.stages.splice(atStage < 0 ? doc.stages.length : atStage, 0, stage({
+    id, name: '插入阶段', kind: 'growth', days: 6, optional: true, inserted: true, group: 'M',
     color: after.color, canopy: after.canopy, roughness: after.roughness,
     cover: Math.min(1, after.cover + 0.1), plantScale: Math.min(1.2, after.plantScale + 0.1),
   }));
-  const mid = doc.chain.slice(1, -1);
-  if (afterId === 'A') mid.unshift(id);
-  else {
-    const at = mid.indexOf(afterId);
-    if (at >= 0) mid.splice(at + 1, 0, id);
-    else mid.push(id);
-  }
-  doc.chain = ['A', ...mid, 'D'];
+  const chain = (doc.chain || []).slice();
+  const budAt = chain.indexOf(stageByGroup(doc, 'B')?.id);
+  const closeAt = chain.indexOf(stageByGroup(doc, 'C')?.id);
+  const tailAt = chain.indexOf(stageByGroup(doc, 'D')?.id);
+  const minAt = budAt >= 0 ? budAt : 0;
+  const maxAt = closeAt >= 0 ? closeAt : (tailAt >= 0 ? tailAt : chain.length);
+  let at = chain.indexOf(after.id);
+  if (at < minAt) at = minAt;
+  if (at >= maxAt) at = Math.max(minAt, maxAt - 1);
+  chain.splice(at + 1, 0, id);
+  doc.chain = chain;
   return rebuildNaturalEdges(doc);
 }
 
 export function removeGrowthStage(doc, id) {
-  if (id === 'A' || id === 'D' || id === 'O' || id === 'E') return doc;
   const gone = stageById(doc, id);
-  const days = gone ? Number(gone.days) || 0 : 0;
+  if (!gone || REQUIRED_GROUPS.includes(gone.group)) return doc;
+  const days = Number(gone.days) || 0;
   const onChain = (doc.chain || []).includes(id);
   doc.stages = doc.stages.filter(s => s.id !== id);
   doc.chain = doc.chain.filter(x => x !== id);
   doc.ops = (doc.ops || []).filter(op => op.stage !== id);
   if (onChain && Number.isFinite(+doc.cycle)) doc.cycle = Math.round((+doc.cycle - days) * 100) / 100;
   return rebuildNaturalEdges(doc);
+}
+
+export function orderedStageOps(doc, stageId) {
+  return (doc.ops || []).filter(op => op.stage === stageId).slice().sort((a, b) => {
+    const ao = Number(a.extensions?.order);
+    const bo = Number(b.extensions?.order);
+    const an = Number.isFinite(ao) ? ao : 1e9;
+    const bn = Number.isFinite(bo) ? bo : 1e9;
+    return an - bn || String(a.id).localeCompare(String(b.id));
+  });
+}
+
+export function moveStageOp(doc, opId, dir) {
+  const op = (doc.ops || []).find(item => item.id === opId);
+  if (!op) return null;
+  const mine = orderedStageOps(doc, op.stage);
+  const i = mine.findIndex(item => item.id === opId);
+  const j = i + (dir < 0 ? -1 : 1);
+  if (i < 0 || j < 0 || j >= mine.length) return op;
+  const swap = mine[j];
+  mine[j] = mine[i];
+  mine[i] = swap;
+  mine.forEach((row, index) => {
+    row.extensions = { ...(row.extensions || {}), order: index };
+  });
+  return op;
 }
