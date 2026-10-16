@@ -74,7 +74,7 @@ export function createMachineWorkshop(els) {
     const env = machineEnvelope(list);
     try { localStorage.setItem(MACHINE_LAB_KEY, JSON.stringify(env)); }
     catch { note('这台浏览器写不进农机存档'); return false; }
-    note(list.length ? '已写入这台浏览器。主游戏本轮不读这份。' : '已写入空的农机列表。');
+    note(list.length ? '已写入这台浏览器。主游戏开局、以及回到页面时，读钥匙 ringsheaf.assetlab.machines.v1。' : '已写入空的农机列表。主游戏会清掉覆盖，改回内置机具。');
     return true;
   }
 
@@ -144,7 +144,7 @@ export function createMachineWorkshop(els) {
       syncPreview();
       return;
     }
-    if (editing) editing.textContent = `正在编辑 ${machine.id}。显示名不改 id。主游戏本轮不读这份。`;
+    if (editing) editing.textContent = `正在编辑 ${machine.id}。显示名不改 id。保存后主游戏按这个 id 盖幅宽、速度和仓容。`;
     const name = panel.querySelector('#me-name');
     if (name && document.activeElement !== name) name.value = machine.name;
     const role = panel.querySelector('#me-role');
@@ -230,7 +230,7 @@ export function createMachineWorkshop(els) {
   <button type="button" id="me-new">新农机</button>
   <button type="button" id="me-drop">删除这台</button>
 </div>
-<p class="fs-note">新农机复制当前这一台，id 另起。删除这台会整机去掉。保存只写工坊钥匙。主游戏的机具表和派单不动。</p>
+<p class="fs-note">新农机复制当前这一台，id 另起。删除这台会整机去掉。保存写 ringsheaf.assetlab.machines.v1。主游戏按 id 盖到内置机具上，不整表替换。模型文件仍不换进田里。</p>
 <p id="me-status"></p>`;
     panel.querySelector('#me-pick').addEventListener('change', (e) => {
       currentId = e.target.value;

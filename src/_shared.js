@@ -481,7 +481,10 @@ function passLanes(f, jobId) {
 }
 function stampWidth(f, jobId, width) {
   if (!f.laneW) f.laneW = {};
-  if (!(f.laneW[jobId] > 0)) f.laneW[jobId] = width > 0 ? width : L.LANE;
+  const next = width > 0 ? width : L.LANE;
+  // 还没走开的工序跟当前机具。已经走出进度的，保持开工时盖上的幅宽，避免半路改垄数。
+  const prog = f.jobS?.[jobId] || 0;
+  if (!(f.laneW[jobId] > 0) || prog < 1e-3) f.laneW[jobId] = next;
   return f.laneW[jobId];
 }
 function seenLanes(f, jobId, prog) {
@@ -539,11 +542,22 @@ function variantName(def, id) {
   }
   return id;
 }
-// 有变体色或会写蒙版的工序才刷田面，灌溉这种自动工序也算。车没动不提前换色。
+// 有变体色或会写蒙版的工序才换田面颜色，灌溉这种自动工序也算。车没动不提前换色。
 // 做完的一道留在 base，下一道只盖扫过的垄。
+// 没变体的地面工序（起薯、碎残）不换色，但正在走的时候仍按机具幅宽刷一条深色，不能改成 12.8 m 视觉垄。
 function paintsField(job) {
   if (!job) return false;
   return !!(job.variant || job.writesMask);
+}
+function bareGroundJob(job) {
+  return !!(job && !job.auto && !job.drone && !job.spray && !paintsField(job));
+}
+function bareSweepOpen(job, f, clock, day) {
+  const when = job.window?.when;
+  if (when === 'after') return !!f.harvested;
+  if (when === 'clock') return clock && day >= (job.window?.from || 0);
+  if (when === 'before') return true;
+  return false;
 }
 function groundSweep(f, def) {
   ensureJobs(f);
@@ -552,6 +566,20 @@ function groundSweep(f, def) {
   let base = '';
   let masked = false;
   for (const job of def.jobs) {
+    if (bareGroundJob(job)) {
+      const prog = f.jobS[job.id] || 0;
+      const done = prog >= passLanes(f, job.id) - 1e-3;
+      // 没开工的碎残/起薯不挡住后面的变体色。正在走才按机具幅宽占住刷色。
+      if (!done && prog > 1e-3 && bareSweepOpen(job, f, clock, day)) {
+        return {
+          coat: '',
+          base: settleTone(f, base, masked),
+          lanes: seenLanes(f, job.id, prog),
+          mask: packMask(f, job.id, prog),
+        };
+      }
+      continue;
+    }
     if (!paintsField(job)) continue;
     const when = job.window?.when;
     if (when === 'after') {
@@ -629,12 +657,14 @@ export function fieldVisual(f) {
   if (f && f.live && !f.paid && def) {
     const sweep = groundSweep(f, def);
     const active = sweep.lanes > 0 && !!sweep.coat;
+    // 没变体的工序也在扫：蒙版是幅宽分米×100 + 趟进度，不再改写成 12.8 m 的视觉垄。
+    const bareSweep = !sweep.coat && sweep.mask > 20;
     const coat = active ? sweep.coat : '';
     const base = sweep.base || '';
-    const front = !active && f.plantedAt != null ? visualFront(f) : 0;
-    const s = active ? sweep.lanes : front;
+    const front = !active && !bareSweep && f.plantedAt != null ? visualFront(f) : 0;
+    const s = active || bareSweep ? sweep.lanes : front;
     // 没在扫、也没有收割前沿时，整田铺上一道留下的颜色。负蒙版只给着色器，s 仍是 0。
-    const mask = active ? sweep.mask : (base && front <= 1e-3 ? -1 : 0);
+    const mask = (active || bareSweep) ? sweep.mask : (base && front <= 1e-3 ? -1 : 0);
     if (f.plantedAt == null || !plantJobDone(f)) {
       // g 仍是 1：蒙版还没写完，生长钟不起。没在扫的时候也停在 1，避免做完一道就掉进 g<0.01 的暗褐裸土。
       return { crop: f.crop, g: potato ? 1 : 0, s, dir: f.dir, coat, base, mask };

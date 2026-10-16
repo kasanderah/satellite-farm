@@ -101,7 +101,9 @@ function encodeDir(v) {
   if (!potDrawNow || CROPS[v.crop]?.id !== 'potato') return orient;
   let workId = v.coat || '';
   let baseId = v.base || '';
-  if (!workId && baseId) {
+  // 没变体、但车正在按机具幅宽扫（碎残、起薯）时，留下的颜色放在 base，扫过的垄另刷深色。
+  const bareSweep = !workId && v.mask > 20;
+  if (!workId && baseId && !bareSweep) {
     workId = baseId;
     baseId = '';
   }
@@ -582,11 +584,22 @@ vec3 farmAlbedo(vec2 p){
           gRough = roughW;
           gTilt = rowAcrossW * slopeW * rowSee;
           canopyHere = crestW > 0.35;
+          if (swept && marked && slots.y < 1.0) {
+            col = g_soil * 0.5;
+            gRough = 0.94;
+            gTilt *= 0.15;
+            canopyHere = false;
+          }
         } else if (harvestBand && swept) {
           vec3 soilLane = texelFetch(uPotTint, ivec2(0, slot), 0).rgb;
           col = mix(col, soilLane * 0.72, 0.62);
           gRough = max(gRough, 0.9);
           gTilt *= 0.35;
+          canopyHere = false;
+        } else if (swept && !(marked && slots.y >= 1.0)) {
+          col = g_soil * 0.5;
+          gRough = 0.94;
+          gTilt *= 0.15;
           canopyHere = false;
         } else {
           int coat = 0;
@@ -689,6 +702,7 @@ vec3 farmAlbedo(vec2 p){
         if (sweptNow && marked && slots.y >= 1.0) coat = int(slots.y);
         else if (!sweptNow && marked && slots.x > 1.0) coat = int(slots.x);
         else if (restFill && marked && slots.y >= 1.0) coat = int(slots.y);
+        bool bareLane = sweptNow && coat == 0;
         if (coat > 0) {
           float roughW, crestW, slopeW;
           float phaseW = fract(uv.y / max(P.y, 0.05));
@@ -697,7 +711,14 @@ vec3 farmAlbedo(vec2 p){
           gRough = roughW;
           canopyHere = crestW > 0.35;
         }
-        col = mix(col, nxt, blendDot);
+        if (bareLane) {
+          col = g_soil * 0.5;
+          gRough = 0.94;
+          gTilt *= 0.15;
+          canopyHere = false;
+        } else {
+          col = mix(col, nxt, blendDot);
+        }
       }
       }
     } else if (cut) {                                       // 残茬：作业带一深一浅（收割方向不同），带车辙
@@ -1988,7 +2009,7 @@ function paintLock() {
   const where = r.f ? fieldCode(r.f) : '';
   el.classList.add('on');
   const batt = Math.round((info.charge ?? 1) * 100);
-  el.innerHTML = `<b>${rigTitle(r)}</b><small><em>${info.speed.toFixed(1)}</em> m/s · 电 ${batt}%</small><small>${info.doing}${where ? ' · ' + where : ''}</small><div id="rigbar"><i style="width:${pct}%"></i></div><small>本趟 ${pct}%</small>`;
+  el.innerHTML = `<b>${rigTitle(r)}</b><small><em>${info.speed.toFixed(1)}</em> m/s · 电 ${batt}%${fleetWidth(r)}</small><small>${info.doing}${where ? ' · ' + where : ''}</small><div id="rigbar"><i style="width:${pct}%"></i></div><small>本趟 ${pct}%</small>`;
 }
 function refreshLayerProps() {
   buildPlotSection();
@@ -2759,7 +2780,15 @@ function bindPlayableClocks() {
 function stageParamIsUrl(param) {
   return !!param && param !== 'repo' && param !== 'workshop' && /^(https?:|data:|\.\/|\/|data\/)/.test(param);
 }
-bootWorkshopMachines(localStorage);
+function reloadWorkshopMachines() {
+  bootWorkshopMachines(localStorage);
+}
+reloadWorkshopMachines();
+addEventListener('focus', reloadWorkshopMachines);
+addEventListener('pageshow', reloadWorkshopMachines);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') reloadWorkshopMachines();
+});
 function bootStagesSync() {
   const param = Q.get('stages');
   if (stageParamIsUrl(param)) return '';
@@ -3182,7 +3211,7 @@ function frame(now) {
   if (viewLayer === 'surface') for (const p of parked) setInst(harvSet, n++, p.x, 0, p.z, p.ang);
   for (const h of nearH) {
     if (inCut(h.x, h.z, 8) || (viewLayer !== 'surface' && inOwnPlot(h.x, h.z))) continue;
-    h.va = h.va === undefined ? h.ang : h.va + Math.atan2(Math.sin(h.ang - h.va), Math.cos(h.ang - h.va)) * Math.min(1, dt * 8);
+    h.va = h.ang;
     setInst(harvSet, n++, h.x, 0, h.z, h.va);
     if (h.mode === 'cut' && d < 600 && h._d < 300) for (let e = 0; e < 3; e++) emitDust(h.x, h.z, h.va);
   }
@@ -3201,7 +3230,7 @@ function frame(now) {
     if (inCut(r.x, r.z, 8)) continue;
     const profile = rigProfile(r.kind);
     const platform = profile?.logicId && rigMesh[profile.logicId] ? profile.logicId : 'tractor_gen';
-    r.va = r.va === undefined ? r.ang : r.va + Math.atan2(Math.sin(r.ang - r.va), Math.cos(r.ang - r.va)) * Math.min(1, dt * 8);
+    r.va = r.ang;
     showRig(platform, r.x, r.z, r.va);
     const hauling = r.intent === 'unload' || r.intent === 'deliver' || r.mode === 'unload';
     const hitch = platform === 'tractor_gen' ? (hauling && profile?.kit?.includes('impl_trailer') ? 'impl_trailer' : (r.hitch || profile?.defaultHitch || null)) : null;

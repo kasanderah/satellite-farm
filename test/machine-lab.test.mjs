@@ -169,3 +169,28 @@ test('workshop fertilizer width and speed overlay the builtin implement', () => 
     clearMachineOverlay();
   }
 });
+
+test('workshop harvester width and speed overlay the lifter, and leave other implements', () => {
+  try {
+    const saved = machineEnvelope([{
+      id: 'harvester_potato', name: '窄收获', role: 'self', tags: ['harvester_potato'], workWidth: 8, speed: 20, bin: 4000,
+    }]);
+    const live = bootWorkshopMachines({ getItem(key) { return key === MACHINE_LAB_KEY ? JSON.stringify(saved) : null; } });
+    assert.equal(live.applied, true);
+    assert.equal(live.reason, 'workshop');
+    assert.equal(workWidthOf('lifter', null), 8);
+    const harvest = { id: 'potato_harvest', cap: 'harvest_potato', self: 'harvester_potato' };
+    const plan = hitchPlan('lifter', null, harvest);
+    assert.equal(plan.platform, true);
+    assert.equal(plan.hitch, null);
+    assert.equal(plan.speed, 2);
+    assert.equal(binCapOf('lifter', null), 4);
+    assert.equal(workWidthOf('hiller', 'impl_cultivator', { mode: 'residue' }), 6.4);
+    assert.equal(workWidthOf('planter', 'impl_fertilizer'), 12.8);
+    const again = bootWorkshopMachines({ getItem() { return ''; } });
+    assert.equal(again.reason, 'empty');
+    assert.equal(workWidthOf('lifter', null), 12.8);
+  } finally {
+    clearMachineOverlay();
+  }
+});

@@ -1641,3 +1641,44 @@ test('lime is the next planter job after base fertilizer', () => {
     resetGame();
   }
 });
+
+test('harvest and stalk-crush paint on the implement width, not the 12.8 m visual lanes', () => {
+  resetGame();
+  const applied = applyStagePayload({ schema: 'ringsheaf.field-stage/1', cropId: 'potato', crops: { potato: potatoB } });
+  try {
+    assert.equal(applied.ok, true, applied.message);
+    bindPotatoClock();
+    setPaused(false);
+    stores.seed = 2;
+    stores.fertilizer = 2;
+    const f = fieldAt(focus.i, focus.j);
+    assert.equal(plantField(f, 'potato').ok, true);
+    const harvest = cropDef('potato').jobs.find(j => j.id === 'potato_harvest');
+    f.plantedAt = worldDay - (harvest.window.from + 0.3);
+    for (const id of Object.keys(f.jobS)) f.jobS[id] = 999;
+    f.laneW = { potato_harvest: 8 };
+    f.jobS.potato_harvest = 2.4;
+    f.harvested = false;
+    let vis = fieldVisual(f);
+    assert.equal(vis.coat, '');
+    assert.ok(vis.mask > 20, vis.mask);
+    assert.ok(Math.abs(vis.mask - (80 * 100 + 2.4)) < 1e-6, vis.mask);
+    const clear = cropDef('potato').jobs.find(j => j.id === 'potato_clear');
+    assert.equal(clear.variant, null);
+    f.jobS.potato_harvest = 999;
+    f.harvested = true;
+    f.laneW.potato_clear = 6.4;
+    f.jobS.potato_clear = 3.25;
+    vis = fieldVisual(f);
+    assert.equal(vis.coat, '');
+    assert.ok(Math.abs(vis.mask - (64 * 100 + 3.25)) < 1e-6, vis.mask);
+    assert.ok(vis.mask > 20, '碎残 stays on the cultivator grid');
+    f.jobS.potato_clear = 999;
+    vis = fieldVisual(f);
+    assert.ok(!(vis.mask > 20), vis.mask);
+  } finally {
+    revertPotatoStages();
+    bindPotatoClock();
+    resetGame();
+  }
+});
