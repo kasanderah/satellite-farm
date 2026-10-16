@@ -6,7 +6,7 @@ import {
   startJob, cancelWorkOrder, sampleRidge, ridgeCrestT, setGrowthChain, insertGrowthStage,
   removeGrowthStage, tally, appearanceOf, alignFieldCalendar, jobWindows,
   allocateCropId, forkCropDocument, indexCropLibrary, setHarvestExit, addStageOp,
-  removeStageOp, patchStageOp, renameStageId, moveStageOp,
+  removeStageOp, patchStageOp,   renameStageId, moveStageOp, stageJobStrip, orderedStageOps,
 } from '../src/field-stages.js';
 import { compilePlayable, SURFACE_CROPS } from '../src/surface-crops.js';
 
@@ -453,4 +453,59 @@ test('renaming a stage id rewrites jobs, and order follows the editor', () => {
   const ordered = prep.slice().sort((a, b) => a.extensions.order - b.extensions.order).map(op => op.id);
   assert.equal(ordered[0], 'lime');
   assert.ok(ordered.indexOf('lime') < ordered.indexOf('potato_base_fert'));
+});
+
+test('old potato lime marked framework is dispatched between base fert and rotary till', () => {
+  const place = placeholderFieldDoc(potato);
+  const optional = place.ops.find(op => op.id === 'lime');
+  assert.equal(optional.kind, 'optional');
+  const play = compilePlayable(place, { id: 'potato', seed: 'seed' });
+  assert.equal(play.jobs.filter(j => j.window.when === 'before').map(j => j.id)[0], 'sow');
+  const raw = JSON.parse(fs.readFileSync(new URL('../data/field-stages/potato-b.json', import.meta.url)));
+  const old = structuredClone(raw);
+  const row = old.ops.find(op => op.id === 'lime');
+  row.reserved = true;
+  row.kind = 'optional';
+  row.variant = '';
+  row.machine = '';
+  row.extensions.framework = true;
+  row.extensions.order = 90;
+  row.extensions.required = false;
+  row.extensions.cap = null;
+  const doc = parseFieldStageDoc(old);
+  const settled = doc.ops.find(op => op.id === 'lime');
+  assert.equal(settled.reserved, false);
+  assert.equal(settled.extensions.framework, false);
+  assert.equal(settled.kind, 'required');
+  assert.equal(settled.extensions.required, true);
+  assert.equal(settled.extensions.cap, 'fertilize');
+  assert.equal(settled.extensions.impl, 'impl_fertilizer');
+  assert.equal(settled.machine, 'impl_fertilizer');
+  assert.equal(settled.variant, 'O2');
+  const fert = doc.ops.find(op => op.id === 'potato_base_fert').extensions.order;
+  const till = doc.ops.find(op => op.id === 'potato_rotavate').extensions.order;
+  assert.ok(settled.extensions.order > Math.min(fert, till));
+  assert.ok(settled.extensions.order < Math.max(fert, till));
+  const compiled = compilePlayable(doc, { id: 'potato', seed: 'seed' });
+  const lime = compiled.jobs.find(j => j.id === 'lime');
+  assert.equal(lime.required, true);
+  assert.equal(lime.cap, 'fertilize');
+  assert.ok(compiled.jobs.filter(j => j.window.when === 'before').map(j => j.id).indexOf('lime') > 0);
+  const kept = structuredClone(raw);
+  kept.ops.find(op => op.id === 'lime').extensions.order = 0.25;
+  assert.equal(parseFieldStageDoc(kept).ops.find(op => op.id === 'lime').extensions.order, 0.25);
+});
+
+test('stage color bars follow the same order as the job list', () => {
+  const raw = JSON.parse(fs.readFileSync(new URL('../data/field-stages/potato-b.json', import.meta.url)));
+  const doc = parseFieldStageDoc(raw);
+  const strip = stageJobStrip(doc, 'O');
+  assert.deepEqual(strip.map(row => row.id), orderedStageOps(doc, 'O').map(op => op.id));
+  assert.equal(strip.find(row => row.id === 'potato_base_fert').color, '#81683f');
+  assert.equal(strip.find(row => row.id === 'lime').color, '#a2998a');
+  assert.equal(strip.find(row => row.id === 'potato_rotavate').color, '#4a4844');
+  moveStageOp(doc, 'lime', -1);
+  const next = stageJobStrip(doc, 'O');
+  assert.deepEqual(next.map(row => row.id), orderedStageOps(doc, 'O').map(op => op.id));
+  assert.equal(next[0].id, 'lime');
 });

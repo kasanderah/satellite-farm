@@ -1602,3 +1602,42 @@ test('hill keeps its color until topdress sweeps, and the dock lists that stage'
     resetGame();
   }
 });
+
+test('lime is the next planter job after base fertilizer', () => {
+  resetGame();
+  const applied = applyStagePayload({ schema: 'ringsheaf.field-stage/1', cropId: 'potato', crops: { potato: potatoB } });
+  try {
+    assert.equal(applied.ok, true, applied.message);
+    bindPotatoClock();
+    setPaused(false);
+    stores.seed = 2;
+    stores.fertilizer = 2;
+    const f = fieldAt(focus.i, focus.j);
+    assert.equal(plantField(f, 'potato').ok, true);
+    const planter = rigs.find(r => r.kind === 'planter');
+    assert.equal(planter.job, 'potato_base_fert');
+    f.jobS.potato_base_fert = 999;
+    planter.mode = 'park';
+    planter.busy = false;
+    planter.f = null;
+    planter.job = null;
+    planter.charge = 1;
+    step(0.05, 0, 1);
+    assert.equal(planter.job, 'lime');
+    const board = stageBoard(f);
+    const lime = board.jobs.find(job => job.id === 'lime');
+    assert.equal(lime.status, '执行中');
+    assert.equal(lime.pct, 0);
+    assert.equal(board.jobs.find(job => job.id === 'potato_base_fert').status, '执行完');
+    assert.equal(board.jobs.find(job => job.id === 'potato_base_fert').pct, 100);
+    assert.equal(board.jobs.find(job => job.id === 'potato_rotavate').status, '未执行');
+    assert.equal(board.jobs.find(job => job.id === 'potato_rotavate').pct, 0);
+    assert.ok(board.jobs.every(job => !String(job.status).includes('不派')));
+    f.jobS.lime = 4;
+    assert.equal(stageBoard(f).jobs.find(job => job.id === 'lime').pct, 40);
+  } finally {
+    revertPotatoStages();
+    bindPotatoClock();
+    resetGame();
+  }
+});

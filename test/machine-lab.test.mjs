@@ -4,6 +4,8 @@ import {
   MACHINE_LAB_KEY, MACHINE_TAGS, allocateMachineId, defaultMachines, dropMachine, forkMachine,
   libraryFromUnknown, machineEnvelope, machineOptionLabel, passPreview, renameMachine,
 } from '../src/machine-lab.js';
+import { applyMachineOverlay, clearMachineOverlay, workWidthOf, hitchPlan, rigCan, binCapOf } from '../src/surface-crops.js';
+import { bootWorkshopMachines } from '../src/machine-live.js';
 
 test('a new machine gets its own id and does not rename the source', () => {
   const list = defaultMachines();
@@ -126,4 +128,44 @@ test('a library placeholder is kept, and an unknown library id falls back', () =
   assert.equal(missing.machines[0].model.libraryId, '');
   assert.equal(missing.machines[0].modes.length, 1);
   assert.equal(missing.machines[0].modes[0].fn, '');
+});
+
+test('workshop fertilizer width and speed overlay the builtin implement', () => {
+  try {
+    const applied = applyMachineOverlay([{
+      id: 'impl_fertilizer',
+      name: '窄施肥',
+      role: 'implement',
+      modes: [{ fn: 'impl_fertilizer', workWidth: 4, speed: 20, bin: 3000 }],
+    }]);
+    assert.equal(applied.applied, true);
+    assert.equal(workWidthOf('planter', 'impl_fertilizer'), 4);
+    const job = { id: 'lime', cap: 'fertilize' };
+    const plan = hitchPlan('planter', 'impl_fertilizer', job);
+    assert.equal(plan.hitch, 'impl_fertilizer');
+    assert.equal(plan.speed, 2);
+    assert.equal(rigCan('planter', job), true);
+    assert.equal(binCapOf('planter', 'impl_fertilizer'), 3);
+    clearMachineOverlay();
+    assert.equal(workWidthOf('planter', 'impl_fertilizer'), 12.8);
+    applyMachineOverlay(defaultMachines());
+    assert.equal(workWidthOf('planter', 'impl_fertilizer'), 12.8);
+    const bad = bootWorkshopMachines({ getItem() { return '{'; } });
+    assert.equal(bad.applied, false);
+    assert.equal(bad.reason, 'corrupt');
+    assert.equal(workWidthOf('planter', 'impl_fertilizer'), 12.8);
+    const empty = bootWorkshopMachines({ getItem() { return ''; } });
+    assert.equal(empty.reason, 'empty');
+    const newer = bootWorkshopMachines({ getItem() { return JSON.stringify({ version: 99, machines: [{ id: 'impl_fertilizer' }] }); } });
+    assert.equal(newer.applied, false);
+    assert.equal(workWidthOf('planter', 'impl_fertilizer'), 12.8);
+    const saved = machineEnvelope([{
+      id: 'impl_fertilizer', name: '窄施肥', role: 'implement', tags: ['impl_fertilizer'], workWidth: 4, speed: 20,
+    }]);
+    const live = bootWorkshopMachines({ getItem(key) { return key === MACHINE_LAB_KEY ? JSON.stringify(saved) : null; } });
+    assert.equal(live.applied, true);
+    assert.equal(workWidthOf('planter', 'impl_fertilizer'), 4);
+  } finally {
+    clearMachineOverlay();
+  }
 });

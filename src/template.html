@@ -101,7 +101,10 @@ body.underground #dock{display:none}
 #admin a:hover{border-color:var(--sig)}
 #admin{top:98px;left:20px;display:none;flex-direction:column;gap:8px;padding:10px 12px;min-width:228px}
 #admin.on{display:flex}
-#admin .ah{display:flex;justify-content:space-between;font-size:10px;letter-spacing:.2em;color:var(--mut);cursor:grab;user-select:none;touch-action:none}
+#admin .ah{display:flex;justify-content:space-between;align-items:center;font-size:10px;letter-spacing:.2em;color:var(--mut);cursor:grab;user-select:none;touch-action:none;position:sticky;top:0;z-index:2;background:#0a0c14;margin:-10px -12px 0;padding:8px 12px 6px}
+#admin .ah-end{display:flex;align-items:center;gap:8px}
+.qmark{width:20px;height:20px;padding:0;border-radius:50%;border:1px solid var(--line);background:#0a0c14;color:var(--fg);font:inherit;font-size:12px;line-height:18px;letter-spacing:0;cursor:pointer;flex:none;display:inline-flex;align-items:center;justify-content:center}
+.qmark:hover,.qmark[aria-expanded="true"]{border-color:var(--sig);color:var(--sig)}
 #admin .ah:active{cursor:grabbing}
 #admin.on ~ #stores{top:268px}
 #admin.crop{max-height:74vh;overflow:auto;width:min(440px,92vw)}
@@ -116,7 +119,6 @@ body.underground #dock{display:none}
 #stage-src textarea{width:100%;min-height:48px;resize:vertical;font:11px/1.4 inherit;color:var(--fg);background:transparent;border:1px solid var(--line);padding:6px}
 #stage-src .file{font-size:12px;letter-spacing:.08em;border:1px solid var(--line);padding:3px 8px;cursor:pointer}
 #stage-src .file input{display:none}
-#stage-src #stage-help{width:22px;padding:3px 0;flex:none}
 #stage-help-note[hidden]{display:none}
 #cropbook .crop{margin-top:10px;padding-top:8px;border-top:1px solid var(--line)}
 #cropbook .crop b{font-weight:500;letter-spacing:.08em;font-size:13px}
@@ -163,6 +165,7 @@ body.underground #dock{display:none}
 #dock .jobs .cap{letter-spacing:.14em}
 #dock .jb{display:flex;justify-content:space-between;gap:8px;font-size:11px;letter-spacing:.06em;color:var(--mut)}
 #dock .jb b{font-weight:500;color:var(--fg);letter-spacing:.08em}
+#dock .jb span{white-space:nowrap;font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1}
 #dock .jb.run b,#dock .jb.run span{color:var(--sig)}
 #dock .ops{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px}
 #dock #selbtns{display:none}
@@ -210,7 +213,7 @@ body.underground #dock{display:none}
 <div class="hud" id="clock"></div>
 <button type="button" class="hud hit" id="admin-toggle">管理</button>
 <a class="hud hit" id="flow-link" href="flow.html">流向</a>
-<div class="hud panel hit" id="admin"><div class="ah"><span>管理</span><span>F2</span></div><div class="arow" id="admin-tabs"><button type="button" id="tab-clock" class="on">钟</button><button type="button" id="tab-crops">作物</button></div><div id="stage-src"><p id="stage-src-label">土豆阶段 · 仓库默认</p><div class="arow"><button type="button" id="stage-reload">重读工坊</button><button type="button" id="stage-repo">仓库默认</button><button type="button" id="stage-help" aria-expanded="false" aria-controls="stage-help-note" title="阶段来源说明">?</button></div><p id="stage-help-note" hidden>同一来源（本地服务器同时打开工坊和本页）时，工坊「保存」写进这台浏览器，点重读即可。file:// 分开打开时两页不共用存储：把工坊下载的 JSON 贴在下面，或导入文件。地址栏 <b>?stages=repo</b> 强制仓库默认。</p><textarea id="stage-paste" placeholder="贴上工坊 JSON"></textarea><div class="arow"><button type="button" id="stage-apply">采用这份</button><label class="file">导入文件<input id="stage-file" type="file" accept="application/json,.json"></label></div><p id="stage-src-err"></p></div><div id="clockpane"><div id="rates"></div><div class="arow"><button type="button" id="lock-day" aria-pressed="false">锁定白天</button></div><div class="arow"><button type="button" id="pause">暂停</button><button type="button" id="assets-open">资产</button><a href="flow.html">流向</a></div><p class="ask" id="reset-ask">清空本机存档，回到开局？仓棚和仓库都会去掉。</p><div class="arow" id="reset-go"><button type="button" id="reset-yes">清空</button><button type="button" id="reset-no">留下</button></div><div class="arow" id="reset-row"><button type="button" id="reset">重开</button></div></div><div id="cropbook"></div></div>
+<div class="hud panel hit" id="admin"><div class="ah"><span>管理</span><span class="ah-end"><span>F2</span><button type="button" class="qmark" id="stage-help" aria-expanded="false" aria-controls="stage-help-note" title="阶段来源说明">?</button></span></div><div class="arow" id="admin-tabs"><button type="button" id="tab-clock" class="on">钟</button><button type="button" id="tab-crops">作物</button></div><div id="stage-src"><p id="stage-src-label">土豆阶段 · 仓库默认</p><div class="arow"><button type="button" id="stage-reload">重读工坊</button><button type="button" id="stage-repo">仓库默认</button></div><p id="stage-help-note" hidden>同一来源（本地服务器同时打开工坊和本页）时，工坊「保存」写进这台浏览器，点重读即可。file:// 分开打开时两页不共用存储：把工坊下载的 JSON 贴在下面，或导入文件。地址栏 <b>?stages=repo</b> 强制仓库默认。</p><textarea id="stage-paste" placeholder="贴上工坊 JSON"></textarea><div class="arow"><button type="button" id="stage-apply">采用这份</button><label class="file">导入文件<input id="stage-file" type="file" accept="application/json,.json"></label></div><p id="stage-src-err"></p></div><div id="clockpane"><div id="rates"></div><div class="arow"><button type="button" id="lock-day" aria-pressed="false">锁定白天</button></div><div class="arow"><button type="button" id="pause">暂停</button><button type="button" id="assets-open">资产</button><a href="flow.html">流向</a></div><p class="ask" id="reset-ask">清空本机存档，回到开局？仓棚和仓库都会去掉。</p><div class="arow" id="reset-go"><button type="button" id="reset-yes">清空</button><button type="button" id="reset-no">留下</button></div><div class="arow" id="reset-row"><button type="button" id="reset">重开</button></div></div><div id="cropbook"></div></div>
 <div class="hud" id="stores"></div>
 <div class="hud" id="fps"></div>
 <div class="hud panel" id="legend"></div>

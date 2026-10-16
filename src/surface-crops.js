@@ -326,6 +326,92 @@ export const IMPLEMENTS = {
   impl_bedder: { workWidth: 3.2, caps: [{ id: 'bed' }] },
 };
 
+// 工坊农机存档盖在内置表上。缺的 id、空档、坏档都不进这张表，调度继续用上面的内置值。
+// 作业速度按 10 m/s 为 1 倍，和 MACHINE_MPS 对齐。仓容按 1000 L 一趟卸，夹在 1 到 20。
+let machineOverlay = null;
+
+function paceOf(mps) {
+  const n = Number(mps);
+  if (!Number.isFinite(n) || n <= 0) return 1;
+  return Math.min(4, Math.max(0.2, Math.round((n / 10) * 100) / 100));
+}
+
+function binLanesOf(bin) {
+  const n = Number(bin);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.min(20, Math.max(1, Math.round(n / 1000)));
+}
+
+const SELF_KIND = {
+  harvester_potato: 'lifter',
+  harvester_combine: 'harvester_combine',
+  harvester_cabbage: 'harvester_cabbage',
+  transplanter: 'transplanter',
+};
+
+export function clearMachineOverlay() {
+  machineOverlay = null;
+}
+
+export function applyMachineOverlay(machines) {
+  if (!Array.isArray(machines) || !machines.length) {
+    machineOverlay = null;
+    return { applied: false };
+  }
+  const implementsLive = {};
+  const profiles = {};
+  const kits = { planter: [], tractor: [] };
+  for (const machine of machines) {
+    const modes = Array.isArray(machine?.modes) ? machine.modes : [];
+    for (const mode of modes) {
+      const fn = mode?.fn;
+      if (!fn || !IMPLEMENTS[fn]) continue;
+      const slot = implementsLive[fn] || { workWidth: mode.workWidth, pace: paceOf(mode.speed), widths: {}, paceByMode: {}, binLanes: null };
+      if (mode.workWidth > 0) slot.workWidth = mode.workWidth;
+      slot.pace = paceOf(mode.speed);
+      const style = mode.extra?.style || mode.extra?.disc || mode.extra?.header || null;
+      if (style) {
+        if (mode.workWidth > 0) slot.widths[style] = mode.workWidth;
+        slot.paceByMode[style] = paceOf(mode.speed);
+      }
+      const lanes = binLanesOf(mode.bin);
+      if (lanes) slot.binLanes = lanes;
+      implementsLive[fn] = slot;
+      if (machine.role === 'tractor') {
+        kits.planter.push(fn);
+        kits.tractor.push(fn);
+      }
+    }
+    if (machine?.role === 'self') {
+      const fn = modes.find(mode => SELF_KIND[mode.fn])?.fn || (SELF_KIND[machine.id] ? machine.id : null);
+      const kind = fn && SELF_KIND[fn];
+      const mode = modes.find(row => row.fn === fn) || modes[0];
+      if (kind && mode) {
+        profiles[kind] = {
+          workWidth: mode.workWidth > 0 ? mode.workWidth : null,
+          pace: paceOf(mode.speed),
+          binCap: binLanesOf(mode.bin),
+        };
+      }
+    }
+  }
+  machineOverlay = { implements: implementsLive, profiles, kits };
+  return { applied: true, ids: machines.map(machine => machine.id) };
+}
+
+function kitOf(kind) {
+  const base = RIG_PROFILE[kind]?.kit || [];
+  const extra = machineOverlay?.kits?.[kind] || [];
+  if (!extra.length) return base;
+  const out = base.slice();
+  for (const id of extra) if (id && !out.includes(id)) out.push(id);
+  return out;
+}
+
+function liveImplement(hitch) {
+  return hitch && machineOverlay?.implements?.[hitch] || null;
+}
+
 export const PLATFORM_CAPS = {
   harvester_potato: [{ id: 'harvest_potato' }],
   harvester_combine: [{ id: 'harvest_combine', mode: 'bean' }, { id: 'harvest_combine', mode: 'grain' }],
@@ -359,17 +445,26 @@ export function hitchHasModes(hitch) {
   return capsOfHitch(hitch).some(cap => cap.modes?.length);
 }
 
+function livePace(hitch, job, fallback) {
+  const live = liveImplement(hitch);
+  if (!live) return fallback;
+  const key = job?.mode || job?.disc || job?.tank || null;
+  if (key && live.paceByMode?.[key]) return live.paceByMode[key];
+  return live.pace || fallback;
+}
+
 export function hitchPlan(kind, currentHitch, job) {
   const profile = rigProfile(kind);
   if (!profile || !job) return null;
+  const selfPace = machineOverlay?.profiles?.[kind]?.pace;
   const platform = (PLATFORM_CAPS[profile.logicId] || []).find(cap => capFits(cap, job));
-  if (platform) return { platform: true, hitch: null, swap: false, speed: platform.speed || 1 };
-  const kit = profile.kit || [];
+  if (platform) return { platform: true, hitch: null, swap: false, speed: selfPace || platform.speed || 1 };
+  const kit = kitOf(kind);
   const owned = kit.filter(id => capsOfHitch(id).some(cap => capFits(cap, job)));
   if (!owned.length) return null;
   const hitch = owned.includes(currentHitch) ? currentHitch : owned[0];
   const cap = capsOfHitch(hitch).find(item => capFits(item, job));
-  return { platform: false, hitch, swap: hitch !== currentHitch, speed: cap?.speed || 1 };
+  return { platform: false, hitch, swap: hitch !== currentHitch, speed: livePace(hitch, job, cap?.speed || 1) };
 }
 
 export function cropDef(id) {
@@ -395,14 +490,31 @@ export function lanesForWidth(width, field = 128) {
   return Math.max(1, Math.round(length / span));
 }
 
-export function workWidthOf(kind, hitch) {
+export function workWidthOf(kind, hitch, job) {
+  const live = liveImplement(hitch);
+  if (live) {
+    const key = job?.mode || job?.disc || job?.tank || null;
+    if (key && live.widths?.[key] > 0) return live.widths[key];
+    if (live.workWidth > 0) return live.workWidth;
+  }
   const impl = hitch && IMPLEMENTS[hitch];
   if (impl?.workWidth > 0) return impl.workWidth;
+  const over = machineOverlay?.profiles?.[kind];
+  if (over?.workWidth > 0) return over.workWidth;
   const profile = rigProfile(kind);
   if (profile?.workWidth > 0) return profile.workWidth;
   const drone = kind && DRONE_PROFILE[kind];
   if (drone?.workWidth > 0) return drone.workWidth;
   return DEFAULT_WORK_WIDTH;
+}
+
+// 工坊自走机械或挂具写了仓容时，按 1000 L 一趟。没写就仍用内置 BIN_LANES。
+export function binCapOf(kind, hitch) {
+  const self = machineOverlay?.profiles?.[kind]?.binCap;
+  if (self > 0) return self;
+  const impl = liveImplement(hitch)?.binLanes;
+  if (impl > 0) return impl;
+  return null;
 }
 
 export function droneCan(kind, job) {
@@ -417,15 +529,14 @@ export function rigCan(kind, job) {
   if (!profile || !job || job.auto || job.drone) return false;
   if (wantedCaps(job)) return !!hitchPlan(kind, null, job);
   if (job.self) return profile.logicId === job.self;
-  const kit = profile.kit || [];
+  const kit = kitOf(kind);
   if (job.implAny) return job.implAny.some(id => kit.includes(id));
   if (job.impl) return kit.includes(job.impl);
   return false;
 }
 
 export function rigHas(kind, impl) {
-  const profile = rigProfile(kind);
-  return !!profile && (profile.kit || []).includes(impl);
+  return kitOf(kind).includes(impl);
 }
 
 // 某一作物、某一天，地上作业会派给哪些 kind。自动灌溉和无人机不在这张表里。

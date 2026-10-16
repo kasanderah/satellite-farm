@@ -435,6 +435,39 @@ function clampDays(n, fallback) {
   return Math.max(0.25, Math.min(400, Math.round(v * 100) / 100));
 }
 
+// 土豆B 的撒石灰夹在基肥和旋耕之间，由施肥机来做。旧档若还标着不派，或把顺序停在翻地/复播那一档（≥90），读进来就清掉并插回中间。
+// 用户已经排过的小数顺序留着。没有这两道土豆整地工时不动，占位链的可选石灰仍在播种后面。
+function settleLime(doc) {
+  const fert = (doc.ops || []).find(op => op.id === 'potato_base_fert');
+  const till = (doc.ops || []).find(op => op.id === 'potato_rotavate');
+  const lime = (doc.ops || []).find(op => op.id === 'lime');
+  if (!fert || !till || !lime) return;
+  const ext = { ...(lime.extensions || {}) };
+  const wasFramework = ext.framework === true;
+  const order = Number(ext.order);
+  const parked = !Number.isFinite(order) || order >= 90;
+  lime.reserved = false;
+  lime.kind = 'required';
+  if (!lime.machine) lime.machine = 'impl_fertilizer';
+  if (!lime.variant) lime.variant = 'O2';
+  ext.framework = false;
+  ext.required = true;
+  ext.cap = 'fertilize';
+  ext.impl = ext.impl || 'impl_fertilizer';
+  ext.auto = false;
+  ext.drone = false;
+  if (wasFramework || parked) {
+    const a = Number(fert.extensions?.order);
+    const b = Number(till.extensions?.order);
+    const lo = Number.isFinite(a) ? a : 0;
+    const hi = Number.isFinite(b) ? b : lo + 1;
+    const left = Math.min(lo, hi);
+    const right = Math.max(lo, hi);
+    ext.order = left === right ? left + 0.5 : (left + right) / 2;
+  }
+  lime.extensions = ext;
+}
+
 function copyRidge(points) {
   if (!points) return null;
   return points.map(p => ({ x: Number(p.x), y: Number(p.y) }));
@@ -511,6 +544,7 @@ export function parseFieldStageDoc(input) {
   const cropName = String(input.cropName || input.name || seed.cropName || doc.cropId).trim() || doc.cropId;
   doc.cropName = cropName;
   doc.name = cropName;
+  settleLime(doc);
   exclusiveHarvestExits(doc);
   return rebuildNaturalEdges(doc);
 }
@@ -1088,6 +1122,19 @@ export function orderedStageOps(doc, stageId) {
     const an = Number.isFinite(ao) ? ao : 1e9;
     const bn = Number.isFinite(bo) ? bo : 1e9;
     return an - bn || String(a.id).localeCompare(String(b.id));
+  });
+}
+
+// 色条和下面的作业列表共用这一份顺序。有变体色用变体，没有就用阶段色。
+export function stageJobStrip(doc, stageId) {
+  const stage = (doc?.stages || []).find(s => s.id === stageId);
+  return orderedStageOps(doc, stageId).map(op => {
+    const variant = (stage?.variants || []).find(v => v.id && v.id === op.variant);
+    return {
+      id: op.id,
+      name: op.name || op.id,
+      color: variant?.color || stage?.color || '#6f6a61',
+    };
   });
 }
 

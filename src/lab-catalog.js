@@ -223,7 +223,7 @@ export const LAB_ENTRIES = [
     span: 150,
     notes: `农机编辑器 v2。类别下面添加模式。每个模式选一个功能，再填功率、作业宽度、作业速度、仓容。部分功能才显示特有项。通用属性右边可勾同步属性。顶视按当前模式的宽度画一趟，巷距跟主游戏 lanesForWidth 同一算法。
 
-保存写 localStorage 钥匙 ringsheaf.assetlab.machines.v1。下载的 JSON 结构见 docs/machine-lab-v1.md。旧的平铺存档读进来收成一个模式。主游戏本轮不读这份，种植和派单仍用原来的机具表。
+保存写 localStorage 钥匙 ringsheaf.assetlab.machines.v1。下载的 JSON 结构见 docs/machine-lab-v1.md。旧的平铺存档读进来收成一个模式。可玩页开局读这份，按机具 id 盖到内置表上；空档或坏档仍用内置机具。
 
 占位外形用 refs/machines 里已有的低模，也可以直接从库里选现用剪影。联合收割机整包已在「参考·外部」，来自「环穗资产」，不拆、不进田里派单。导入文件只记下文件名。`,
   },

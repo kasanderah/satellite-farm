@@ -1,7 +1,7 @@
-// 农机编辑器 v2。只存在工坊这台浏览器，钥匙仍是 ringsheaf.assetlab.machines.v1。
+// 农机编辑器 v2。钥匙仍是 ringsheaf.assetlab.machines.v1。
 // 一台农机有多个模式。每个模式选一个功能，再记功率、作业宽度、作业速度、仓容。
 // 勾上同步属性时，这一项在该农机的所有模式里是同一个数。
-// 主游戏本轮不读这份，种植和派单仍用原来的机具表。
+// 可玩页开局读这份：按机具 id 盖宽度、速度和仓容，空档或坏档则继续用内置机具表。能力不收窄。
 // 结构见 docs/machine-lab-v1.md。v1 的平铺字段读进来时收成一个模式。
 import { OP_MACHINE_CHOICES } from './field-stages.js';
 import { MACHINE_CAP_BY_ID, IMPLEMENTS, DEFAULT_WORK_WIDTH, lanesForWidth } from './surface-crops.js';

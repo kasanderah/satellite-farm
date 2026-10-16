@@ -1,5 +1,5 @@
 // 可玩页读工坊存下的田间阶段。解析和派工都走同一份编译：阶段对齐，作业窗口。
-// 土豆、大豆、饲料大麦、结球甘蓝都能从这里换表。缺的那一份留仓库占位。
+// 土豆、大豆、饲料大麦、结球甘蓝都能从这里换表。土豆没有工坊档时用仓库里的土豆B。其余作物留占位链。
 //
 // 工坊「保存」写入 localStorage `ringsheaf.assetlab.fieldStages.v1`，形状是
 // `{ schema, cropId, crops: { potato: doc } }`。工坊「下载」是单份 doc。
@@ -8,6 +8,7 @@
 // 那种打开方式用管理里的粘贴或导入文件，或地址栏 `?stages=repo` 强制仓库默认。
 import { FIELD_STAGE_SCHEMA, FIELD_STAGE_STORE } from './field-stages.js';
 import { cropDef, installPotatoProfile, potatoProfileFromRaw, shippedPotatoProfile, surfaceProfileFromRaw, installSurfaceProfile } from './surface-crops.js';
+import potatoBRaw from '../data/field-stages/potato-b.json' with { type: 'json' };
 
 export { FIELD_STAGE_STORE };
 
@@ -92,6 +93,13 @@ export function revertPotatoStages() {
   const profile = shippedPotatoProfile();
   installPotatoProfile(profile, 'repo');
   return { ok: true, origin: 'repo', maturity: profile.maturity, rotAt: profile.rotAt };
+}
+
+// 可玩页的仓库默认是土豆B，不是四作物共用的占位链。占位链仍由 revertPotatoStages 装回。
+export function installShippedPotato() {
+  const profile = potatoProfileFromRaw(structuredClone(potatoBRaw));
+  installPotatoProfile(profile, 'repo');
+  return { ok: true, origin: 'repo', maturity: profile.maturity, rotAt: profile.rotAt, profile: profile.profile };
 }
 
 export function stageBadge() {
@@ -195,12 +203,25 @@ export function resumePotatoStage(storage) {
 
 // stagesParam 为 repo 时忽略浏览器里的工坊存档。其余值留给地址栏上的 JSON 地址，由页面自己去取。
 // potatoSuspended 是「仓库默认」留下的：土豆文档还在，这一轮先不套上。重读会先清掉这个标记。
+// 这三条都装仓库里的土豆B。坏掉的 JSON 同样退回土豆B，避免可玩页停在占位链上。
 export function bootFieldStageSource(storage, stagesParam) {
-  if (stagesParam === 'repo') return { ok: true, origin: 'repo', skipped: true };
+  if (stagesParam === 'repo') {
+    installShippedPotato();
+    return { ok: true, origin: 'repo', skipped: true };
+  }
   const payload = readStageStore(storage);
-  if (!payload) return { ok: true, origin: 'repo', skipped: true };
-  if (payload.__parseError) return { ok: false, reason: 'json', message: '工坊存档不是 JSON：' + payload.__parseError };
-  if (payload.potatoSuspended) return { ok: true, origin: 'repo', skipped: true, suspended: true };
+  if (!payload) {
+    installShippedPotato();
+    return { ok: true, origin: 'repo', skipped: true };
+  }
+  if (payload.__parseError) {
+    installShippedPotato();
+    return { ok: false, reason: 'json', message: '工坊存档不是 JSON：' + payload.__parseError };
+  }
+  if (payload.potatoSuspended) {
+    installShippedPotato();
+    return { ok: true, origin: 'repo', skipped: true, suspended: true };
+  }
   if (reinstatePotato(payload)) {
     try { storage.setItem(FIELD_STAGE_STORE, JSON.stringify(payload)); } catch { /* 无痕模式 */ }
   }

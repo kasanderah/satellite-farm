@@ -12,8 +12,9 @@ import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { HorizontalTiltShiftShader } from 'three/addons/shaders/HorizontalTiltShiftShader.js';
 import { VerticalTiltShiftShader } from 'three/addons/shaders/VerticalTiltShiftShader.js';
 import { PALETTE, CROPS, TEX_ID, L, fields, harvesters, haulers, drones, step, TRUNKS_X, TRUNKS_Z, depots, inCrater, ROADS, RING, LAYERS, CUT, wrapX, PLOT, economy, focus, signals, log, plantField, abandonField, quote, setTimeScale, setPaused, paused, exportSnapshot, applySnapshot, fieldAtWorld, fieldAt, fieldOrigin, simTime, worldDay, stores, rigs, fieldVisual, cropWatch, stageBoard, POTATO_DAYS, POTATO_STAGES, warehouse, buildings, sellLot, sellStack, warehouseStacks, warehouseCapacity, placeBuilding, removeBuilding, rigReadout, SHOP, buySeed, buyItem, SEED_PER_FIELD, FERT_PER_FIELD, resetGame, CULTURES, DECK_CLIMATE, tanks, cultureWatch, startCulture, tendCulture, harvestCulture, BUILDING_KINDS, CULTURE_CELLS, tankSite, devices, potatoStock, fertPlan, cultureFeedPlan, millWatch, startMill, removeMill, orderProcess, HUB_SITES, cropDossier, MACHINE_SHOP, buyMachine, cropDef, boomWatch, rigProfile, DRONE_SHOP, workDrones, buyDrone, sectorLight, sectorWord, dayCenter, setWorldDay, RING_OMEGA, bindPotatoClock, bindSurfaceClock, formatTimeScale } from './_shared.js';
-import { applyStagePayload, revertPotatoStages, bootFieldStageSource, writeStageStore, suspendPotatoStage, resumePotatoStage, stageBadge } from './field-stage-live.js';
-import { potatoDrawLooks, POTATO_PAINT_SLOTS } from './surface-crops.js';
+import { applyStagePayload, bootFieldStageSource, writeStageStore, suspendPotatoStage, resumePotatoStage, stageBadge, installShippedPotato } from './field-stage-live.js';
+import { bootWorkshopMachines } from './machine-live.js';
+import { potatoDrawLooks, POTATO_PAINT_SLOTS, workWidthOf } from './surface-crops.js';
 import { ridgeCrestT } from './field-stages.js';
 import { migrateSave } from './save-contract.js';
 import { productById } from './products.js';
@@ -1956,6 +1957,12 @@ function rigTitle(r) {
   if (same.length < 2) return r.label;
   return `${r.label} ${same.indexOf(r) + 1}`;
 }
+function fleetWidth(r) {
+  const w = workWidthOf(r.kind, r.hitch);
+  if (!(w > 0)) return '';
+  const text = Math.abs(w - Math.round(w)) < 0.05 ? String(Math.round(w)) : String(Math.round(w * 10) / 10);
+  return ` · 幅宽 ${text} m`;
+}
 function rigLine(r) {
   const info = rigReadout(r);
   const aerial = r.kind === 'drone_scout' || r.kind === 'drone_treat';
@@ -1966,9 +1973,10 @@ function rigLine(r) {
     return `${info.doing}${where}${band}`;
   }
   const pct = Math.round((info.charge ?? 1) * 100);
-  if (!r.busy && r.mode !== 'charge') return `停在机库 · 电 ${pct}%`;
+  const width = fleetWidth(r);
+  if (!r.busy && r.mode !== 'charge') return `停在机库 · 电 ${pct}%${width}`;
   const where = r.f ? ' · ' + fieldCode(r.f) : '';
-  return `${info.doing}${where} · 电 ${pct}%`;
+  return `${info.doing}${where} · 电 ${pct}%${width}`;
 }
 function paintLock() {
   const el = $('rigread');
@@ -2641,7 +2649,7 @@ function updateDock() {
     const rows = board?.jobs || [];
     jobsHost.hidden = !rows.length;
     jobsHost.innerHTML = rows.length
-      ? `<div class="cap">${board.stageName}</div>` + rows.map(job => `<div class="jb${job.status === '执行中' ? ' run' : ''}"><b>${job.name}</b><span>${job.status}</span></div>`).join('')
+      ? `<div class="cap">${board.stageName}</div>` + rows.map(job => `<div class="jb${job.status === '执行中' ? ' run' : ''}"><b>${job.name}</b><span>${job.status} ${job.pct}%</span></div>`).join('')
       : '';
   }
   const legendHost = $('dock-legend');
@@ -2731,7 +2739,7 @@ function reloadStageStore() {
     paintStageChrome(booted.message || '工坊存档读不了');
     return booted;
   }
-  if (booted.skipped) revertPotatoStages();
+  if (booted.skipped) installShippedPotato();
   bindPlayableClocks();
   const extra = booted.siblingNotes?.length ? booted.siblingNotes.join('；') : '';
   paintStageChrome(booted.skipped ? '这台浏览器里没有工坊存档，仍用仓库默认' : extra);
@@ -2740,7 +2748,7 @@ function reloadStageStore() {
 function useRepoStages() {
   let kept = false;
   try { kept = suspendPotatoStage(localStorage).kept; } catch { /* 无痕模式 */ }
-  revertPotatoStages();
+  installShippedPotato();
   bindPlayableClocks();
   paintStageChrome(kept ? '已改用仓库默认。土豆工坊档还在这台浏览器里，重读即可恢复，不用回工坊再存。' : '');
 }
@@ -2751,6 +2759,7 @@ function bindPlayableClocks() {
 function stageParamIsUrl(param) {
   return !!param && param !== 'repo' && param !== 'workshop' && /^(https?:|data:|\.\/|\/|data\/)/.test(param);
 }
+bootWorkshopMachines(localStorage);
 function bootStagesSync() {
   const param = Q.get('stages');
   if (stageParamIsUrl(param)) return '';
@@ -2847,7 +2856,7 @@ function toggleAdmin() {
 }
 $('admin-toggle').addEventListener('click', toggleAdmin);
 $('admin').querySelector('.ah').addEventListener('pointerdown', e => {
-  if (e.button !== 0) return;
+  if (e.button !== 0 || e.target.closest('button')) return;
   const el = $('admin');
   const bar = e.currentTarget;
   const r = el.getBoundingClientRect();

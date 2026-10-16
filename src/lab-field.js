@@ -9,7 +9,7 @@ import {
   FIELD_STAGE_SCHEMA, FIELD_STAGE_STORE, placeholderFieldDoc, parseFieldStageDoc,
   createSim, stepSim, startJob, cancelWorkOrder, sampleRidge, appearanceOf,
   stageById, stageByGroup, insertGrowthStage, removeGrowthStage, dominant, tally,
-  renameStageId, renameStageName, setStageGroup, orderedStageOps, moveStageOp, SEQUENCE_GROUPS,
+  renameStageId, renameStageName, setStageGroup, orderedStageOps, moveStageOp, stageJobStrip, SEQUENCE_GROUPS,
   alignFieldCalendar, jobWindows, PLANTABLE_CROP_IDS, allocateCropId, cropOptionLabel,
   indexCropLibrary, renameCropDisplay, forkCropDocument, setHarvestExit,
   OP_MACHINE_CHOICES, addStageOp, removeStageOp, patchStageOp,
@@ -788,7 +788,8 @@ ${variants}
     if (!host) return;
     const doc = current();
     const ops = orderedStageOps(doc, selected);
-    const sig = selected + '|' + ops.map(op => op.id).join(',');
+    const strip = stageJobStrip(doc, selected);
+    const sig = selected + '|' + strip.map(row => row.id + ':' + row.color).join(',');
     if (sig === jobsSig && host.childElementCount) return;
     jobsSig = sig;
     const stageIds = doc.stages.map(st => st.id);
@@ -820,7 +821,8 @@ ${variants}
 </div>
 </div>`).join('');
     const hint = onChain ? '留空表示这一阶段整段都可派。' : '这阶段不在生长链上，进游戏不派这里的作业。';
-    host.innerHTML = `<div class="fs-jobs"><h4>本阶段作业</h4><p class="fs-note">${hint}</p>${cards}<div class="fs-row"><button type="button" id="fs-add-job">增加作业</button></div></div>`;
+    const bars = strip.map(row => `<div class="fs-jobbar"><i style="background:${esc(row.color)}"></i><span>${esc(row.name)}</span></div>`).join('');
+    host.innerHTML = `<div class="fs-jobs"><h4>作业色条</h4><div class="fs-jobbars">${bars}</div><h4>执行顺序</h4><p class="fs-note">${hint}</p>${cards}<div class="fs-row"><button type="button" id="fs-add-job">增加作业</button></div></div>`;
     const touchJob = (opId, patch) => {
       patchStageOp(doc, opId, patch);
       dirty = true;

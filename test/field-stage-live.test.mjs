@@ -142,6 +142,15 @@ test('boot reads the workshop store and repo skips it', () => {
   assert.equal(store.getItem(FIELD_STAGE_STORE), null);
   const empty = bootFieldStageSource(store, null);
   assert.equal(empty.skipped, true);
+  assert.equal(cropDef('potato').stageOrigin, 'repo');
+  assert.equal(cropDef('potato').maturity, 77);
+  assert.equal(cropDef('potato').profile, 'potato-b');
+  const lime = cropDef('potato').jobs.find(job => job.id === 'lime');
+  assert.equal(lime.required, true);
+  assert.equal(lime.cap, 'fertilize');
+  revertPotatoStages();
+  bindPotatoClock();
+  assert.equal(cropDef('potato').maturity, 43);
 });
 
 test('a potato key still applies when cropId was overwritten with the display name', () => {
@@ -254,6 +263,9 @@ test('broken JSON is not treated as an empty browser', () => {
   assert.equal(booted.ok, false);
   assert.match(booted.message, /JSON/);
   assert.equal(booted.skipped, undefined);
+  assert.equal(cropDef('potato').profile, 'potato-b');
+  revertPotatoStages();
+  bindPotatoClock();
 });
 
 test('a string-wrapped workshop save still loads', () => {

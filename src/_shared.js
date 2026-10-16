@@ -4,7 +4,7 @@
 // =====================================================================
 import { productById, recipeById, deviceById, shopRows, utilityCost, LOOP_OFFSETS } from './products.js';
 import { SAVE_VERSION } from './save-contract.js';
-import { cropDef, rigProfile, rigCan, rigHas, hitchPlan, hitchHasModes, droneCan, JOB_PENALTY, UNLOAD_WHILE_MOVING, BIN_LANES, UNLOAD_SECONDS, TRAILER_CARGO_CAP, HITCH_SWAP_S, RELOAD_S, MODE_SWITCH_S, SURFACE_CROPS, workWidthOf, lanesForWidth } from './surface-crops.js';
+import { cropDef, rigProfile, rigCan, rigHas, hitchPlan, hitchHasModes, droneCan, JOB_PENALTY, UNLOAD_WHILE_MOVING, BIN_LANES, UNLOAD_SECONDS, TRAILER_CARGO_CAP, HITCH_SWAP_S, RELOAD_S, MODE_SWITCH_S, SURFACE_CROPS, workWidthOf, lanesForWidth, binCapOf } from './surface-crops.js';
 export { cropDef, rigProfile, JOB_PENALTY, UNLOAD_WHILE_MOVING, BIN_LANES, SURFACE_CROPS, workWidthOf, lanesForWidth };
 
 // ---------- ① 色板（来自 art-ref 报告 5.4 节，只允许使用这些键名） ----------
@@ -698,6 +698,7 @@ export function stageBoard(f) {
   }
   const stage = def.stages.find(s => s.id === stageId);
   const jobs = def.jobs.filter(j => j.stage === stageId).slice().sort((a, b) => (a.order || 0) - (b.order || 0));
+  ensureJobs(f);
   return {
     stageId,
     stageName: stage?.name || watch?.label || stageId || '',
@@ -707,7 +708,12 @@ export function stageBoard(f) {
       let status = '未执行';
       if (jobDone(f, job.id)) status = '执行完';
       if (rigOn || droneOn) status = '执行中';
-      return { id: job.id, name: job.name, status };
+      const lanes = passLanes(f, job.id);
+      const prog = f.jobS?.[job.id] || 0;
+      let pct = 0;
+      if (status === '执行完') pct = 100;
+      else if (status === '执行中' && lanes > 0) pct = Math.max(0, Math.min(100, Math.round(prog / lanes * 100)));
+      return { id: job.id, name: job.name, status, pct };
     }),
   };
 }
@@ -888,7 +894,8 @@ function beginJob(r, f, job) {
   ensureJobs(f);
   r.job = job.id;
   // 生长链不在开工时记。播种写完蒙版见 finishPass。
-  r.laneW = stampWidth(f, job.id, workWidthOf(r.kind, r.hitch));
+  r.laneW = stampWidth(f, job.id, workWidthOf(r.kind, r.hitch, job));
+  r.binCap = binCapOf(r.kind, r.hitch);
   const lanes = passLanes(f, job.id);
   const s = Math.min(Math.max(f.jobS[job.id] || 0, 0), lanes - 1e-4);
   const lane = Math.floor(s);
@@ -950,7 +957,8 @@ function routeToJob(r, f, job) {
   r.job = job.id;
   const plan = hitchPlan(r.kind, r.hitch, job);
   const hitch = plan?.hitch || r.hitch;
-  r.laneW = stampWidth(f, job.id, workWidthOf(r.kind, hitch));
+  r.laneW = stampWidth(f, job.id, workWidthOf(r.kind, hitch, job));
+  r.binCap = binCapOf(r.kind, hitch);
   const pose = workTarget(f, job.id);
   routeTo(r, pose.x, pose.z, 'job', f);
 }
@@ -1160,7 +1168,7 @@ function stepWork(r, dt) {
   rem -= room;
   if (job?.harvest && !UNLOAD_WHILE_MOVING) {
     r.bin = (r.bin || 0) + 1;
-    if (r.bin >= BIN_LANES || r.lane + 1 >= lanes) {
+    if (r.bin >= (r.binCap || BIN_LANES) || r.lane + 1 >= lanes) {
       enterNeedUnload(r);
       return;
     }
@@ -1737,7 +1745,9 @@ export function rigReadout(r) {
   const aerial = r.kind === 'drone_scout' || r.kind === 'drone_treat';
   const light = aerial ? sectorLight(r.x, worldDay) : null;
   const moving = !paused && (r.mode === 'work' || r.mode === 'turn' || r.mode === 'travel');
-  const speed = moving ? (aerial ? DRONE_MPS : MACHINE_MPS) * economy.timeScale : 0;
+  const job = r.f && cropOf(r.f)?.jobs.find(j => j.id === r.job);
+  const pace = !aerial && job ? (hitchPlan(r.kind, r.hitch, job)?.speed || 1) : 1;
+  const speed = moving ? (aerial ? DRONE_MPS : MACHINE_MPS * pace) * economy.timeScale : 0;
   let doing = aerial ? '停在基站' : '停在机库';
   if (aerial && r.mode === 'reload') doing = '在基站装药';
   else if (r.mode === 'turn') doing = '地头转弯';
@@ -1754,7 +1764,6 @@ export function rigReadout(r) {
     else doing = '开往田块';
   } else if (r.mode === 'charge') doing = '充电';
   else if (r.mode === 'work') {
-    const job = r.f && cropOf(r.f)?.jobs.find(j => j.id === r.job);
     doing = job?.name || '作业';
   }
   let frac = 0;
