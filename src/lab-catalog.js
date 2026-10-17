@@ -1,0 +1,290 @@
+// 资产工坊目录。只有名字和分类，不进主进度存档。
+export const LAB_CLASSES = [
+  { id: 'unit', label: '地块' },
+  { id: 'field', label: '田间' },
+  { id: 'machine', label: '农机' },
+  { id: 'equip', label: '设备' },
+  { id: 'rail', label: '轨道设备' },
+  { id: 'ref', label: '参考·外部' },
+];
+
+// Sketchfab「Low Poly Combine Harvestors」。整包在 refs，工坊对照用，不拆、不进田里派单。
+export const REF_SKETCHFAB_COMBINE = 'https://sketchfab.com/3d-models/low-poly-combine-harvestors-84b8a341aabc421b8f7268c3a4b173f1';
+
+// 培育层空单元。农场 4 km 切成 7×7 地块，和地表同一套地块边界；中枢占正中一格，不放台。
+// 口头「约 143 m」是 570/4 的口算。缝、窄环路和墙从地块里扣掉，台面净边略小。
+const m1 = n => (Math.round(n * 10) / 10).toString();
+const m2 = n => (Math.round(n * 100) / 100).toString();
+export const CULT_EMPTY = {
+  farm: 4000,
+  plots: 7,
+  wall: 1.2,
+  lane: 5,
+  seam: 3,
+  raise: 0.46,
+  chamfer: 4.2,
+  bevel: 0.1,
+  clear: 17,
+  doorW: 8,
+  doorH: 5,
+  doorsPerWall: 4,
+  code: 'C-3,2',
+};
+CULT_EMPTY.plot = CULT_EMPTY.farm / CULT_EMPTY.plots;
+CULT_EMPTY.unit = (CULT_EMPTY.plot - 2 * CULT_EMPTY.wall - 2 * CULT_EMPTY.lane - 3 * CULT_EMPTY.seam) / 4;
+
+export const CULT_EMPTY_NOTES = `抬缘白台。培育层的空单元：台上没有设备，也没有作物。
+
+尺度（对齐地表地块网格）：
+农场 ${CULT_EMPTY.farm / 1000}×${CULT_EMPTY.farm / 1000} km，${CULT_EMPTY.plots}×${CULT_EMPTY.plots}=${CULT_EMPTY.plots * CULT_EMPTY.plots} 个地块。正中一格是中枢，单独留出，不放培育台。培育层与地表的地块边界对齐。本沙盒只摆一块非中枢样例，编号 ${CULT_EMPTY.code}。
+地块外边 ${m1(CULT_EMPTY.plot)} m（4 km / 7，口头约 570 m）。每块 4×4=16 个单元。
+单元净边 ${m1(CULT_EMPTY.unit)} m。口头约 143 m 是 570/4 的口算；${m1(CULT_EMPTY.seam)} m 电缆沟、贴墙环路和 ${m1(CULT_EMPTY.wall)} m 结构墙都从这 ${m1(CULT_EMPTY.plot)} m 里扣，所以台面略小于 143 m。
+培育层净高 ${CULT_EMPTY.clear} m。顶是地表楼板的底面。
+
+缝与路：
+单元之间只留 ${m1(CULT_EMPTY.seam)} m 电缆沟（约定 2–4 m）。窄缝，不是公路。分隔不靠黄黑警示门，也不做霓虹满灌。
+贴墙一圈环路宽 ${m1(CULT_EMPTY.lane)} m，比上一版概念窄，只够农机沿墙走。
+
+台面（抬缘白台）：
+亚光米白 / 浅灰。整台只抬高 ${m2(CULT_EMPTY.raise)} m，是低台阶，不是高基座。平面转角倒角 ${m1(CULT_EMPTY.chamfer)} m，比上一版小；顶缘倒棱 ${m2(CULT_EMPTY.bevel)} m。
+每台四边都有平贴的小号工业编号，样例 ${CULT_EMPTY.code}-U01 到 U16。一台一个号，四边同一串，字躺在台面上。
+台面有一层很浅的分格线，亚光，没有噪点。台沿不铺一条发光带。每台四边有一排地灯，小型跑道边灯，冷白灯头，间距疏，不是光条。顶灯带在 ${CULT_EMPTY.clear} m 楼板下，空闲时大约两成，是真正的灯，不是贴图。环境光压暗，方便看清照度。
+
+墙与门：
+墙背是光板。肋柱、横梁、板缝和门框都在内皮，地块合并后背面几乎看不见。四面墙各 ${CULT_EMPTY.doorsPerWall} 扇农机门，一共 ${CULT_EMPTY.doorsPerWall * 4} 扇。门宽 ${m1(CULT_EMPTY.doorW)} m，高 ${m1(CULT_EMPTY.doorH)} m，农机进得去，不是机库大开口。门位对准外侧那一排单元。
+
+灯组：顶灯带、地灯、门灯、墙灯。工坊里可以逐组开关。状态仍用 1–4。
+空闲：环境偏暗，顶灯大约两成，地灯是小点。
+作业：顶灯和地灯一起抬一点。
+选中：地灯更亮，台面略亮。
+损坏：顶灯和地灯变弱，台面有轻微磨损。
+
+地块级照明：一个地块共用顶灯、门灯、墙灯。同一地块里，如果不同单元要的地块级照明不一样，后开始的那一单元说了算。光照不对会减产。
+单元装上蛴螬培养槽之后，这一地块进入弱光：顶灯带变成很暗的暗房红，门灯改成低亮的黄，墙灯全部关掉。`;
+
+export const CULT_B_NOTES = `培育地块B方案。同一套空地块，漆面马拉松绿，不是 A 的亚光白台。台上仍然没有设备，也没有作物。
+
+尺度与 A 相同：农场 4×4 km，7×7=49 地块，正中是中枢。样例 ${CULT_EMPTY.code}。地块外边 ${m1(CULT_EMPTY.plot)} m。4×4=16 单元，净边 ${m1(CULT_EMPTY.unit)} m。单元之间 ${m1(CULT_EMPTY.seam)} m 电缆沟。贴墙环路 ${m1(CULT_EMPTY.lane)} m。净高 ${CULT_EMPTY.clear} m。
+
+造型：高饱和凯利绿 / 森绿，清漆，高光。转角是大圆角，不是 A 的小倒角。亮红横带作结构强调。紫色发光点是点缀。墙背仍是光板，肋、梁、板缝、门框只在内皮。
+
+灯组：顶灯带、台缘、门灯、墙灯、紫灯。可逐组开关。1–4 仍是空闲、作业、选中、损坏。空闲顶灯大约两成。`;
+
+// 沙盒默认 2 台。2 和 4 都把槽列均分，台数以后做成升级项。
+export const GRUB_GANTRY_OPTIONS = [2, 4];
+export const GRUB_DEMO_GANTRIES = 2;
+export const GRUB_WORK_MPS = 3;
+export const GRUB_EMPTY_MPS = 12;
+
+export function planGrubColumns(rowCount, gantryCount) {
+  const n = gantryCount === 4 ? 4 : 2;
+  const rows = Array.from({ length: Math.max(0, rowCount) }, (_, i) => i);
+  const base = Math.floor(rows.length / n);
+  let extra = rows.length % n;
+  const out = [];
+  let i = 0;
+  for (let g = 0; g < n; g++) {
+    const len = base + (extra > 0 ? 1 : 0);
+    if (extra > 0) extra -= 1;
+    out.push(rows.slice(i, i + len));
+    i += len;
+  }
+  return out;
+}
+
+export const GRUB_TROUGH_NOTES = `蛴螬培养槽。一整套设备，放在培育层的一个单元台上。
+
+槽：每只约 4×15 m，开口培养槽，同一规格，整齐排开。槽里是蛴螬，成团堆在槽内，看得见。
+一角不放槽。那里两扇地面门：A 出，装满的箱子从这里离开；B 进，空箱从这里上来。
+
+龙门：默认 ${GRUB_DEMO_GANTRIES} 台。2 台或 4 台都能排进这一单元，几台就平分槽列，不抢同一列。台数以后做成升级项。
+空闲：停在单元边上。
+作业：沿槽的长边走，作业速度约 ${GRUB_WORK_MPS} m/s，和地表农机同一档。一列走完，在单元端头平移到下一列。空驶更快，约 ${GRUB_EMPTY_MPS} m/s。
+每台龙门顶上有状态灯：停靠是琥珀，空驶是蓝，作业是绿。巡灯、状态灯、槽灯都在灯心上加一层软光晕，不往场景里打光。
+
+容器循环逻辑（以后可能换成别的）：龙门走到可收的槽上方，把箱子吊起，送到 A 门放下，再到 B 门接一只空箱，放回原位。
+以后还会补这些作业动画，现在只留名字：补料、巡逻、翻堆。沙盒里作业键播的是容器循环。
+
+暗房：蛴螬的每个阶段都要暗。槽灯是红的，龙门巡灯也是红的。空闲、作业、选中、损坏都停在这间暗房里，不把地块灯拉亮。
+装进单元后，这一地块进入弱光。顶灯带改成很暗的暗房红，门灯是低亮黄，墙灯全关。工坊里看这套设备时，地块就是这套弱光。
+同一地块里，若几个单元要的地块级照明不一样，后开始的单元为准。光照不对会减产。
+
+灯组：槽灯、巡灯、状态灯；旁边是地块的顶灯带、地灯、门灯、墙灯。墙灯在弱光里关掉。可关。1–4 仍是空闲、作业、选中、损坏。
+选中：整套有选中圈。损坏：龙门停偏，状态灯变红，部分槽变暗。
+
+占地：一个培育单元，净边 ${m1(CULT_EMPTY.unit)} m。不占中枢，不放进地表田。`;
+
+export const HUB_PLOT_NOTES = `中枢地块。农场 7×7 的正中一格。不种，不养，培育台不进这一格。
+
+尺度：地块外边 ${m1(CULT_EMPTY.plot)} m（4 km / 7），和培育地块同一条网格。工坊里这一格就是样例，不是 ${CULT_EMPTY.code}。四层都是整层封住的，只在正中留主井井口。
+
+四层的中心是同一口主井，井道朝空间站中轴接上去：
+地表：硬化坪。井口在正中。西侧是这一农场的能源场，南侧是仓储。
+培育层：井穿过去。四周是冷藏和料罐，不放培育台。
+设备层：变电和机厅围着井。
+承压壳：井的根。电池和结构环停在这一层，再往下不挖。
+
+主井：六边形模块叠起来，浅灰壳体，炭黑接缝，黄条和红标。井从承压壳一直升到环心，顶在空间站中轴上，不再停在地块上方。作业时轿厢沿井在这几层里走。井灯、层灯、能源、仓储、警示都是灯心上的光晕，不往场景里打光。
+
+剖面：跟别的地块一样，要看下面就切到那一层，上面的板和房子藏起来。默认是地表。培育层、设备层、承压壳各看各的整层。
+
+灯组可逐组开关。1–4 仍是空闲、作业、选中、损坏。
+空闲：灯大约两成，轿厢停在井口附近。
+作业：轿厢沿井上下，井灯和层灯抬亮。
+选中：地块有选中圈，指示更亮。
+损坏：警示变红，能源收暗，轿厢停在设备层。`;
+
+// 闲置的阶段色块。只作参考外观，放在 ref。阶段数据仍只在田间 → 阶段编辑器。
+function fieldLook(id, name, notes, look) {
+  return {
+    id, cls: 'ref', name, size: '48 × 48 m', span: 52, notes, look,
+  };
+}
+function fieldSeries() {
+  const bare = '参考外观，不是阶段数据。阶段在田间 → 阶段编辑器里改。现有田块网格加阶段色，冠层是色块，不是最终植株。';
+  return [
+    fieldLook('field-bare', '裸土', `${bare} 还没出苗，只有土垄。`, { cover: 0, canopy: '#6f6a61', cut: 0 }),
+    {
+      id: 'field-road', cls: 'ref', name: '田路', size: '64 × 40 m', span: 72,
+      notes: '参考外观。两块田之间的路。路面和田肩用现在的土色和金属色，没有新模型。阶段数据不在这里。',
+      road: true,
+    },
+    fieldLook('field-potato-till', '商品薯 · 整地', `${bare} 整地空田，垄还是裸的。`, { cover: 0.04, canopy: '#6f6a61', cut: 0 }),
+    fieldLook('field-potato-plant', '商品薯 · 播种', `${bare} 播种趟刚走完一段，其余仍是裸土。`, { cover: 0.08, canopy: '#4a4844', cut: 0.35 }),
+    fieldLook('field-potato-emerg', '商品薯 · 出苗', `${bare} 出苗以后才铺绿色。`, { cover: 0.38, canopy: '#51542c', cut: 0 }),
+    fieldLook('field-potato-hill', '商品薯 · 培土', `${bare} 培土后的冠层。`, { cover: 0.66, canopy: '#787c32', cut: 0 }),
+    fieldLook('field-potato-bulk', '商品薯 · 膨大', `${bare} 膨大期，冠层最满。`, { cover: 0.92, canopy: '#c4b0d4', cut: 0 }),
+    fieldLook('field-potato-haulm', '商品薯 · 杀秧', `${bare} 杀秧后的碎秧色，已走过的垄压低。`, { cover: 0.22, canopy: '#9e543a', cut: 0.55 }),
+    fieldLook('field-potato-harvest', '商品薯 · 待收', `${bare} 成熟待收。收获机走过的垄是空的。`, { cover: 0.16, canopy: '#81683f', cut: 0.7 }),
+    fieldLook('field-soy-young', '大豆 · 分枝', `${bare} 大豆出苗后的分枝。`, { cover: 0.48, canopy: '#51542c', cut: 0 }),
+    fieldLook('field-soy-pod', '大豆 · 结荚', `${bare} 结荚，冠层收拢。`, { cover: 0.82, canopy: '#787c32', cut: 0 }),
+    fieldLook('field-soy-harvest', '大豆 · 待收', `${bare} 大豆成熟待收。联合收割走豆模式。`, { cover: 0.28, canopy: '#81683f', cut: 0.6 }),
+    fieldLook('field-barley-young', '饲料大麦 · 分蘖', `${bare} 分蘖，浅中耕可选，还不是收获。`, { cover: 0.42, canopy: '#8a7a45', cut: 0 }),
+    fieldLook('field-barley-grain', '饲料大麦 · 灌浆', `${bare} 灌浆，只灌溉，不派培土机。`, { cover: 0.78, canopy: '#b59a63', cut: 0 }),
+    fieldLook('field-barley-harvest', '饲料大麦 · 待收', `${bare} 成熟待收。这一段只派联合收割机谷模式，旁边停车侧卸。`, { cover: 0.3, canopy: '#81683f', cut: 0.62 }),
+    fieldLook('field-cabbage-bed', '结球甘蓝 · 作畦', `${bare} 作畦，苗还没栽，地面是畦。`, { cover: 0.1, canopy: '#6f6a61', cut: 0 }),
+    fieldLook('field-cabbage-rosette', '结球甘蓝 · 莲座', `${bare} 定植之后的莲座叶。`, { cover: 0.58, canopy: '#8fbbad', cut: 0 }),
+    fieldLook('field-cabbage-head', '结球甘蓝 · 结球', `${bare} 结球期。`, { cover: 0.86, canopy: '#52747e', cut: 0 }),
+    fieldLook('field-cabbage-harvest', '结球甘蓝 · 待收', `${bare} 成熟待收。这一段只派结球收获机。`, { cover: 0.34, canopy: '#81683f', cut: 0.5 }),
+  ];
+}
+
+// span：沙盒里把镜头框住的边长（米）。和游戏里的模数一致，只用于取景。
+export const LAB_ENTRIES = [
+  {
+    id: 'cult-a',
+    cls: 'unit',
+    name: '培育地块A方案',
+    size: `${m1(CULT_EMPTY.unit)} × ${m1(CULT_EMPTY.unit)} m · 地块 ${m1(CULT_EMPTY.plot)} m`,
+    span: 800,
+    notes: CULT_EMPTY_NOTES,
+  },
+  {
+    id: 'cult-b',
+    cls: 'unit',
+    name: '培育地块B方案',
+    size: `${m1(CULT_EMPTY.unit)} × ${m1(CULT_EMPTY.unit)} m · 圆角 · 地块 ${m1(CULT_EMPTY.plot)} m`,
+    span: 800,
+    notes: CULT_B_NOTES,
+  },
+  { id: 'field', cls: 'unit', name: '地表田块', size: '128 × 128 m', span: 128, notes: '露天小格。地面是垄，四周是田埂。没有顶。' },
+  {
+    id: 'field-stage',
+    cls: 'field',
+    name: '阶段编辑器',
+    size: '预览 36 × 28 m',
+    span: 44,
+    notes: `田间阶段编辑器。预览一块田。默认土豆是土豆B。保存写进这台浏览器，可玩页读同一把钥匙。
+
+空地是 O。播种扫出蒙版 M，M 里从 A 播种后走到 D 待收获，收割后是 E。中间的阶段可以拿掉或插入。土豆这份是土豆B：出苗、培土、膨大、杀秧插在 A 和 D 之间。M 外本轮不参与，也不能再播。
+
+时长是游戏日。预览里 1× 下 1 日等于 1 秒，加速按这个比例走。可选作业写成 A1、A2，后一次盖住前一次，到点仍进下一阶段。空地放久变成 O3。待收不割变成 D1，再变成 D2。
+
+收获后默认沿边表清田回 O。E→A 留在边表里，默认关掉。翻地、清田可以拆掉蒙版。取消扫田只停这一趟。
+
+右侧改时长、颜色、垄截面和行数。截面横轴是垄宽，纵轴是高度。保存留在这台浏览器。下载的 JSON 和 data/field-stages/potato-b.json 是同一结构。可玩页用 parseFieldStageDoc 来读。
+
+下拉是「显示名 · id」。显示名改不了 id。新作物复制当前阶段，另起 id，不进主游戏种植菜单。E→O 和 E→A 只留一条，默认清田。选中阶段后可以增删改农机作业。`,
+  },
+  { id: 'deck', cls: 'unit', name: '培育层地板', size: '128 × 128 m', span: 128, notes: '密封小格。金属地板、墙和顶缘。冷色缝灯。' },
+  {
+    id: 'hub',
+    cls: 'unit',
+    name: '中枢地块',
+    size: `${m1(CULT_EMPTY.plot)} × ${m1(CULT_EMPTY.plot)} m · 四层`,
+    span: 640,
+    notes: HUB_PLOT_NOTES,
+  },
+  {
+    id: 'machine-editor',
+    cls: 'machine',
+    name: '农机编辑器',
+    size: '顶视 128 m · 一趟',
+    span: 150,
+    notes: `农机编辑器 v2。类别下面添加模式。每个模式选一个功能，再填功率、作业宽度、作业速度、仓容。部分功能才显示特有项。通用属性右边可勾同步属性。顶视按当前模式的宽度画一趟，巷距跟主游戏 lanesForWidth 同一算法。
+
+保存写 localStorage 钥匙 ringsheaf.assetlab.machines.v1。下载的 JSON 结构见 docs/machine-lab-v1.md。旧的平铺存档读进来收成一个模式。可玩页开局读这份，按机具 id 盖到内置表上；空档或坏档仍用内置机具。
+
+占位外形用 refs/machines 里已有的低模，也可以直接从库里选现用剪影。联合收割机整包已在「参考·外部」，来自「环穗资产」，不拆、不进田里派单。导入文件只记下文件名。`,
+  },
+  { id: 'tractor', cls: 'machine', name: '拖拉机', size: '约 4.5 m', span: 16, notes: '地表农机。自由行驶，后面可换农具。' },
+  { id: 'planter', cls: 'machine', name: '播种机', size: '约 6 m', span: 18, notes: '拖拉机拖着覆土起垄器。' },
+  { id: 'hiller', cls: 'machine', name: '培土机', size: '约 6 m', span: 18, notes: '圆盘把土抛回垄脊。' },
+  { id: 'topper', cls: 'machine', name: '杀秧机', size: '约 6 m', span: 18, notes: '前挂甩刀罩，把藤蔓打碎。' },
+  { id: 'harvester', cls: 'machine', name: '收获机', size: '约 10 m', span: 24, notes: '铲起垄，土从杆条网落下。' },
+  {
+    id: 'grub-trough',
+    cls: 'equip',
+    name: '蛴螬培养槽',
+    size: `4 × 15 m 槽 · 占 1 单元 ${m1(CULT_EMPTY.unit)} m`,
+    span: 168,
+    notes: GRUB_TROUGH_NOTES,
+  },
+  { id: 'tank', cls: 'equip', name: '培养槽', size: '16 × 9 m', span: 28, notes: '放在培育层、中枢东侧的小格里。中枢格上不放。' },
+  { id: 'warehouse', cls: 'equip', name: '仓库', size: '22 × 14 m', span: 40, notes: '中枢上的仓。只建在中枢。' },
+  { id: 'garage', cls: 'equip', name: '车库', size: '28 × 16 m', span: 48, notes: '中枢上的机库。地表农机停在前面。' },
+  { id: 'process', cls: 'equip', name: '加工棚', size: '12 × 8 m', span: 28, notes: '中枢上的加工。只建在中枢。' },
+  { id: 'arm', cls: 'rail', name: '收获臂', size: '沿槽排', span: 42, notes: '龙门臂。沿轨道走，作业时探向槽。' },
+  { id: 'irrigator', cls: 'rail', name: '喷灌桁架', size: '跨 124 m', span: 140, notes: '沿田块往返的桁架。' },
+  ...fieldSeries(),
+  {
+    id: 'ref-tractor-compare',
+    cls: 'ref',
+    name: '拖拉机对照',
+    size: '现用约 4.5 m · 参考已对齐车长',
+    span: 30,
+    notes: `外部低模，只作对照，不替换田里的农机。
+
+从左到右：现用 tractor_gen、Kenney Car Kit 拖拉机、Pixor Library 拖拉机。参考模型缩放到现用车长，车头朝同一边。
+
+Kenney：CC0。https://kenney.nl/assets/car-kit
+文件 refs/machines/kenney-tractor.glb
+Pixor：CC0。https://pixor.art/library/farm/tractor/
+文件 refs/machines/pixor-library-tractor.glb`,
+  },
+  {
+    id: 'ref-kenney-shovel',
+    cls: 'ref',
+    name: 'Kenney 铲斗',
+    size: '现用约 4.5 m · 参考已对齐车长',
+    span: 22,
+    notes: `Kenney Car Kit 的铲斗拖拉机，CC0。只作对照，不替换田里的农机，不进机队。
+
+左边是现用 tractor_gen，右边是 refs/machines/kenney-tractor-shovel.glb。参考模型缩放到现用车长。
+来源 https://kenney.nl/assets/car-kit`,
+  },
+  {
+    id: 'ref-sketchfab-combine',
+    cls: 'ref',
+    name: 'Sketchfab 收割机',
+    size: '现用联合收割机 · 整包已对齐车长',
+    span: 28,
+    notes: `Sketchfab「Low Poly Combine Harvestors」，作者 iedalton，许可 CC BY 4.0。整包已放入工坊，不拆成多台。
+
+左边是现用 harvester_combine。右边是 refs/machines/low-poly-combine-harvestors.glb。整包缩放到现用车长，网格不拆开。只作对照，不替换田里的农机，不进机队。
+
+署名：iedalton。许可 CC BY 4.0。https://creativecommons.org/licenses/by/4.0/
+来源 ${REF_SKETCHFAB_COMBINE}
+许可全文 refs/machines/low-poly-combine-harvestors.LICENSE.txt`,
+  },
+];
