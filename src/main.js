@@ -531,7 +531,9 @@ vec3 farmAlbedo(vec2 p){
     int tex = int(P.z + .5);
     vec2 uv = d.a > .5 ? loc.yx : loc;              // u 沿作物行，v 跨行
     vec2 acrossW = d.a > .5 ? vec2(1., 0.) : vec2(0., 1.);
-    bool head = uv.x < 6. || uv.x > FIELD - 6.;      // 地头：作物行方向与田内垂直
+    // 框架 B 整块一色：b < -0.5 且 a 没有作业槽。旧田的间隙保色会把变体写进 a 的小数，不进这条。
+    bool bWhole = d.b < -0.5 && fract(d.a) < 0.0004;
+    bool head = !bWhole && (uv.x < 6. || uv.x > FIELD - 6.);      // 地头：作物行方向与田内垂直
     float across = head ? uv.x : uv.y;
     if (head) acrossW = acrossW.yx;
     float rowS = P.y * (tex == 4 ? 2.2 : 1.0);
@@ -544,7 +546,41 @@ vec3 farmAlbedo(vec2 p){
     bool cut = d.b >= 0.0 && d.b < 20.0 && laneCut(uv, d.b);
     float patchy = (n1 - 0.5) * 0.12 + (n2 - 0.5) * 0.05;
     float pst = floor(g + 0.001);
-    if (pst >= 1.0 && tex == 2) {                    // 商品薯。工坊覆写时垄色、冠层、行距都读阶段表。
+    if (bWhole && tex == 2) {
+      // g=5 在旧阶梯里是膨大开花，小数部分还会按格子混进杀秧锈色。B 的成熟就是整块冠层，收割后才整块换成秸秆。
+      float edgeIn = min(min(loc.x, FIELD - loc.x), min(loc.y, FIELD - loc.y));
+      float edgeFade = smoothstep(0.0, 1.8, edgeIn);
+      float rowSpB = max(P.y, 0.05);
+      float rowPhB = uv.y / rowSpB;
+      float rowSeeB = (1.0 - smoothstep(0.22, 0.55, fwidth(rowPhB))) * edgeFade;
+      float profB = 0.5 + 0.5 * cos(6.2832 * rowPhB);
+      float slopeB = -sin(6.2832 * rowPhB);
+      vec3 soilB = g_soil * (0.86 + 0.08 * profB * rowSeeB) * (1.0 + patchy);
+      float growB = clamp((g - 2.0) / 3.0, 0.0, 1.0);
+      vec3 youngB = mix(g_oliveDp, g_moss, 0.35);
+      vec3 ripeB = mix(g_oliveDp, g_olive, 0.62);
+      vec3 cropB = mix(youngB, ripeB, smoothstep(0.12, 0.9, growB)) * (1.0 + patchy * 0.35);
+      if (g < 1.5) {
+        col = soilB;
+        gTilt = acrossW * slopeB * (g < 0.5 ? 0.28 : 0.62) * rowSeeB;
+        gRough = 0.96;
+        canopyHere = false;
+      } else if (g < 6.5) {
+        float coverB = smoothstep(0.0, 0.28, growB);
+        float wB = mix(0.16, 0.62, coverB);
+        vec3 gapB = mix(soilB, cropB * 0.55, coverB * 0.35);
+        float bandB = smoothstep(1.0 - wB - 0.12, 1.0 - wB + 0.12, profB);
+        col = mix(mix(gapB, cropB, wB), mix(gapB, cropB, bandB), rowSeeB);
+        gTilt = acrossW * slopeB * mix(0.28, 0.62, coverB) * rowSeeB;
+        gRough = mix(0.92, 0.66, coverB);
+        canopyHere = coverB > 0.45;
+      } else {
+        col = mix(soilB, g_straw, 0.38) * (1.0 + patchy * 0.25);
+        gTilt = acrossW * slopeB * 0.1 * rowSeeB;
+        gRough = 0.9;
+        canopyHere = false;
+      }
+    } else if (pst >= 1.0 && tex == 2) {                    // 商品薯。工坊覆写时垄色、冠层、行距都读阶段表。
       bool worked = jobSwept(uv, d.b);
       if (uPotOn > 0.5) {
         // 地头不再把跨行轴拧 90°。垄法线、地面色、冠层色带都跟田内行距走同一条 uv.y。
@@ -922,16 +958,22 @@ varying vec3 vCropCol;`).replace('#include <begin_vertex>', `#include <begin_ver
     vec2 uv = d.a > .5 ? loc.yx : loc;
     if (d.r >= 0.) {
       stage = floor(d.g + 0.001);
-      bool opened = harvestFront(d.b) > 0.0 && laneCut(uv, harvestFront(d.b));
+      bool bWhole = d.b < -0.5 && fract(d.a) < 0.0004;
+      bool opened = !bWhole && harvestFront(d.b) > 0.0 && laneCut(uv, harvestFront(d.b));
       float frac = clamp(d.g - stage, 0.0, 0.999);
-      speck = step(hash12(floor(io.xz * 0.45)), frac);
-      gg = mix(growthVis(stage + 0.2), growthVis(stage + 1.2), speck);
-      if (stage < 1.5) gg = 0.;
-      if (uPotOn > 0.5 && stage >= 1.5 && stage < 8.5 && !opened) {
-        if (int(uCropP[c].z + 0.5) == 2) gg = 1.;
+      speck = bWhole ? 0.0 : step(hash12(floor(io.xz * 0.45)), frac);
+      if (bWhole) {
+        // 成熟 g=5 落在旧杀秧档。整块长冠层，不按格子抽下一档，也不涂锈色残茬。
+        gg = (d.g < 1.5 || d.g >= 6.5) ? 0.0 : smoothstep(1.6, 4.2, d.g);
+      } else {
+        gg = mix(growthVis(stage + 0.2), growthVis(stage + 1.2), speck);
+        if (stage < 1.5) gg = 0.;
+        if (uPotOn > 0.5 && stage >= 1.5 && stage < 8.5 && !opened) {
+          if (int(uCropP[c].z + 0.5) == 2) gg = 1.;
+        }
+        if (opened) gg = 0.;
+        if (stage > 8.5) gg = 0.04;
       }
-      if (opened) gg = 0.;
-      if (stage > 8.5) gg = 0.04;
       sc = gg;
     }
   }
@@ -941,8 +983,11 @@ varying vec3 vCropCol;`).replace('#include <begin_vertex>', `#include <begin_ver
   vec4 P = uCropP[c];
   float hs = P.x * pow(max(sc, 0.), 0.85) * edge, ws = P.w * 2.4 * (0.35 + 0.65 * sc) * edge;
   transformed.xz *= ws; transformed.y *= hs;
-  vCropCol = mix(uCropYoung[c], uCropRipe[c], smoothstep(0.45, 1.0, gg));
-  if (uPotOn > 0.5 && int(P.z + 0.5) == 2 && stage >= 1.0) {
+  bool bPlant = d.b < -0.5 && fract(d.a) < 0.0004;
+  vCropCol = mix(uCropYoung[c], uCropRipe[c], bPlant ? 0.18 : smoothstep(0.45, 1.0, gg));
+  if (bPlant) {
+    // 整块冠层已经写好。不要再掉进下面的杀秧锈色。
+  } else if (uPotOn > 0.5 && int(P.z + 0.5) == 2 && stage >= 1.0) {
     int slot = int(clamp(stage, 1.0, 9.0));
     int nxt = int(min(float(slot) + 1.0, 9.0));
     float p0 = texelFetch(uPotTint, ivec2(2, slot), 0).r;
@@ -991,6 +1036,7 @@ function rebuildPlants(cx, cz, W) {
     if (xa >= xb || za >= zb) continue;
     const rowS = cr.row * (cr.tex === 'beds' ? 1.1 : 1), al = cr.along;
     const potRow = cr.id === 'potato' && potDraw.workshop;
+    const bWhole = !!f.bUnit;
     let crestT = 0.5;
     if (potRow) {
       const slot = Math.max(1, Math.min(9, Math.floor(fieldVisual(f).g + 0.001)));
@@ -1004,13 +1050,15 @@ function rebuildPlants(cx, cz, W) {
       v0 = Math.ceil((va - crestT * rowS) / rowS) * rowS + crestT * rowS;
       if (v0 < va) v0 += rowS;
     }
-    const alongJit = potRow ? 0.22 : 0.6;
-    const acrossJit = potRow ? 0.06 : 0.18;
+    const alongJit = bWhole ? 0.12 : potRow ? 0.22 : 0.6;
+    const acrossJit = bWhole ? 0.08 : potRow ? 0.06 : 0.18;
     hseed = f.idx * 7919 + 1;
     for (let v = v0; v < vb; v += rowS) {
       if (cr.tex !== 'beds' && cr.tex !== 'paddy' && Math.abs(((v % 24) + 24) % 24 - 12) < 1.4) continue; // 拖拉机道
       for (let u = Math.ceil(ua / al) * al; u < ub; u += al) {
-        if (u < 6 || u > L.FIELD - 6) continue;      // 地头留给地面纹理
+        if (bWhole) {
+          if (u < 1.6 || u > L.FIELD - 1.6 || v < 1.6 || v > L.FIELD - 1.6) continue;
+        } else if (u < 6 || u > L.FIELD - 6) continue;      // 地头留给地面纹理
         const n = counts[cr.shape]; if (n >= PLANT_CAP) break;
         const ju = u + (hr() - 0.5) * al * alongJit, jv = v + (hr() - 0.5) * rowS * acrossJit;
         const x = f.dir === 0 ? f.x0 + ju : f.x0 + jv, z = f.dir === 0 ? f.z0 + jv : f.z0 + ju;
