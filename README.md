@@ -10,7 +10,7 @@ Play `index.html` on this branch. The asset workshop is not required. The game k
 
 Open `index.html` in a browser. It is a single file: no server, no network.
 
-`asset-lab.html` is the design sandbox, titled 环穗 · 资产工坊. The playable game uses the hub plot, the empty grow-deck unit (抬缘白台), and the grub trough from that sandbox. Notes typed in the sandbox stay in this browser and do not touch a saved game. Stage color swatches (裸土, 田路, and the crop looks) sit under 参考. The stage documents stay in 田间 → 阶段编辑器. 农机编辑器 writes `ringsheaf.assetlab.machines.v1` (v2 modes on that same key; see `docs/machine-lab-v1.md`). The game reads that key on boot and again when the tab is focused, overlaying width, speed, and bin by machine id onto the builtin fleet. Placeholder meshes stay the ones already in `refs/machines`; a workshop model file is not swapped into the field. The combine pack from 环穗资产 is `refs/machines/low-poly-combine-harvestors.glb` (iedalton, CC BY 4.0): the workshop shows that whole file under 参考·外部, scaled to the current harvester length, and the game does not dispatch it.
+`asset-lab.html` is the design sandbox, titled 环穗 · 资产工坊. The playable game uses the hub plot, the empty grow-deck unit (抬缘白台), and the grub trough from that sandbox. Notes typed in the sandbox stay in this browser and do not touch a saved game. The field loop no longer reads the workshop fleet or the potato stage document. See `docs/framework-b.md`.
 
 `flow.html` is 环穗 · 产物流向. It draws the potato → starch and peel → grub and frass loop from `src/products.js`, the same table the shop, the mill, and the culture tanks read. A header link and the admin panel both open it.
 
@@ -22,30 +22,22 @@ npm test
 npm run build
 ```
 
-`npm test` checks the flat-map sim (plot size, planting, growth, harvest payout, snapshot round-trip). The page itself is the 3D client.
+`npm test` checks framework B (whole-field jobs, the 拉斯提卡 loop, the dispatcher) and the save contract. The page itself is the 3D client.
 
-Art cameras, same as the sample: `index.html?view=far`, `mid`, `near`, `cut`, `up`. Add `fresh=1` to ignore a saved game. `rate=4` still sets the world clock for that session. **1× means one real minute is one world day.** A higher multiplier speeds the clock and the machines together. The speed control is not on the play HUD.
+Art cameras, same as the sample: `index.html?view=far`, `mid`, `near`, `cut`, `up`. Add `fresh=1` to ignore a saved game. `rate=4` still sets the world clock for that session. A higher multiplier speeds the clock and the machine together. The speed control sits on the clock.
 
 ## Play
 
-The only crop in this slice is a mid-season ware potato (中熟商品薯). It takes **120 world days** from planting to harvest. Stages follow that clock. Clicking does not skip a stage. At 1×, the planter, hiller, haulm topper, and harvester move at about 2.8 m/s, so one 128 m field edge takes about 50 real seconds.
+This slice is framework B, written up in `docs/framework-b.md`. Point at your field. **整地** runs the 清地 recipe: one hard job, 犁地, and the whole field becomes 一般田地. **种植** then 拉斯提卡. 播种 is hard; the growth clock starts when sowing finishes. After 成熟 the same 万能农机 harvests and tidies. 收拾 returns the field to 一般田地, so the next planting does not need another plow. Jobs are whole-field. The machine's width and progress live on the work order, not on the ground.
 
-The opening view sits on an empty field next to the hub. The salmon edge is the selected field. You start with one seed potato and one dose of fertilizer, enough for that first field, plus a vine-kill spray. The shop sells more 种薯, 肥料, and 饲料. A new game starts with feed for two protein cultures. More feed is the third shop row, at a placeholder price of 800.
-
-1. Click 中熟商品薯. That spends one seed potato and one fertilizer. A tractor-drawn planter drops the seed and closes the soil into ridges.
-2. The field stays bare ridges until emergence. Green shoots show on the ridges. A hiller then throws soil back onto the ridges.
-3. The canopy closes the rows, then the plants flower (pale purple on a yellow-flesh potato).
-4. Before harvest, a haulm topper shreds the vines. That pass also uses one spray if you still have any. The field turns to shredded brown haulm. This is vine-kill, not a slow yellowing.
-5. A harvester lifts the ridge. Soil falls through the web, tubers show briefly in the opened row, and the lot goes into the warehouse. **营收** does not move until you sell that lot.
-
-Click another of your fields to plant it again, if you still have seed and fertilizer. If either count is zero, planting stops and the field line says so. Buy the missing one in 商店. The price is a placeholder in the same unit as 营收. Short money says 营收不够. Fields outside the salmon plot boundary are a neighbor snapshot: you can look, you cannot plant, and they do not pay. The boundary is the same salmon line as a selected field, drawn around the whole plot, including in map mode (M). Keys: drag to pan, right-drag to orbit, wheel to zoom, 1–4 still change camera distance, C down to the protein deck and back, N day-night, M map, H hide the HUD.
+The opening view sits on an empty field next to the hub. The dock shows `C0 · P(x,y)`: hub block C0, east +X, north +Y. Fields outside the salmon plot boundary are a neighbor snapshot. Keys: drag to pan, right-drag to orbit, wheel to zoom, 1–4 still change camera distance, C down to the protein deck and back, N day-night, M map, H hide the HUD. The clock multiplier speeds the world clock and the machine together. 1× is the machine's real meters per second.
 
 ## Bottom bar
 
 The buttons along the bottom are the play modes:
 
 - **农机** lists the machines you own and what each is doing. Click one and the camera locks onto it.
-- **区域** returns to the field you are planting: select a field, then plant the potato. From the protein deck, 区域 brings you back up.
+- **区域** returns to the field you are working. From the protein deck, 区域 brings you back up.
 - **仓库** is the store on the hub. Harvested potatoes and protein lots sit here. Select a lot and sell it to add that lot's listed price to 营收. Each row has a **牌价**. That number is a placeholder for a future market price. It does not change, and there is no price simulation.
 - **建设** has three separate actions: 放下 picks a building and clicks the hub to place it, 拆除 selects a hub building and removes it, and 查看 only lists what is already there. A crop field still refuses a building. The opening hub has a warehouse, a garage where the surface machines park, and a small processing shed. They stay until you delete them. 重开 puts the three back.
 - **商店** sells 种薯, 肥料, and 饲料. Buying spends 营收. 饲料 is 800. One culture spends one.

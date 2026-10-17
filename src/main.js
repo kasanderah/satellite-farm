@@ -11,7 +11,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { HorizontalTiltShiftShader } from 'three/addons/shaders/HorizontalTiltShiftShader.js';
 import { VerticalTiltShiftShader } from 'three/addons/shaders/VerticalTiltShiftShader.js';
-import { PALETTE, CROPS, TEX_ID, L, fields, harvesters, haulers, drones, step, TRUNKS_X, TRUNKS_Z, depots, inCrater, ROADS, RING, LAYERS, CUT, wrapX, PLOT, economy, focus, signals, log, plantField, abandonField, quote, setTimeScale, setPaused, paused, exportSnapshot, applySnapshot, fieldAtWorld, fieldAt, fieldOrigin, simTime, worldDay, stores, rigs, fieldVisual, cropWatch, stageBoard, POTATO_DAYS, POTATO_STAGES, warehouse, buildings, sellLot, sellStack, warehouseStacks, warehouseCapacity, placeBuilding, removeBuilding, rigReadout, SHOP, buySeed, buyItem, SEED_PER_FIELD, FERT_PER_FIELD, resetGame, CULTURES, DECK_CLIMATE, tanks, cultureWatch, startCulture, tendCulture, harvestCulture, BUILDING_KINDS, CULTURE_CELLS, tankSite, devices, potatoStock, fertPlan, cultureFeedPlan, millWatch, startMill, removeMill, orderProcess, HUB_SITES, cropDossier, MACHINE_SHOP, buyMachine, cropDef, boomWatch, rigProfile, DRONE_SHOP, workDrones, buyDrone, sectorLight, sectorWord, dayCenter, setWorldDay, RING_OMEGA, bindPotatoClock, bindSurfaceClock, formatTimeScale } from './_shared.js';
+import { PALETTE, CROPS, TEX_ID, L, fields, harvesters, haulers, drones, step, TRUNKS_X, TRUNKS_Z, depots, inCrater, ROADS, RING, LAYERS, CUT, wrapX, PLOT, economy, focus, signals, log, plantField, abandonField, quote, setTimeScale, setPaused, paused, exportSnapshot, applySnapshot, fieldAtWorld, fieldAt, toWorld, onAfterStep, fieldOrigin, simTime, worldDay, stores, rigs, fieldVisual, cropWatch, stageBoard, POTATO_DAYS, POTATO_STAGES, warehouse, buildings, sellLot, sellStack, warehouseStacks, warehouseCapacity, placeBuilding, removeBuilding, rigReadout, SHOP, buySeed, buyItem, SEED_PER_FIELD, FERT_PER_FIELD, resetGame, CULTURES, DECK_CLIMATE, tanks, cultureWatch, startCulture, tendCulture, harvestCulture, BUILDING_KINDS, CULTURE_CELLS, tankSite, devices, potatoStock, fertPlan, cultureFeedPlan, millWatch, startMill, removeMill, orderProcess, HUB_SITES, cropDossier, MACHINE_SHOP, buyMachine, cropDef, boomWatch, rigProfile, DRONE_SHOP, workDrones, buyDrone, sectorLight, sectorWord, dayCenter, setWorldDay, RING_OMEGA, bindPotatoClock, bindSurfaceClock, formatTimeScale } from './_shared.js';
 import { applyStagePayload, bootFieldStageSource, writeStageStore, suspendPotatoStage, resumePotatoStage, stageBadge, installShippedPotato } from './field-stage-live.js';
 import { bootWorkshopMachines } from './machine-live.js';
 import { potatoDrawLooks, POTATO_PAINT_SLOTS, workWidthOf } from './surface-crops.js';
@@ -24,6 +24,7 @@ import { surfaceKits, hitchOffset } from './surface-kits.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CULT_EMPTY } from './lab-catalog.js';
 import { makeColony } from './colony-art.js';
+import { bootSlice, tickSlice, prepField, plantCrop, dockOf } from './b-bind.js';
 
 const Q = new URLSearchParams(location.search);
 const VIEW = Q.get('view') || '', PREWARM = +Q.get('t') || 0, NOPOST = Q.has('nopost'), SHOWFPS = Q.has('fps');
@@ -165,6 +166,7 @@ const cutInner = () => ({ x0: cut.x - CUT.AX + 14, x1: cut.x - CUT.AX + 14 + 2 *
 const inCut = (x, z, pad = 0) => cut.on && Math.abs(x - cut.x) < CUT.AX + pad && Math.abs(z - cut.z) < CUT.AZ + pad;
 function writeFields() {
   syncPotatoPaint();
+  U.uPotOn.value = 0;
   for (const f of fields) {
     const o = (f.j * NFX + f.i) * 4;
     const v = fieldVisual(f);
@@ -1746,25 +1748,34 @@ function planOpts() {
   return { cycle: planCycle, autoBuy: planBuy };
 }
 function planCropButtons(disabled) {
-  return CROPS.filter(c => c.plantable).map(c => {
-    const label = cropDef(c.id)?.planLabel || c.name;
-    return `<button type="button" class="sell" data-plan="${c.id}"${disabled ? ' disabled' : ''}>${label}</button>`;
-  }).join('');
+  return `<button type="button" class="sell" data-plan="lastika"${disabled ? ' disabled' : ''}>拉斯提卡</button>`;
 }
 function planTicks() {
-  return `<label class="tick"><input type="checkbox" data-flag="cycle"${planCycle ? ' checked' : ''}>循环种植</label><label class="tick"><input type="checkbox" data-flag="buy"${planBuy ? ' checked' : ''}>自动购买物资</label><p class="note">循环：收完清田后再种。自动购买：缺种薯、种子、甘蓝苗或肥料时用营收买。种苗只从商店来。这一站不看农时。</p>`;
+  return '<p class="note">先整地，清地的目标是一般田地。再种拉斯提卡。播种做完才开始生长。这一季不扣种薯。</p>';
 }
-function doPlant(id) {
+function plantWhy(reason) {
+  if (reason === 'ground') return '要先整地。清地的目标是一般田地。';
+  if (reason === 'lock') return '这块田还在作业';
+  if (reason === 'busy' || reason === 'planting') return '这块正在种拉斯提卡';
+  return '不能播种';
+}
+function doPrep() {
+  if (!selected?.owned) { toast('不能整地'); return { ok: false, reason: 'plot' }; }
+  const r = prepField(selected);
+  if (!r.ok) { toast(plantWhy(r.reason)); return r; }
+  plantOpen = false;
+  toast(r.skipped ? '已经是一般田地' : '清地 · 犁地');
+  updateDock();
+  return r;
+}
+function doPlant() {
   if (!selected?.owned) { toast('不能播种'); return { ok: false, reason: 'plot' }; }
-  readPlanFlags($('sheet'));
-  const r = plantField(selected, id, planOpts());
-  if (!r.ok) {
-    toast(planWhy(r.reason));
-    return r;
-  }
+  const r = plantCrop(selected);
+  if (!r.ok) { toast(plantWhy(r.reason)); return r; }
   plantOpen = false;
   plantWin = { x: 1e9, z: 1e9, w: 0 };
-  saveSoon();
+  toast('拉斯提卡 · 播种');
+  updateDock();
   return r;
 }
 function closePlanMenu() {
@@ -1781,24 +1792,20 @@ function applyFieldPick(list, shift) {
   else if (!pickedFields.size) selectField(null);
   if (mode === 'scheme') paintSheet();
 }
-function planSelected(cropId) {
-  readPlanFlags($('sheet'));
-  readPlanFlags($('planmenu'));
+function planSelected() {
   closePlanMenu();
   let n = 0;
   let why = '';
-  const opts = planOpts();
   for (const idx of pickedFields) {
     const f = fields[idx];
     if (!f?.owned) continue;
-    const r = plantField(f, cropId, opts);
+    const r = plantCrop(f);
     if (r.ok) n++;
-    else if (!why) why = r.reason === 'seed' ? '种子不足' : r.reason === 'fertilizer' ? '肥料不足' : r.reason === 'busy' ? '有的田正在长' : r.reason === 'season' ? '现在不在农时里' : '有的田不能种';
+    else if (!why) why = plantWhy(r.reason);
   }
-  if (n) toast(`已规划 ${n} 块。生长等第一趟作业开工`);
+  if (n) toast(`已种 ${n} 块拉斯提卡`);
   else toast(why || '没有种上');
   paintSheet();
-  saveSoon();
 }
 function openPlanMenu(x, y) {
   const menu = $('planmenu');
@@ -1962,12 +1969,12 @@ const labelLayer = $('labels'); const LBL = [];
 for (let i = 0; i < 70; i++) { const d = document.createElement('div'); d.className = 'lbl'; labelLayer.appendChild(d); LBL.push(d); }
 const legend = $('legend');
 legend.innerHTML = [
-  ['裸垄', PALETTE.regoDk, PALETTE.rego],
-  ['出苗', PALETTE.regoDk, PALETTE.oliveDp],
-  ['封垄', PALETTE.oliveDp, PALETTE.olive],
-  ['开花', PALETTE.olive, '#c4b0d4'],
-  ['碎秧', PALETTE.ochre, PALETTE.rust],
-  ['起薯', PALETTE.straw, PALETTE.regoLt],
+  ['未整地', PALETTE.deep, PALETTE.regoDk],
+  ['一般田地', PALETTE.regoDk, PALETTE.rego],
+  ['播种', PALETTE.rego, PALETTE.oliveDp],
+  ['成熟', PALETTE.oliveDp, PALETTE.olive],
+  ['收割', PALETTE.ochre, PALETTE.straw],
+  ['收拾', PALETTE.rego, PALETTE.regoLt],
 ].map(([name, a, b]) => `<div class="lg"><i style="background:linear-gradient(90deg,${a},${b})"></i><span>${name}</span></div>`).join('');
 const MODES = [['machines', '农机', 'FLEET'], ['rigshop', '农机店', 'BUY'], ['plan', '区域', 'PLAN'], ['crops', '作物', 'CROP'], ['scheme', '规划', 'ASSIGN'], ['store', '仓库', 'STORE'], ['build', '建设', 'BUILD'], ['shop', '商店', 'SHOP']];
 $('tiers').innerHTML = MODES.map(([id, zh, en]) => `<button type="button" data-mode="${id}"><b>${zh}</b><small>${en}</small></button>`).join('');
@@ -1979,6 +1986,11 @@ function rigTitle(r) {
   return `${r.label} ${same.indexOf(r) + 1}`;
 }
 function fleetWidth(r) {
+  if (r.bDrive) {
+    const w = r.bWidth || 16;
+    const text = Math.abs(w - Math.round(w)) < 0.05 ? String(Math.round(w)) : String(Math.round(w * 10) / 10);
+    return ` · 幅宽 ${text} m`;
+  }
   const w = workWidthOf(r.kind, r.hitch);
   if (!(w > 0)) return '';
   const text = Math.abs(w - Math.round(w)) < 0.05 ? String(Math.round(w)) : String(Math.round(w * 10) / 10);
@@ -2106,7 +2118,7 @@ function paintSheet() {
     el.innerHTML = `<div class="split"><div><div class="who"><b>作物</b><span>点一种看阶段</span></div>${stackSlots(rows, d.id, 'data-cropid')}</div><div>${head}</div></div>`;
   } else if (mode === 'scheme') {
     const n = pickedFields.size;
-    el.innerHTML = `<div class="who"><b>规划</b><span>已选 ${n} 块田</span></div><p class="note">拖出方框选田。按住 Shift 再点，加选。右键已选的田，指定作物。生长从第一趟作业开工才计时。播种或移栽走完以前，田面保持裸土。</p>${planTicks()}${planCropButtons(!n)}`;
+    el.innerHTML = `<div class="who"><b>规划</b><span>已选 ${n} 块田</span></div><p class="note">拖出方框选田。按住 Shift 再点，加选。右键已选的田，种拉斯提卡。田要先整成一般田地。</p>${planTicks()}${planCropButtons(!n)}`;
   } else if (mode === 'machines') {
     const fleetRows = rigs.map(r => `<button type="button" class="rowbtn${watchRig === r ? ' on' : ''}" data-rig="${r.id}"><b>${rigTitle(r)}</b><small>${rigLine(r)}</small></button>`).join('')
       + workDrones.map(d => `<button type="button" class="rowbtn${watchRig === d ? ' on' : ''}" data-drone="${d.id}"><b>${d.label}</b><small>${rigLine(d)}</small></button>`).join('');
@@ -2482,7 +2494,8 @@ function updateLabels(d) {
   if (aField > 0) for (const f of fields) {
     if (f.crop < 0) continue; const x = f.x0 + 64, z = f.z0 + 64; if (Math.hypot(x - camS.x, z - camS.z) > Math.min(d * 1.15, 720) || inCut(x, z, 40)) continue;
     const watch = cropWatch(f);
-    const st = watch ? `${watch.label} · 第 ${Math.floor(watch.day)} 日` : (f.state === 3 ? '作业' : '定格冠层');
+    const bStat = f.bUnit && f.bUnit.look !== 'hold' ? f.bUnit.text : '';
+    const st = bStat || (watch ? `${watch.label} · 第 ${Math.floor(watch.day)} 日` : (f.state === 3 ? '作业' : '定格冠层'));
     const sw = watch ? PALETTE.olive : PALETTE.rego;
     want.push({ x, z, pr: 2, a: aField, html: `<i style="background:${sw}"></i><b>F-${String(f.i).padStart(2, '0')}${String(f.j).padStart(2, '0')}</b><span>${st}</span>`, cls: 'fld' + ((f === selected || watch) ? ' act' : '') });
   }
@@ -2642,73 +2655,38 @@ function updateDock() {
   if (!show) { el.classList.remove('on'); return; }
   el.classList.add('on');
   const f = selected;
-  const watch = cropWatch(f);
+  const desc = f.owned ? dockOf(f) : null;
   let stat = selNote;
-  if (!stat) {
-    if (!f.owned) stat = '邻区快照 · 只读';
-    else if (watch?.waiting && watch.work === 'sow') stat = `${CROPS[f.crop].name} · ${watch.label} · 播种扫过，生长还没计时`;
-    else if (watch?.waiting && watch.work === 'variant') stat = `${CROPS[f.crop].name} · ${watch.label} · 扫过的垄换上这道作业的地面色`;
-    else if (watch?.waiting && watch.work === 'rest') stat = `${CROPS[f.crop].name} · ${watch.label} · 上一道色留在田上，等下一趟`;
-    else if (watch?.waiting && watch.phase === 'O') stat = `${CROPS[f.crop].name} · 整地空田 · 生长链要等播种写完`;
-    else if (watch?.waiting) stat = `${CROPS[f.crop].name} · 已规划 · 等第一趟作业，生长还没计时`;
-    else if (watch?.failed) stat = `${CROPS[f.crop].name} · 烂在地里 · 没人收，不入仓`;
-    else if (watch && watch.planted === false) stat = `${CROPS[f.crop].name} · ${watch.label} · 播种还没走完 · 第 ${Math.floor(watch.day)} 日`;
-    else if (watch) stat = `${CROPS[f.crop].name} · ${watch.label} · 播后 ${Math.floor(watch.day)} / ${watch.days} 日`;
-    else if (stores.fertilizer + 1e-9 < fertPlan().fromFert) stat = stores.frass > 0 ? '肥料不足。虫粪只能抵一半。' : '肥料不足。打开商店买一份。';
-    else if (f.state === 0) stat = '裸地 · 点种植，再选作物';
-    else stat = '定格冠层 · 可改种';
-  }
-  if (!selNote && watch && CROPS[f.crop]?.id === 'potato') stat += ` · ${stageBadge()}`;
-  $('selid').textContent = `F-${String(f.i).padStart(3, '0')}${String(f.j).padStart(2, '0')}`;
+  if (!stat) stat = !f.owned ? '邻区快照 · 只读' : (desc?.stat || '未整地');
+  const addr = desc?.plot || '';
+  $('selid').textContent = addr ? `C0 · ${addr}` : `F-${String(f.i).padStart(3, '0')}${String(f.j).padStart(2, '0')}`;
   $('selstat').textContent = stat;
-  const showStages = !!(watch && f.crop >= 0);
-  const day = watch && !watch.waiting ? watch.day : 0;
-  const stages = (f.crop >= 0 && CROPS[f.crop].stages?.length) ? CROPS[f.crop].stages : [];
   const jobsHost = $('dock-jobs');
   if (jobsHost) {
-    const board = f.live ? stageBoard(f) : null;
-    const rows = board?.jobs || [];
+    const rows = desc?.jobs || [];
     jobsHost.hidden = !rows.length;
     jobsHost.innerHTML = rows.length
-      ? `<div class="cap">${board.stageName}</div>` + rows.map(job => `<div class="jb${job.status === '执行中' ? ' run' : ''}"><b>${job.name}</b><span>${job.status} ${job.pct}%</span></div>`).join('')
+      ? rows.map(job => `<div class="jb${job.status === '执行中' || job.status === '生长' ? ' run' : ''}"><b>${job.name}</b><span>${job.status} ${job.pct}%</span></div>`).join('')
       : '';
   }
   const legendHost = $('dock-legend');
   if (legendHost) {
-    const chips = showStages ? stages.filter(s => !s.preplant && !s.after) : [];
+    const chips = desc?.chips || [];
     legendHost.hidden = !chips.length;
-    legendHost.innerHTML = chips.map(s => `<div class="lg"><i style="background:${s.color}"></i><span>${s.name}</span></div>`).join('');
+    legendHost.innerHTML = chips.map(s => `<div class="lg${s.on ? ' on' : ''}"><span>${s.name}</span></div>`).join('');
   }
   const bar = $('bar');
   if (bar) {
-    bar.hidden = !showStages;
-    bar.innerHTML = showStages ? stages.map(s => {
-    const fill = day <= s.from ? 0 : day >= s.to ? 1 : (day - s.from) / (s.to - s.from);
+    const fill = Math.max(0, Math.min(1, desc?.bar || 0));
     const pct = (fill * 100).toFixed(1);
-    return `<i style="flex:${s.to - s.from};background:linear-gradient(90deg,${s.color} ${pct}%,rgba(232,216,208,.16) ${pct}%)"></i>`;
-  }).join('') : '';
+    bar.hidden = !desc || (!desc.jobs.length && fill <= 0);
+    bar.innerHTML = `<i style="flex:1;background:linear-gradient(90deg,#c4b08a ${pct}%,rgba(232,216,208,.16) ${pct}%)"></i>`;
   }
-  el.classList.toggle('picking', plantOpen && !!f.owned && !f.live);
+  el.classList.toggle('picking', plantOpen && !!f.owned);
   const plantBtn = $('act-plant');
-  const clearBtn = $('act-clear');
-  if (plantBtn) plantBtn.disabled = !f.owned || !!f.live;
-  if (clearBtn) clearBtn.disabled = !f.owned;
-  document.querySelectorAll('#selbtns button').forEach(b => {
-    const def = cropDef(b.dataset.crop);
-    const seedName = def ? (productById(def.seed)?.nameZh || '种子') : '';
-    const have = def ? (stores[def.seed] || 0) >= def.seedQty : false;
-    b.disabled = !f.owned;
-    b.classList.toggle('on', !!watch && !watch.waiting && have && CROPS[f.crop]?.id === b.dataset.crop);
-    const crop = CROPS.find(c => c.id === b.dataset.crop);
-    const small = b.querySelector('small');
-    if (small && def && crop) {
-      const fert = fertPlan();
-      const fertTxt = Math.abs(fert.fromFert - 1) < 1e-6 ? '1' : stockText(fert.fromFert);
-      small.textContent = `${seedName} ${def.seedQty} · 肥料 ${fertTxt} · ${crop.days} 日`;
-    }
-    const name = b.querySelector('b');
-    if (name && crop) name.textContent = crop.name;
-  });
+  const prepBtn = $('act-prep');
+  if (plantBtn) plantBtn.disabled = !f.owned;
+  if (prepBtn) prepBtn.disabled = !f.owned;
 }
 function paintRates() {
   document.querySelectorAll('#rates button').forEach(b => b.classList.toggle('on', Math.abs(+b.dataset.rate - economy.timeScale) < 1e-6));
@@ -2800,32 +2778,21 @@ function bootStagesSync() {
 }
 const bootStageNote = bootStagesSync();
 $('kpi').innerHTML = `<div class="k-rev"><small>营收</small><b class="hv" id="kpi-rev">0</b></div><div class="k-day"><small>世界日</small><b id="kpi-day">0</b></div><div class="k-time"><small>时刻</small><span class="clk"><i class="face" id="kpi-face" aria-hidden="true"><i id="kpi-hh"></i><i id="kpi-mh"></i></i><b id="kpi-hm">00:00</b><b id="kpi-rate">1×</b></span></div><div class="k-act"><small>作业</small><b class="hv" id="kpi-act">0</b><em>/ ${rigs.length}</em></div>`;
-$('dock').innerHTML = `<div class="who"><b id="selid"></b><span id="selstat"></span></div><div id="dock-jobs" class="jobs" hidden></div><div id="dock-legend" class="legend" hidden></div><div id="bar"><i id="selbar"></i></div><div class="ops"><button type="button" id="act-plant"><b>种植</b><small>再选作物</small></button><button type="button" id="act-clear"><b>清地</b><small>已种也弃收</small></button></div><div class="row" id="selbtns"></div>`;
-for (const c of CROPS) if (c.plantable) {
+$('dock').innerHTML = `<div class="who"><b id="selid"></b><span id="selstat"></span></div><div id="dock-jobs" class="jobs" hidden></div><div id="dock-legend" class="legend" hidden></div><div id="bar"><i id="selbar"></i></div><div class="ops"><button type="button" id="act-prep"><b>整地</b><small>清地 · 一般田地</small></button><button type="button" id="act-plant"><b>种植</b><small>拉斯提卡</small></button></div><div class="row" id="selbtns"></div>`;
+{
   const b = document.createElement('button');
-  b.dataset.crop = c.id;
-  const def = cropDef(c.id);
-  const seedName = productById(def.seed)?.nameZh || '种子';
-  b.innerHTML = `<b>${c.name}</b><small>${seedName} ${def.seedQty} · 肥料 1 · ${c.days} 日</small>`;
+  b.dataset.crop = 'lastika';
+  b.innerHTML = '<b>拉斯提卡</b><small>播种之后开始生长</small>';
   b.style.gridColumn = '1 / -1';
-  b.addEventListener('click', () => doPlant(c.id));
+  b.addEventListener('click', () => doPlant());
   $('selbtns').appendChild(b);
 }
 $('act-plant').addEventListener('click', () => {
-  if (!selected?.owned || selected.live) return;
+  if (!selected?.owned) return;
   plantOpen = !plantOpen;
   updateDock();
 });
-$('act-clear').addEventListener('click', () => {
-  if (!selected?.owned) return;
-  const had = !!selected.live;
-  const r = abandonField(selected);
-  if (!r.ok) { toast('不能清地'); return; }
-  plantOpen = false;
-  toast(had ? '已清地，这一季不入仓' : '这块是空的');
-  updateDock();
-  saveSoon();
-});
+$('act-prep').addEventListener('click', () => doPrep());
 const RATE_STOPS = [1, 4, 12, 120, 1000];
 $('rates').innerHTML = `<span>1×：1 分 = 2 世界时</span>` + RATE_STOPS.map(r => `<button type="button" data-rate="${r}">${r}×</button>`).join('') + `<input id="rate-in" type="text" inputmode="decimal" value="1" aria-label="世界钟倍率" autocomplete="off">`;
 function stepRate(dir) {
@@ -2989,6 +2956,7 @@ $('reset-yes').addEventListener('click', () => {
   planCycle = false;
   planBuy = false;
   resetGame();
+  bindSlice();
   try { localStorage.removeItem(SAVE_KEY); } catch (e) { /* private mode */ }
   clearTimeout(saveSoon.t);
   seenLog = 0;
@@ -3128,6 +3096,23 @@ $('viewer-close').addEventListener('click', () => $('viewer').classList.remove('
 if (!VIEW && !Q.has('fresh')) {
   loadNow();
   if (holdSave) offerUnreadableSave();
+}
+function bindSlice() {
+  onAfterStep(tickSlice);
+  bootSlice({
+    fields, rigs, focus,
+    length: L.FIELD, width: L.FIELD,
+    originI: L.HUBX * L.PER + Math.floor(L.PER / 2),
+    originJ: L.HUBZ * L.PER + Math.floor(L.PER / 2),
+    toWorld,
+    timeScale: () => economy.timeScale,
+    paused: () => paused,
+  });
+}
+bindSlice();
+{
+  const opening = fieldAt(focus.i, focus.j);
+  if (opening?.owned) selectField(opening, '');
 }
 paintRates();
 paintWorldClock();
@@ -3388,7 +3373,19 @@ window.__farm = {
   devices, potatoStock, fertPlan, cultureFeedPlan, millWatch, startMill, removeMill, orderProcess, products: productById,
   deck(on) { visitDeck(on == null ? !camS.deck : !!on); },
   get onDeck() { return !!camS.deck; },
-  snapshot: exportSnapshot, plant: doPlant, select: (i, j) => selectField(fieldAt(i, j)),
+  snapshot: exportSnapshot, plant: () => doPlant(), prep: () => doPrep(), select: (i, j) => selectField(fieldAt(i, j)),
+  b() {
+    const f = selected;
+    const rig = rigs.find(r => r.bDrive) || null;
+    const vis = f ? fieldVisual(f) : null;
+    return {
+      dock: f ? dockOf(f) : null,
+      i: f?.i, j: f?.j,
+      look: f?.bUnit?.look || null,
+      g: vis?.g, mask: vis?.mask,
+      rig: rig && { x: rig.x, z: rig.z, ang: rig.ang, busy: !!rig.busy, doing: rig.bRead?.doing || '', frac: rig.bRead?.frac || 0 },
+    };
+  },
   setTimeScale, setPaused,
   setLockDay(on) { lockDay = !!on; paintLockDay(); },
   get lockDay() { return lockDay; },

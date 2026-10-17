@@ -1,0 +1,166 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {
+  CAPABILITIES, GROUNDS, JOBS, PREP_RECIPES, PLANT_CROPS, OMNI, MACHINE_CLASSES,
+  GROW_SECONDS, HUB_PLOT, plotAddress, lookG, fieldShader, hitchStub,
+  createFarm, addField, addMachine, requestPrep, requestPlant, stepFarm, fieldWork, describeField,
+} from '../src/framework-b.js';
+
+function slice() {
+  const farm = createFarm();
+  addMachine(farm, { ...OMNI, caps: OMNI.caps.slice(), energyLeft: OMNI.energyKwh });
+  addField(farm, { id: 'a', length: 128, width: 128, ground: 'raw', look: 'raw', plot: 'P(3,-1)' });
+  return farm;
+}
+
+function until(farm, pred, cap = 600) {
+  let t = 0;
+  while (t < cap && !pred()) {
+    stepFarm(farm, 1);
+    t += 1;
+  }
+  assert.ok(t < cap, '超时');
+  return t;
+}
+
+test('清地只有犁地，犁完是一般田地，田上不留进度', () => {
+  const farm = slice();
+  const field = farm.fields.get('a');
+  assert.equal(PREP_RECIPES.clear_general.targetName, '一般田地');
+  assert.deepEqual(PREP_RECIPES.clear_general.steps, ['plow']);
+  assert.equal(JOBS.plow.kind, 'hard');
+  assert.deepEqual(JOBS.plow.caps, ['犁田']);
+  assert.equal(CAPABILITIES['犁田'].name, '犁田');
+  const started = requestPrep(farm, 'a');
+  assert.equal(started.ok, true);
+  stepFarm(farm, 1);
+  assert.match(describeField(farm, 'a').stat, /清地/);
+  assert.match(describeField(farm, 'a').stat, /犁地/);
+  const mid = fieldWork(farm, 'a');
+  assert.equal(mid.jobId, 'plow');
+  assert.equal(mid.width, OMNI.width);
+  assert.equal(mid.origin, OMNI.origin);
+  assert.ok(mid.progress > 0 && mid.progress < 1);
+  assert.equal(field.look, 'raw');
+  assert.equal(Object.hasOwn(field, 'mask'), false);
+  assert.equal(Object.hasOwn(field, 'progress'), false);
+  assert.equal(fieldWork(farm, 'a').progress, mid.progress);
+  const again = requestPrep(farm, 'a');
+  assert.equal(again.ok, false);
+  assert.equal(again.reason, 'lock');
+  until(farm, () => field.ground === 'general');
+  assert.equal(field.ground, 'general');
+  assert.equal(field.look, 'general');
+  assert.equal(field.lock, null);
+  assert.equal(fieldWork(farm, 'a'), null);
+  assert.ok(farm.events.some(ev => ev.type === 'job-complete' && ev.jobId === 'plow' && ev.look === 'general'));
+  assert.equal(GROUNDS.general.name, '一般田地');
+  const skip = requestPrep(farm, 'a');
+  assert.equal(skip.skipped, true);
+});
+
+test('没整地不能种；播种做完才开始生长', () => {
+  const farm = slice();
+  const denied = requestPlant(farm, 'a', 'lastika');
+  assert.equal(denied.ok, false);
+  assert.equal(denied.reason, 'ground');
+  assert.equal(farm.fields.get('a').plant, null);
+  requestPrep(farm, 'a');
+  until(farm, () => farm.fields.get('a').ground === 'general');
+  const planted = requestPlant(farm, 'a');
+  assert.equal(planted.ok, true);
+  const field = farm.fields.get('a');
+  stepFarm(farm, 0.2);
+  assert.equal(field.plant.stageId, 'sow');
+  assert.equal(field.plant.clock, false);
+  assert.equal(field.plant.grow, 0);
+  assert.equal(field.look, 'general');
+  until(farm, () => field.plant.clock);
+  assert.equal(field.look, 'sown');
+  assert.ok(farm.events.some(ev => ev.type === 'clock-start' && ev.fieldId === 'a'));
+  const atStart = field.plant.grow;
+  stepFarm(farm, 1);
+  assert.ok(field.plant.grow > atStart);
+  assert.equal(field.plant.need, GROW_SECONDS);
+  assert.equal(PLANT_CROPS.lastika.name, '拉斯提卡');
+  assert.deepEqual(PLANT_CROPS.lastika.grounds, ['general']);
+  assert.deepEqual(PLANT_CROPS.lastika.stages.map(s => s.name), ['播种', '成熟', '收割', '收拾']);
+});
+
+test('成熟后收割再收拾，回到可种的一般田地', () => {
+  const farm = slice();
+  requestPrep(farm, 'a');
+  until(farm, () => farm.fields.get('a').ground === 'general');
+  requestPlant(farm, 'a');
+  const field = farm.fields.get('a');
+  until(farm, () => field.look === 'mature');
+  assert.equal(field.plant.stageId, 'harvest');
+  assert.equal(field.plant.clock, false);
+  until(farm, () => field.look === 'harvested');
+  assert.equal(field.plant.stageId, 'tidy');
+  until(farm, () => field.plant == null);
+  assert.equal(field.ground, 'general');
+  assert.equal(field.look, 'general');
+  assert.equal(field.lock, null);
+  const again = requestPlant(farm, 'a');
+  assert.equal(again.ok, true);
+  assert.equal(JOBS.sow.kind, 'hard');
+  assert.equal(JOBS.harvest.kind, 'hard');
+  assert.equal(JOBS.tidy.kind, 'hard');
+  assert.ok(Object.values(JOBS).every(job => job.kind === 'hard'));
+});
+
+test('调度优先更快的自走一体机，拖挂单独派不出去', () => {
+  const farm = createFarm();
+  addMachine(farm, hitchStub());
+  addMachine(farm, {
+    id: 'slow', classId: 'self', className: '自走机', integral: true, name: '窄机',
+    caps: ['犁田', '播种', '收割', '收拾'], origin: 1, width: 4, workSpeed: 2, cruiseSpeed: 4,
+    powerOutKw: 20, energy: 'electric', energyKwh: 40, energyLeft: 40,
+  });
+  addMachine(farm, { ...OMNI, caps: OMNI.caps.slice(), energyLeft: OMNI.energyKwh });
+  addField(farm, { id: 'a', length: 128, width: 128 });
+  requestPrep(farm, 'a');
+  const work = fieldWork(farm, 'a');
+  assert.equal(work.width, OMNI.width);
+  assert.ok(farm.orders[0].machineId === 'omni');
+  assert.equal(MACHINE_CLASSES.hitch.power, 'demand');
+  assert.equal(MACHINE_CLASSES.self.name, '自走机');
+  assert.equal(MACHINE_CLASSES.air.name, '飞行机');
+  assert.equal(hitchStub().powerNeedKw, 0);
+  assert.equal(OMNI.energy, 'electric');
+  stepFarm(farm, 2);
+  const omni = farm.machines.find(m => m.id === 'omni');
+  assert.ok(omni.energyLeft < omni.energyKwh);
+});
+
+test('第二块田排队，等第一块解锁', () => {
+  const farm = slice();
+  addField(farm, { id: 'b', length: 128, width: 128, ground: 'raw', look: 'raw' });
+  assert.equal(requestPrep(farm, 'a').ok, true);
+  assert.equal(requestPrep(farm, 'b').ok, true);
+  assert.equal(fieldWork(farm, 'b'), null);
+  until(farm, () => farm.fields.get('a').ground === 'general');
+  stepFarm(farm, 0.05);
+  assert.equal(fieldWork(farm, 'b')?.jobId, 'plow');
+});
+
+test('整块颜色和地块编号', () => {
+  assert.equal(lookG('raw'), 0);
+  assert.equal(lookG('general'), 1);
+  assert.equal(lookG('mature'), 5);
+  assert.equal(lookG('harvested'), 7);
+  assert.ok(lookG('sown', 0) === 2);
+  assert.ok(lookG('sown', 1) > 4);
+  assert.equal(fieldShader({ look: 'general' }).mask, -1);
+  assert.equal(fieldShader({ look: 'hold' }), null);
+  const addr = plotAddress(13, 9, 10, 10);
+  assert.equal(addr.hub, HUB_PLOT);
+  assert.equal(addr.code, 'P(3,-1)');
+  const farm = slice();
+  assert.match(describeField(farm, 'a').stat, /未整地/);
+  requestPrep(farm, 'a');
+  until(farm, () => farm.fields.get('a').ground === 'general');
+  assert.match(describeField(farm, 'a').stat, /一般田地/);
+  assert.match(describeField(farm, 'a').stat, /拉斯提卡/);
+});

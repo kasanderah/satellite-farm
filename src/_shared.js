@@ -4,6 +4,7 @@
 // =====================================================================
 import { productById, recipeById, deviceById, shopRows, utilityCost, LOOP_OFFSETS } from './products.js';
 import { SAVE_VERSION } from './save-contract.js';
+import { fieldShader } from './framework-b.js';
 import { cropDef, rigProfile, rigCan, rigHas, hitchPlan, hitchHasModes, droneCan, JOB_PENALTY, UNLOAD_WHILE_MOVING, BIN_LANES, UNLOAD_SECONDS, TRAILER_CARGO_CAP, HITCH_SWAP_S, RELOAD_S, MODE_SWITCH_S, SURFACE_CROPS, workWidthOf, lanesForWidth, binCapOf } from './surface-crops.js';
 export { cropDef, rigProfile, JOB_PENALTY, UNLOAD_WHILE_MOVING, BIN_LANES, SURFACE_CROPS, workWidthOf, lanesForWidth };
 
@@ -648,6 +649,11 @@ function stageBlend(def, day) {
   return st + frac;
 }
 export function fieldVisual(f) {
+  const shade = f?.bUnit ? fieldShader(f.bUnit) : null;
+  if (shade) {
+    const potato = CROPS.findIndex(c => c.id === 'potato');
+    return { crop: potato, g: shade.g, s: 0, dir: f.dir, mask: shade.mask };
+  }
   const id = f && f.crop >= 0 ? CROPS[f.crop]?.id : null;
   const potato = id === 'potato';
   if (f?.failed === 'rot') {
@@ -1063,6 +1069,7 @@ function deliverTrailer(r) {
 }
 function assignIdleRigs() {
   for (const r of rigs) {
+    if (r.bDrive) continue;
     if (r.mode === 'work' || r.mode === 'turn' || r.mode === 'travel' || r.mode === 'need_unload' || r.mode === 'unload' || r.mode === 'service' || r.mode === 'switch') continue;
     const home = atGarage(r);
     if (home && (r.charge ?? 1) < BATT_LEAVE) {
@@ -1602,6 +1609,7 @@ function stepWorkDrones(dt) {
 }
 function stepRigs(dt) {
   for (const r of rigs) {
+    if (r.bDrive) continue;
     if ((r.mode === 'work' || r.mode === 'turn') && r.f && (!r.f.live || r.f.paid)) goHome(r);
     if ((r.mode === 'park' || r.mode === 'charge') && atGarage(r) && (r.charge ?? 1) < 1) {
       r.charge = Math.min(1, (r.charge ?? 1) + dt / RECHARGE_S);
@@ -1611,6 +1619,7 @@ function stepRigs(dt) {
   }
   assignIdleRigs();
   for (const r of rigs) {
+    if (r.bDrive) continue;
     if (r.mode === 'work') stepWork(r, dt);
     else if (r.mode === 'turn') stepTurn(r, dt);
     else if (r.mode === 'travel') stepTravel(r, dt);
@@ -1624,7 +1633,7 @@ function stepRigs(dt) {
 function settlePotatoCalendar() {
   for (let i = potatoLive.length - 1; i >= 0; i--) {
     const f = potatoLive[i];
-    if (!f.live || f.paid) { potatoLive.splice(i, 1); continue; }
+    if (!f.live || f.paid || f.bUnit) { potatoLive.splice(i, 1); continue; }
     const def = cropOf(f);
     if (!def || f.plantedAt == null) continue;
     ensureJobs(f);
@@ -1772,6 +1781,7 @@ export function abandonField(f) {
 }
 export function rigReadout(r) {
   if (!r) return null;
+  if (r.bRead) return r.bRead;
   const aerial = r.kind === 'drone_scout' || r.kind === 'drone_treat';
   const light = aerial ? sectorLight(r.x, worldDay) : null;
   const moving = !paused && (r.mode === 'work' || r.mode === 'turn' || r.mode === 'travel');
@@ -1821,13 +1831,16 @@ export function rigReadout(r) {
   };
   const garageAt = hubPad(3, 2);
   garageOrigin = { x: garageAt.x, z: garageAt.z };
-  ['planter', 'hiller', 'topper', 'lifter'].forEach((kind, n) => {
-    const x = garageAt.x - 18 + n * 12, z = garageAt.z + 22;
-    const profile = rigProfile(kind);
-    const rig = { id: n, kind, label: profile.label, logicId: profile.logicId, busy: false, f: null, job: null, mode: 'park', intent: null, route: null, ri: 0, charge: 1, lane: 0, u: 0, bin: 0, cargo: 0, parkX: x, parkZ: z, x, z, ang: -Math.PI / 2 };
+  {
+    const x = garageAt.x, z = garageAt.z + 22;
+    const rig = {
+      id: 0, kind: 'omni', label: '万能农机', logicId: 'tractor_gen', bDrive: true, bWidth: 16,
+      busy: false, f: null, job: null, mode: 'park', intent: null, route: null, ri: 0,
+      charge: 1, lane: 0, u: 0, bin: 0, cargo: 0, parkX: x, parkZ: z, x, z, ang: -Math.PI / 2,
+    };
     bootRig(rig);
     rigs.push(rig);
-  });
+  }
   nextRigId = rigs.length;
   for (const [di, dj, kind] of [[3, 1, 'warehouse'], [3, 2, 'garage'], [3, 3, 'process']]) {
     const at = hubPad(di, dj);
@@ -1895,6 +1908,7 @@ function dispatch(h) {
 }
 export function stepFields(days) {
   for (const f of fields) {
+    if (f.bUnit) continue;
     if (f.live && f.crop >= 0 && CROPS[f.crop].id === 'potato') continue;
     if (f.state === 4) {
       f.timer -= days;
@@ -2349,6 +2363,7 @@ export function sellStack(cropId, fraction = 1) {
   return { crop: cropId, name, listPrice: pay, liters };
 }
 export function plantField(f, cropId, opts = {}) {
+  if (f?.bUnit) return { ok: false, reason: 'ground' };
   if (!f?.owned) return { ok: false, reason: 'plot' };
   if (!seasonAllowsSow(f)) return { ok: false, reason: 'season' };
   if (f.state === 3 || f.live) return { ok: false, reason: 'busy' };
@@ -2578,4 +2593,7 @@ export function step(dt, t, scale = 1) {
   settleDevices();
   stepHaulers(dt);
   stepDrones(t);
+  if (afterStepHook && total > 0) afterStepHook(total);
 }
+let afterStepHook = null;
+export function onAfterStep(fn) { afterStepHook = typeof fn === 'function' ? fn : null; }

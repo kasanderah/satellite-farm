@@ -2,11 +2,11 @@
   "name": "satellite-farm",
   "type": "module",
   "version": "0.1.0",
-  "description": "环穗 (Ringsheaf). One plot on test satellite 农神VIII: a 120-world-day ware potato, from seed ridge to vine-kill and harvest.",
+  "description": "环穗 (Ringsheaf). One plot on test satellite 农神VIII. Framework B: whole-field 整地 and 拉斯提卡.",
   "main": "index.html",
   "scripts": {
     "build": "node build.mjs",
-    "test": "node --test test/sim.test.mjs test/field-stages.test.mjs test/field-stage-live.test.mjs test/save-contract.test.mjs test/machine-lab.test.mjs"
+    "test": "node --test test/framework-b.test.mjs test/save-contract.test.mjs"
   },
   "keywords": [],
   "author": "",
