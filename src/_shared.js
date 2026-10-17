@@ -4,7 +4,7 @@
 // =====================================================================
 import { productById, recipeById, deviceById, shopRows, utilityCost, LOOP_OFFSETS } from './products.js';
 import { SAVE_VERSION } from './save-contract.js';
-import { fieldShader } from './framework-b.js';
+import { fieldShader, PLANT_CROPS } from './framework-b.js';
 import { cropDef, rigProfile, rigCan, rigHas, hitchPlan, hitchHasModes, droneCan, JOB_PENALTY, UNLOAD_WHILE_MOVING, BIN_LANES, UNLOAD_SECONDS, TRAILER_CARGO_CAP, HITCH_SWAP_S, RELOAD_S, MODE_SWITCH_S, SURFACE_CROPS, workWidthOf, lanesForWidth, binCapOf } from './surface-crops.js';
 export { cropDef, rigProfile, JOB_PENALTY, UNLOAD_WHILE_MOVING, BIN_LANES, SURFACE_CROPS, workWidthOf, lanesForWidth };
 
@@ -40,6 +40,8 @@ export const CROPS = [
   { id: 'alfalfa', name: '银叶苜', analog: '苜蓿', family: 'teal',  young: 'tealGy',  ripe: 'steel',  stub: 'regoDk', height: 0.7, row: 0.30, along: 0.25, tex: 'drill',  shape: 'tuft',    grow: 200, season: 18, plantable: false, weight: 0.10 },
   { id: 'sorghum', name: '锈穗粱', analog: '高粱', family: 'grain', young: 'olive',   ripe: 'rust',   stub: 'ochre',  height: 1.8, row: 0.75, along: 0.30, tex: 'wide',   shape: 'stalk',   grow: 300, season: 24, plantable: false, weight: 0.05 },
   { id: 'feed_barley', name: '饲料大麦', analog: '大麦', family: 'grain', young: 'olive', ripe: 'straw', stub: 'ochre', height: 0.9, row: 0.4, along: 0.28, tex: 'drill', shape: 'ear', grow: 240, season: 65, plantable: true, yieldL: 5200, price: 180, weight: 0, days: 57 },
+  // 权重 0：不进邻区抽选，旧作物下标不变。尺寸来自框架 B 的拉斯提卡，不跟商品薯。
+  { id: 'lastika', name: '拉斯提卡', analog: '拉斯提卡', family: 'green', young: 'oliveDp', ripe: 'olive', stub: 'straw', height: PLANT_CROPS.lastika.visual.height, row: PLANT_CROPS.lastika.visual.row, along: PLANT_CROPS.lastika.visual.along, tex: PLANT_CROPS.lastika.visual.tex, shape: PLANT_CROPS.lastika.visual.shape, grow: 1, season: 1, plantable: false, weight: 0 },
 ];
 export const TEX_ID = { drill: 0, wide: 1, ridges: 2, paddy: 3, beds: 4 };
 
@@ -651,8 +653,8 @@ function stageBlend(def, day) {
 export function fieldVisual(f) {
   const shade = f?.bUnit ? fieldShader(f.bUnit) : null;
   if (shade) {
-    const potato = CROPS.findIndex(c => c.id === 'potato');
-    return { crop: potato, g: shade.g, s: 0, dir: f.dir, mask: shade.mask };
+    const lastika = CROPS.findIndex(c => c.id === 'lastika');
+    return { crop: lastika, g: shade.g, s: 0, dir: f.dir, mask: shade.mask };
   }
   const id = f && f.crop >= 0 ? CROPS[f.crop]?.id : null;
   const potato = id === 'potato';

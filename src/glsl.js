@@ -84,6 +84,11 @@ bool jobSwept(vec2 uv, float db){
   float fr = (prog - fs) * FIELD;
   return mod(fs, 2.0) < 0.5 ? uv.x < fr : uv.x > FIELD - fr;
 }
+// 框架 B：裸地与收割后没有冠层。播种完成 g=2 起到成熟 g=5 长满。不借用旧档的膨大 / 待收。
+float bGrowthVis(float g){
+  if (g < 1.5 || g >= 6.5) return 0.0;
+  return clamp((g - 2.0) / 3.0, 0.0, 1.0);
+}
 // g < 1：邻区冠层沿用生长度。g >= 1：商品薯（1 整地裸土 2 播种后 3 出苗 4 培土 5 膨大 6 杀秧 7 成熟待收 8 过熟 9 烂地）
 float growthVis(float g){
   float stage = floor(g + 0.001);
@@ -105,6 +110,8 @@ float canopyAt(vec2 p){
   vec4 d = texelFetch(uField, fij, 0);
   if (d.r < 0.) return 0.;
   vec2 uv = d.a > .5 ? loc.yx : loc;
+  bool bWhole = d.b < -0.5 && fract(d.a) < 0.0004;
+  if (bWhole) return bGrowthVis(d.g) * uCropP[int(d.r + 0.5)].x;
   float stage = floor(d.g + 0.001);
   float front = harvestFront(d.b);
   if (front > 0.0 && laneCut(uv, front)) return 0.02;

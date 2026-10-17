@@ -49,6 +49,8 @@ export const PLANT_CROPS = {
     name: '拉斯提卡',
     grounds: ['general'],
     growSeconds: GROW_SECONDS,
+    // 株高、垄距、株距只属于拉斯提卡。不要借商品薯的 0.55 / 0.90 / 0.40。
+    visual: { shape: 'bush', tex: 'ridges', height: 0.7, row: 0.75, along: 0.36 },
     stages: [
       { id: 'sow', name: '播种', kind: 'hard', job: 'sow' },
       { id: 'mature', name: '成熟', kind: 'time' },

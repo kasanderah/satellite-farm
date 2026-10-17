@@ -25,6 +25,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CULT_EMPTY } from './lab-catalog.js';
 import { makeColony } from './colony-art.js';
 import { bootSlice, tickSlice, prepField, plantCrop, dockOf } from './b-bind.js';
+import { PLANT_CROPS } from './framework-b.js';
 
 const Q = new URLSearchParams(location.search);
 const VIEW = Q.get('view') || '', PREWARM = +Q.get('t') || 0, NOPOST = Q.has('nopost'), SHOWFPS = Q.has('fps');
@@ -72,6 +73,9 @@ const U = {
   uLocalDay: { value: 1 },
   uMirrorOn: { value: 1 },
   uLockDay: { value: 0 },
+  // 和地面 B 冠层同一条：幼苗 mix(oliveDp, moss, 0.35)，成熟 mix(oliveDp, olive, 0.62)。
+  uBYoung: { value: C('oliveDp').clone().lerp(C('moss'), 0.35) },
+  uBRipe: { value: C('oliveDp').clone().lerp(C('olive'), 0.62) },
 };
 const POT_SLOTS = POTATO_PAINT_SLOTS;
 const potTintData = new Float32Array(POT_SLOTS * 3 * 4);
@@ -132,6 +136,22 @@ function syncPotatoPaint() {
     packed.x = src.height;
     packed.y = src.row;
     packed.w = src.along;
+  }
+  const lastika = CROPS.findIndex(c => c.id === 'lastika');
+  const vis = PLANT_CROPS.lastika.visual;
+  const packedL = U.uCropP.value[lastika];
+  if (packedL) {
+    // 工坊覆写只改尺寸。默认垄距和株高是拉斯提卡，不落到商品薯 0.90 m。
+    if (draw.workshop) {
+      packedL.x = draw.height;
+      packedL.y = draw.row;
+      packedL.w = draw.along;
+    } else {
+      packedL.x = vis.height;
+      packedL.y = vis.row;
+      packedL.w = vis.along;
+    }
+    packedL.z = TEX_ID[vis.tex];
   }
   for (let s = 0; s < POT_SLOTS; s++) {
     const look = draw.slots[s] || draw.slots[1];
@@ -803,7 +823,7 @@ vec3 farmAlbedo(vec2 p){
     }
     // 制图层的地图模式：成熟度用单一色相渐变
     if (uMap > 0.) {
-      float m = pst >= 1.0 ? growthVis(g) : (cut ? 0.0 : g);
+      float m = bWhole ? bGrowthVis(g) : (pst >= 1.0 ? growthVis(g) : (cut ? 0.0 : g));
       vec3 mc = mix(g_deep * 1.6, g_zone, m) * (cut ? 0.6 : 1.0);
       col = mix(col, mc, uMap * 0.92);
     }
@@ -947,7 +967,7 @@ function plantPatch(s, depth) {
 ${CURVE_DECL}
 ${NOISE}
 ${FARM}
-uniform float uTime, uCutOn, uPotOn; uniform vec4 uPlantWin, uCut;
+uniform float uTime, uCutOn, uPotOn; uniform vec4 uPlantWin, uCut; uniform vec3 uBYoung, uBRipe;
 uniform sampler2D uPotTint;
 varying vec3 vCropCol;`).replace('#include <begin_vertex>', `#include <begin_vertex>
   vec4 io = modelMatrix * instanceMatrix * vec4(0., 0., 0., 1.);
@@ -984,9 +1004,12 @@ varying vec3 vCropCol;`).replace('#include <begin_vertex>', `#include <begin_ver
   float hs = P.x * pow(max(sc, 0.), 0.85) * edge, ws = P.w * 2.4 * (0.35 + 0.65 * sc) * edge;
   transformed.xz *= ws; transformed.y *= hs;
   bool bPlant = d.b < -0.5 && fract(d.a) < 0.0004;
-  vCropCol = mix(uCropYoung[c], uCropRipe[c], bPlant ? 0.18 : smoothstep(0.45, 1.0, gg));
+  float growB = clamp((d.g - 2.0) / 3.0, 0.0, 1.0);
+  vCropCol = bPlant
+    ? mix(uBYoung, uBRipe, smoothstep(0.12, 0.9, growB))
+    : mix(uCropYoung[c], uCropRipe[c], smoothstep(0.45, 1.0, gg));
   if (bPlant) {
-    // 整块冠层已经写好。不要再掉进下面的杀秧锈色。
+    // 冠层色已经按拉斯提卡写好。不要再掉进下面的杀秧锈色，也不混商品薯赭黄。
   } else if (uPotOn > 0.5 && int(P.z + 0.5) == 2 && stage >= 1.0) {
     int slot = int(clamp(stage, 1.0, 9.0));
     int nxt = int(min(float(slot) + 1.0, 9.0));
@@ -1031,12 +1054,19 @@ function rebuildPlants(cx, cz, W) {
   for (let j = fj0; j <= fj1; j++) for (let i = fi0; i <= fi1; i++) {
     const f = fields[j * NFX + i]; if (f.crop < 0) continue;
     if (viewLayer !== 'surface' && f.inPlot) continue;
-    const cr = CROPS[f.crop], im = plantMeshes[cr.shape];
+    // hold 仍用生成时的旧作物。已经进入 B 阶段的田改用拉斯提卡的网格和株行距。
+    const bActive = !!(f.bUnit && f.bUnit.look && f.bUnit.look !== 'hold');
+    const vis = PLANT_CROPS.lastika.visual;
+    const cr = bActive
+      ? { id: 'lastika', shape: vis.shape, tex: vis.tex, row: potDraw.workshop ? potDraw.row : vis.row, along: potDraw.workshop ? potDraw.along : vis.along }
+      : CROPS[f.crop];
+    const im = plantMeshes[cr.shape];
+    if (!im) continue;
     const xa = Math.max(f.x0, cx - W), xb = Math.min(f.x0 + L.FIELD, cx + W), za = Math.max(f.z0, cz - W), zb = Math.min(f.z0 + L.FIELD, cz + W);
     if (xa >= xb || za >= zb) continue;
     const rowS = cr.row * (cr.tex === 'beds' ? 1.1 : 1), al = cr.along;
     const potRow = cr.id === 'potato' && potDraw.workshop;
-    const bWhole = !!f.bUnit;
+    const bWhole = bActive;
     let crestT = 0.5;
     if (potRow) {
       const slot = Math.max(1, Math.min(9, Math.floor(fieldVisual(f).g + 0.001)));
@@ -1046,7 +1076,11 @@ function rebuildPlants(cx, cz, W) {
     // 田内：行沿 u；在世界坐标里按田垄方向铺。工坊土豆落在垄顶相位上，和色带同一条跨行轴。
     const [ua, ub, va, vb] = f.dir === 0 ? [xa - f.x0, xb - f.x0, za - f.z0, zb - f.z0] : [za - f.z0, zb - f.z0, xa - f.x0, xb - f.x0];
     let v0 = Math.ceil(va / rowS) * rowS + rowS * 0.5;
-    if (potRow) {
+    if (bWhole) {
+      // 垄顶在行距的整数倍上，和地面 B 冠层色带同一条。
+      v0 = Math.ceil((va - 1e-4) / rowS) * rowS;
+      if (v0 < va - 1e-4) v0 += rowS;
+    } else if (potRow) {
       v0 = Math.ceil((va - crestT * rowS) / rowS) * rowS + crestT * rowS;
       if (v0 < va) v0 += rowS;
     }
@@ -1054,7 +1088,7 @@ function rebuildPlants(cx, cz, W) {
     const acrossJit = bWhole ? 0.08 : potRow ? 0.06 : 0.18;
     hseed = f.idx * 7919 + 1;
     for (let v = v0; v < vb; v += rowS) {
-      if (cr.tex !== 'beds' && cr.tex !== 'paddy' && Math.abs(((v % 24) + 24) % 24 - 12) < 1.4) continue; // 拖拉机道
+      if (!bWhole && cr.tex !== 'beds' && cr.tex !== 'paddy' && Math.abs(((v % 24) + 24) % 24 - 12) < 1.4) continue; // 拖拉机道
       for (let u = Math.ceil(ua / al) * al; u < ub; u += al) {
         if (bWhole) {
           if (u < 1.6 || u > L.FIELD - 1.6 || v < 1.6 || v > L.FIELD - 1.6) continue;

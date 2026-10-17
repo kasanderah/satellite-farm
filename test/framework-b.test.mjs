@@ -85,6 +85,12 @@ test('没整地不能种；播种做完才开始生长', () => {
   assert.equal(PLANT_CROPS.lastika.name, '拉斯提卡');
   assert.deepEqual(PLANT_CROPS.lastika.grounds, ['general']);
   assert.deepEqual(PLANT_CROPS.lastika.stages.map(s => s.name), ['播种', '成熟', '收割', '收拾']);
+  assert.equal(PLANT_CROPS.lastika.visual.shape, 'bush');
+  assert.equal(PLANT_CROPS.lastika.visual.tex, 'ridges');
+  assert.equal(PLANT_CROPS.lastika.visual.row, 0.75);
+  assert.equal(PLANT_CROPS.lastika.visual.height, 0.7);
+  assert.equal(PLANT_CROPS.lastika.visual.along, 0.36);
+  assert.notEqual(PLANT_CROPS.lastika.visual.row, 0.9);
 });
 
 test('成熟后收割再收拾，回到可种的一般田地', () => {
