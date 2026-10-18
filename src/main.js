@@ -589,14 +589,21 @@ vec3 farmAlbedo(vec2 p){
       float profB = 0.5 + 0.5 * cos(6.2832 * rowPhB);
       float slopeB = -sin(6.2832 * rowPhB);
       vec3 soilB = g_soil * (0.86 + 0.08 * profB * rowSeeB) * (1.0 + patchy);
+      // 未整地是浅棕平土。一般田地是深棕，垄也更深。犁地扫过要能看出变色，不能只剩车辙。
+      vec3 rawSoil = mix(g_regoLt, g_rego, 0.28) * (0.98 + 0.04 * profB * rowSeeB) * (1.0 + patchy * 0.35);
       float growB = clamp((visG - 2.0) / 3.0, 0.0, 1.0);
       vec3 youngB = mix(g_oliveDp, g_moss, 0.35);
       vec3 ripeB = mix(g_oliveDp, g_olive, 0.62);
       vec3 cropB = mix(youngB, ripeB, smoothstep(0.12, 0.9, growB)) * (1.0 + patchy * 0.35);
-      if (visG < 1.5) {
+      if (visG < 0.5) {
+        col = rawSoil;
+        gTilt = acrossW * slopeB * 0.18 * rowSeeB;
+        gRough = 0.98;
+        canopyHere = false;
+      } else if (visG < 1.5) {
         col = soilB;
-        gTilt = acrossW * slopeB * (visG < 0.5 ? 0.28 : 0.62) * rowSeeB;
-        gRough = 0.96;
+        gTilt = acrossW * slopeB * 0.72 * rowSeeB;
+        gRough = 0.94;
         canopyHere = false;
       } else if (visG < 6.5) {
         float coverB = smoothstep(0.0, 0.28, growB);
@@ -1063,6 +1070,7 @@ for (const sh of SHAPES) {
   im.count = 0; im.castShadow = true; im.receiveShadow = true; im.frustumCulled = false; im.customDepthMaterial = cropDepth;
   const col = new Float32Array(PLANT_CAP * 3); im.instanceColor = new THREE.InstancedBufferAttribute(col, 3);
   scene.add(im); plantMeshes[sh] = im;
+  im.userData.shape = sh;
   im.onBeforeRender = () => { U.uBStub.value = sh === 'stubble' ? 1 : 0; };
 }
 const tmpM = new THREE.Matrix4(), tmpQ = new THREE.Quaternion(), tmpS = new THREE.Vector3(), tmpP = new THREE.Vector3(), UP = new THREE.Vector3(0, 1, 0);
@@ -1071,7 +1079,7 @@ let plantWin = { x: 1e9, z: 1e9, w: 0, sig: '' };
 function ownedLookSig() {
   let s = '';
   for (const f of fields) {
-    if (!f.bUnit || f.bUnit.look === 'hold') continue;
+    if (!f.bUnit || (f.bUnit.look === 'hold' && !f.bUnit.sweep)) continue;
     s += f.idx + ':' + f.bUnit.look + ':' + (f.bUnit.sweep ? f.bUnit.sweep.look : '') + '|';
   }
   return s;
@@ -1086,60 +1094,62 @@ function rebuildPlants(cx, cz, W) {
     const f = fields[j * NFX + i]; if (f.crop < 0) continue;
     if (viewLayer !== 'surface' && f.inPlot) continue;
     // hold 仍用生成时的旧作物。已经进入 B 阶段的田改用拉斯提卡的网格和株行距。
-    const bActive = !!(f.bUnit && f.bUnit.look && f.bUnit.look !== 'hold');
+    const bActive = !!(f.bUnit && f.bUnit.look && (f.bUnit.look !== 'hold' || f.bUnit.sweep));
     const vis = PLANT_CROPS.lastika.visual;
     const sweepLook = f.bUnit?.sweep?.look;
-    let bShape = vis.shape;
+    // 残茬跟垄走：沿行距（跨行）和株距（沿垄，与收割趟同一条）铺。收割扫过才显示，没割的地方仍是冠层。
+    const shapes = [];
     if (bActive) {
-      if (f.bUnit.look === 'harvested') bShape = 'stubble';
-      else if (f.bUnit.look === 'sown' || f.bUnit.look === 'mature' || sweepLook === 'sown' || sweepLook === 'harvested') bShape = 'bush';
-      else bShape = '';
-    }
-    if (bActive && !bShape) continue;
-    const cr = bActive
-      ? { id: 'lastika', shape: bShape, tex: vis.tex, row: potDraw.workshop ? potDraw.row : vis.row, along: potDraw.workshop ? potDraw.along : vis.along }
-      : CROPS[f.crop];
-    const im = plantMeshes[cr.shape];
-    if (!im) continue;
+      if (f.bUnit.look === 'harvested' || sweepLook === 'harvested') shapes.push('stubble');
+      if (f.bUnit.look === 'sown' || f.bUnit.look === 'mature' || sweepLook === 'sown') shapes.push('bush');
+      if (!shapes.length) continue;
+    } else shapes.push(CROPS[f.crop].shape);
     const xa = Math.max(f.x0, cx - W), xb = Math.min(f.x0 + L.FIELD, cx + W), za = Math.max(f.z0, cz - W), zb = Math.min(f.z0 + L.FIELD, cz + W);
     if (xa >= xb || za >= zb) continue;
-    const rowS = cr.row * (cr.tex === 'beds' ? 1.1 : 1), al = cr.along;
-    const potRow = cr.id === 'potato' && potDraw.workshop;
-    const bWhole = bActive;
-    let crestT = 0.5;
-    if (potRow) {
-      const slot = Math.max(1, Math.min(9, Math.floor(fieldVisual(f).g + 0.001)));
-      const look = potDraw.slots[slot] || potDraw.slots[1];
-      crestT = ridgeCrestT(look && look.ridge);
-    }
-    // 田内：行沿 u；在世界坐标里按田垄方向铺。工坊土豆落在垄顶相位上，和色带同一条跨行轴。
-    const [ua, ub, va, vb] = f.dir === 0 ? [xa - f.x0, xb - f.x0, za - f.z0, zb - f.z0] : [za - f.z0, zb - f.z0, xa - f.x0, xb - f.x0];
-    let v0 = Math.ceil(va / rowS) * rowS + rowS * 0.5;
-    if (bWhole) {
-      // 垄顶在行距的整数倍上，和地面 B 冠层色带同一条。
-      v0 = Math.ceil((va - 1e-4) / rowS) * rowS;
-      if (v0 < va - 1e-4) v0 += rowS;
-    } else if (potRow) {
-      v0 = Math.ceil((va - crestT * rowS) / rowS) * rowS + crestT * rowS;
-      if (v0 < va) v0 += rowS;
-    }
-    const alongJit = bWhole ? 0.12 : potRow ? 0.22 : 0.6;
-    const acrossJit = bWhole ? 0.08 : potRow ? 0.06 : 0.18;
-    hseed = f.idx * 7919 + 1;
-    for (let v = v0; v < vb; v += rowS) {
-      if (!bWhole && cr.tex !== 'beds' && cr.tex !== 'paddy' && Math.abs(((v % 24) + 24) % 24 - 12) < 1.4) continue; // 拖拉机道
-      for (let u = Math.ceil(ua / al) * al; u < ub; u += al) {
-        if (bWhole) {
-          if (u < 1.6 || u > L.FIELD - 1.6 || v < 1.6 || v > L.FIELD - 1.6) continue;
-        } else if (u < 6 || u > L.FIELD - 6) continue;      // 地头留给地面纹理
-        const n = counts[cr.shape]; if (n >= PLANT_CAP) break;
-        const ju = u + (hr() - 0.5) * al * alongJit, jv = v + (hr() - 0.5) * rowS * acrossJit;
-        const x = f.dir === 0 ? f.x0 + ju : f.x0 + jv, z = f.dir === 0 ? f.z0 + jv : f.z0 + ju;
-        const s = 0.8 + hr() * 0.4;
-        tmpM.compose(tmpP.set(x, 0, z), tmpQ.setFromAxisAngle(UP, hr() * 6.283), tmpS.set(s, s * (0.85 + hr() * 0.3), s));
-        im.setMatrixAt(n, tmpM);
-        const j = 0.9 + hr() * 0.2; im.instanceColor.setXYZ(n, j, j * (0.97 + hr() * 0.06), j);
-        counts[cr.shape] = n + 1;
+    for (const shape of shapes) {
+      const cr = bActive
+        ? { id: 'lastika', shape, tex: vis.tex, row: potDraw.workshop ? potDraw.row : vis.row, along: potDraw.workshop ? potDraw.along : vis.along }
+        : CROPS[f.crop];
+      const im = plantMeshes[cr.shape];
+      if (!im) continue;
+      const rowS = cr.row * (cr.tex === 'beds' ? 1.1 : 1), al = cr.along;
+      const potRow = cr.id === 'potato' && potDraw.workshop;
+      const bWhole = bActive;
+      let crestT = 0.5;
+      if (potRow) {
+        const slot = Math.max(1, Math.min(9, Math.floor(fieldVisual(f).g + 0.001)));
+        const look = potDraw.slots[slot] || potDraw.slots[1];
+        crestT = ridgeCrestT(look && look.ridge);
+      }
+      // 田内：u 沿垄（收割趟），v 跨行。世界坐标按田垄方向铺，残茬和冠层落在同一条垄顶上。
+      const [ua, ub, va, vb] = f.dir === 0 ? [xa - f.x0, xb - f.x0, za - f.z0, zb - f.z0] : [za - f.z0, zb - f.z0, xa - f.x0, xb - f.x0];
+      let v0 = Math.ceil(va / rowS) * rowS + rowS * 0.5;
+      if (bWhole) {
+        v0 = Math.ceil((va - 1e-4) / rowS) * rowS;
+        if (v0 < va - 1e-4) v0 += rowS;
+      } else if (potRow) {
+        v0 = Math.ceil((va - crestT * rowS) / rowS) * rowS + crestT * rowS;
+        if (v0 < va) v0 += rowS;
+      }
+      const alongJit = bWhole ? 0.12 : potRow ? 0.22 : 0.6;
+      const acrossJit = bWhole ? 0.08 : potRow ? 0.06 : 0.18;
+      hseed = f.idx * 7919 + 1;
+      for (let v = v0; v < vb; v += rowS) {
+        if (!bWhole && cr.tex !== 'beds' && cr.tex !== 'paddy' && Math.abs(((v % 24) + 24) % 24 - 12) < 1.4) continue; // 拖拉机道
+        for (let u = Math.ceil(ua / al) * al; u < ub; u += al) {
+          if (bWhole) {
+            if (u < 1.6 || u > L.FIELD - 1.6 || v < 1.6 || v > L.FIELD - 1.6) continue;
+          } else if (u < 6 || u > L.FIELD - 6) continue;      // 地头留给地面纹理
+          const n = counts[cr.shape]; if (n >= PLANT_CAP) break;
+          const ju = u + (hr() - 0.5) * al * alongJit, jv = v + (hr() - 0.5) * rowS * acrossJit;
+          const x = f.dir === 0 ? f.x0 + ju : f.x0 + jv, z = f.dir === 0 ? f.z0 + jv : f.z0 + ju;
+          const s = 0.8 + hr() * 0.4;
+          const rowAng = f.dir === 0 ? 0 : Math.PI / 2;
+          tmpM.compose(tmpP.set(x, 0, z), tmpQ.setFromAxisAngle(UP, bWhole ? rowAng : hr() * 6.283), tmpS.set(s, s * (0.85 + hr() * 0.3), s));
+          im.setMatrixAt(n, tmpM);
+          const j = 0.9 + hr() * 0.2; im.instanceColor.setXYZ(n, j, j * (0.97 + hr() * 0.06), j);
+          counts[cr.shape] = n + 1;
+        }
       }
     }
   }
