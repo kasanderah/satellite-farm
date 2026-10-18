@@ -654,7 +654,7 @@ export function fieldVisual(f) {
   const shade = f?.bUnit ? fieldShader(f.bUnit) : null;
   if (shade) {
     const lastika = CROPS.findIndex(c => c.id === 'lastika');
-    return { crop: lastika, g: shade.g, s: 0, dir: f.dir, mask: shade.mask };
+    return { crop: lastika, g: shade.g, s: 0, dir: f.dir, mask: shade.mask, next: shade.next };
   }
   const id = f && f.crop >= 0 ? CROPS[f.crop]?.id : null;
   const potato = id === 'potato';

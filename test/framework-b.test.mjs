@@ -173,8 +173,52 @@ test('整块颜色和地块编号', () => {
   assert.match(describeField(farm, 'a').stat, /拉斯提卡/);
 });
 
+test('作业中按幅宽刷下一道，地头有转弯，做完整块定稿', () => {
+  const farm = slice();
+  requestPrep(farm, 'a');
+  let turns = 0;
+  let sawWork = false;
+  for (let i = 0; i < 900 && farm.fields.get('a').look === 'raw'; i++) {
+    stepFarm(farm, 0.25);
+    const order = farm.orders.find(item => item.fieldId === 'a');
+    if (!order) break;
+    if (order.phase === 'turn') {
+      turns += 1;
+      assert.equal(farm.fields.get('a').look, 'raw');
+      assert.notEqual(order.turnFrom.heading, order.turnTo.heading);
+      assert.equal(order.pose, order.turnFrom);
+      assert.equal(order.pose.alongFrac, 1);
+      assert.match(describeField(farm, 'a').stat, /地头转弯/);
+      const shade = fieldShader({
+        look: 'raw',
+        sweep: { width: order.width, pass: order.pose.pass, alongFrac: 1, look: 'general' },
+      });
+      assert.equal(shade.g, 0);
+      assert.equal(shade.next, 1);
+      assert.ok(Math.abs(shade.mask - (160 * 100 + order.pose.pass + 1)) < 1e-6, shade.mask);
+      stepFarm(farm, 2);
+    } else if (order.phase === 'work' && order.pose && order.progress < 1) {
+      sawWork = true;
+      const shade = fieldShader({
+        look: 'raw',
+        sweep: { width: order.width, pass: order.pose.pass, alongFrac: order.pose.alongFrac, look: 'general' },
+      });
+      assert.equal(shade.next, 1);
+      assert.ok(shade.mask > 20);
+      assert.equal(farm.fields.get('a').look, 'raw');
+    }
+  }
+  assert.equal(turns, 7);
+  assert.equal(sawWork, true);
+  assert.equal(farm.fields.get('a').look, 'general');
+  assert.equal(farm.fields.get('a').lock, null);
+  const done = fieldShader({ look: 'general' });
+  assert.equal(done.mask, -1);
+  assert.equal(done.next, undefined);
+});
+
 test('拉斯提卡阶段和版本戳来自同一份定义', () => {
-  assert.equal(HUD_VERSION, '环穗 v1');
+  assert.equal(HUD_VERSION, '环穗 v2');
   const crop = installShippedLastika();
   assert.equal(crop.name, '拉斯提卡');
   assert.deepEqual(crop.stages.map(s => s.name), ['播种', '成熟', '收割', '收拾']);

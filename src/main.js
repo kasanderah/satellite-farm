@@ -77,6 +77,9 @@ const U = {
   // 和地面 B 冠层同一条：幼苗 mix(oliveDp, moss, 0.35)，成熟 mix(oliveDp, olive, 0.62)。
   uBYoung: { value: C('oliveDp').clone().lerp(C('moss'), 0.35) },
   uBRipe: { value: C('oliveDp').clone().lerp(C('olive'), 0.62) },
+  uBStraw: { value: C('straw') },
+  uBStub: { value: 0 },
+  uBCrop: { value: CROPS.findIndex(c => c.id === 'lastika') },
 };
 const POT_SLOTS = POTATO_PAINT_SLOTS;
 const potTintData = new Float32Array(POT_SLOTS * 3 * 4);
@@ -191,7 +194,12 @@ function writeFields() {
   for (const f of fields) {
     const o = (f.j * NFX + f.i) * 4;
     const v = fieldVisual(f);
-    fieldData[o] = v.crop; fieldData[o + 1] = v.g; fieldData[o + 2] = v.mask != null && v.mask !== 0 ? v.mask : v.s; fieldData[o + 3] = encodeDir(v);
+    let alpha = encodeDir(v);
+    if (v.next != null && v.mask > 20 && CROPS[v.crop]?.id === 'lastika') {
+      const orient = v.dir > 0.5 ? 1 : 0;
+      alpha = orient + (Math.round(v.next) % 100) / 100;
+    }
+    fieldData[o] = v.crop; fieldData[o + 1] = v.g; fieldData[o + 2] = v.mask != null && v.mask !== 0 ? v.mask : v.s; fieldData[o + 3] = alpha;
   }
   fieldTex.needsUpdate = true;
 }
@@ -552,9 +560,13 @@ vec3 farmAlbedo(vec2 p){
     int tex = int(P.z + .5);
     vec2 uv = d.a > .5 ? loc.yx : loc;              // u 沿作物行，v 跨行
     vec2 acrossW = d.a > .5 ? vec2(1., 0.) : vec2(0., 1.);
-    // 框架 B 整块一色：b < -0.5 且 a 没有作业槽。旧田的间隙保色会把变体写进 a 的小数，不进这条。
-    bool bWhole = d.b < -0.5 && fract(d.a) < 0.0004;
-    bool head = !bWhole && (uv.x < 6. || uv.x > FIELD - 6.);      // 地头：作物行方向与田内垂直
+    // 拉斯提卡按作物号认。空闲整块一色；作业中 d.b 是幅宽进度，扫过的部分换成下一道，不进商品薯阶梯。
+    bool bField = abs(d.r - uBCrop) < 0.25;
+    bool bWhole = bField && d.b < -0.5 && fract(d.a) < 0.0004;
+    bool bSweep = bField && d.b >= 20.0;
+    float visG = d.g;
+    if (bSweep && jobSwept(uv, d.b)) visG = floor(fract(d.a) * 100.0 + 0.5);
+    bool head = !bField && (uv.x < 6. || uv.x > FIELD - 6.);      // 地头：作物行方向与田内垂直
     float across = head ? uv.x : uv.y;
     if (head) acrossW = acrossW.yx;
     float rowS = P.y * (tex == 4 ? 2.2 : 1.0);
@@ -567,8 +579,8 @@ vec3 farmAlbedo(vec2 p){
     bool cut = d.b >= 0.0 && d.b < 20.0 && laneCut(uv, d.b);
     float patchy = (n1 - 0.5) * 0.12 + (n2 - 0.5) * 0.05;
     float pst = floor(g + 0.001);
-    if (bWhole && tex == 2) {
-      // g=5 在旧阶梯里是膨大开花，小数部分还会按格子混进杀秧锈色。B 的成熟就是整块冠层，收割后才整块换成秸秆。
+    if ((bWhole || bSweep) && tex == 2) {
+      // 扫过的格子用下一道。做完以后蒙版回到 -1，整块回到同一个 g。
       float edgeIn = min(min(loc.x, FIELD - loc.x), min(loc.y, FIELD - loc.y));
       float edgeFade = smoothstep(0.0, 1.8, edgeIn);
       float rowSpB = max(P.y, 0.05);
@@ -577,16 +589,16 @@ vec3 farmAlbedo(vec2 p){
       float profB = 0.5 + 0.5 * cos(6.2832 * rowPhB);
       float slopeB = -sin(6.2832 * rowPhB);
       vec3 soilB = g_soil * (0.86 + 0.08 * profB * rowSeeB) * (1.0 + patchy);
-      float growB = clamp((g - 2.0) / 3.0, 0.0, 1.0);
+      float growB = clamp((visG - 2.0) / 3.0, 0.0, 1.0);
       vec3 youngB = mix(g_oliveDp, g_moss, 0.35);
       vec3 ripeB = mix(g_oliveDp, g_olive, 0.62);
       vec3 cropB = mix(youngB, ripeB, smoothstep(0.12, 0.9, growB)) * (1.0 + patchy * 0.35);
-      if (g < 1.5) {
+      if (visG < 1.5) {
         col = soilB;
-        gTilt = acrossW * slopeB * (g < 0.5 ? 0.28 : 0.62) * rowSeeB;
+        gTilt = acrossW * slopeB * (visG < 0.5 ? 0.28 : 0.62) * rowSeeB;
         gRough = 0.96;
         canopyHere = false;
-      } else if (g < 6.5) {
+      } else if (visG < 6.5) {
         float coverB = smoothstep(0.0, 0.28, growB);
         float wB = mix(0.16, 0.62, coverB);
         vec3 gapB = mix(soilB, cropB * 0.55, coverB * 0.35);
@@ -824,7 +836,7 @@ vec3 farmAlbedo(vec2 p){
     }
     // 制图层的地图模式：成熟度用单一色相渐变
     if (uMap > 0.) {
-      float m = bWhole ? bGrowthVis(g) : (pst >= 1.0 ? growthVis(g) : (cut ? 0.0 : g));
+      float m = bField ? bGrowthVis(visG) : (pst >= 1.0 ? growthVis(g) : (cut ? 0.0 : g));
       vec3 mc = mix(g_deep * 1.6, g_zone, m) * (cut ? 0.6 : 1.0);
       col = mix(col, mc, uMap * 0.92);
     }
@@ -960,7 +972,7 @@ vec3 wallAlbedo(){
 })();
 
 // ---------------- 近景单株（只在镜头附近的窗口里实例化；生长 / 收割由着色器读田块纹理决定） ----------------
-const SHAPES = ['ear', 'stalk', 'bush', 'tuft', 'rosette'];
+const SHAPES = ['ear', 'stalk', 'bush', 'tuft', 'rosette', 'stubble'];
 const PLANT_CAP = 60000;
 function plantPatch(s, depth) {
   Object.assign(s.uniforms, U);
@@ -968,24 +980,29 @@ function plantPatch(s, depth) {
 ${CURVE_DECL}
 ${NOISE}
 ${FARM}
-uniform float uTime, uCutOn, uPotOn; uniform vec4 uPlantWin, uCut; uniform vec3 uBYoung, uBRipe;
+uniform float uTime, uCutOn, uPotOn, uBStub; uniform vec4 uPlantWin, uCut; uniform vec3 uBYoung, uBRipe, uBStraw;
 uniform sampler2D uPotTint;
 varying vec3 vCropCol;`).replace('#include <begin_vertex>', `#include <begin_vertex>
   vec4 io = modelMatrix * instanceMatrix * vec4(0., 0., 0., 1.);
   ivec2 fij; vec2 loc, bl; int kind = farmCell(io.xz, fij, loc, bl);
-  float sc = 0.; int c = 0; float gg = 0.; vec4 d = vec4(0.); float stage = 0.; float speck = 0.;
+  float sc = 0.; int c = 0; float gg = 0.; vec4 d = vec4(0.); float stage = 0.; float speck = 0.; vec2 uv = vec2(0.);
   if (kind == 3) {
     d = texelFetch(uField, fij, 0); c = int(d.r + .5);
-    vec2 uv = d.a > .5 ? loc.yx : loc;
+    uv = d.a > .5 ? loc.yx : loc;
     if (d.r >= 0.) {
       stage = floor(d.g + 0.001);
-      bool bWhole = d.b < -0.5 && fract(d.a) < 0.0004;
-      bool opened = !bWhole && harvestFront(d.b) > 0.0 && laneCut(uv, harvestFront(d.b));
+      bool bField = abs(d.r - uBCrop) < 0.25;
+      bool bSweep = bField && d.b >= 20.0;
+      float visG = d.g;
+      if (bSweep && jobSwept(uv, d.b)) visG = floor(fract(d.a) * 100.0 + 0.5);
+      bool straw = bField && visG >= 6.5 && visG < 8.5;
+      bool opened = !bField && harvestFront(d.b) > 0.0 && laneCut(uv, harvestFront(d.b));
       float frac = clamp(d.g - stage, 0.0, 0.999);
-      speck = bWhole ? 0.0 : step(hash12(floor(io.xz * 0.45)), frac);
-      if (bWhole) {
-        // 成熟 g=5 落在旧杀秧档。整块长冠层，不按格子抽下一档，也不涂锈色残茬。
-        gg = (d.g < 1.5 || d.g >= 6.5) ? 0.0 : smoothstep(1.6, 4.2, d.g);
+      speck = bField ? 0.0 : step(hash12(floor(io.xz * 0.45)), frac);
+      if (bField) {
+        // 残茬网格只在秸秆档长出来。冠层网格在扫过收割带后藏起来，不涂锈色。
+        if (uBStub > 0.5) gg = straw ? 1.0 : 0.0;
+        else gg = (straw || visG < 1.5) ? 0.0 : smoothstep(1.6, 4.2, visG);
       } else {
         gg = mix(growthVis(stage + 0.2), growthVis(stage + 1.2), speck);
         if (stage < 1.5) gg = 0.;
@@ -1003,11 +1020,15 @@ varying vec3 vCropCol;`).replace('#include <begin_vertex>', `#include <begin_ver
   if (uCutOn > 0.5 && abs(io.x - uCut.x) < uCut.z + 0.5 && abs(io.z - uCut.y) < uCut.w + 0.5) edge = 0.;
   vec4 P = uCropP[c];
   float hs = P.x * pow(max(sc, 0.), 0.85) * edge, ws = P.w * 2.4 * (0.35 + 0.65 * sc) * edge;
+  if (uBStub > 0.5) hs *= 0.85;
   transformed.xz *= ws; transformed.y *= hs;
-  bool bPlant = d.b < -0.5 && fract(d.a) < 0.0004;
-  float growB = clamp((d.g - 2.0) / 3.0, 0.0, 1.0);
+  bool bPlant = abs(d.r - uBCrop) < 0.25;
+  float visCol = d.g;
+  if (bPlant && d.b >= 20.0 && jobSwept(uv, d.b)) visCol = floor(fract(d.a) * 100.0 + 0.5);
+  bool strawCol = bPlant && visCol >= 6.5 && visCol < 8.5;
+  float growB = clamp((visCol - 2.0) / 3.0, 0.0, 1.0);
   vCropCol = bPlant
-    ? mix(uBYoung, uBRipe, smoothstep(0.12, 0.9, growB))
+    ? (strawCol ? mix(uBStraw, vec3(0.93, 0.86, 0.62), 0.45) : mix(uBYoung, uBRipe, smoothstep(0.12, 0.9, growB)))
     : mix(uCropYoung[c], uCropRipe[c], smoothstep(0.45, 1.0, gg));
   if (bPlant) {
     // 冠层色已经按拉斯提卡写好。不要再掉进下面的杀秧锈色，也不混商品薯赭黄。
@@ -1042,12 +1063,21 @@ for (const sh of SHAPES) {
   im.count = 0; im.castShadow = true; im.receiveShadow = true; im.frustumCulled = false; im.customDepthMaterial = cropDepth;
   const col = new Float32Array(PLANT_CAP * 3); im.instanceColor = new THREE.InstancedBufferAttribute(col, 3);
   scene.add(im); plantMeshes[sh] = im;
+  im.onBeforeRender = () => { U.uBStub.value = sh === 'stubble' ? 1 : 0; };
 }
 const tmpM = new THREE.Matrix4(), tmpQ = new THREE.Quaternion(), tmpS = new THREE.Vector3(), tmpP = new THREE.Vector3(), UP = new THREE.Vector3(0, 1, 0);
 let hseed = 1; const hr = () => (hseed = (hseed * 16807) % 2147483647) / 2147483647;
-let plantWin = { x: 1e9, z: 1e9, w: 0 };
+let plantWin = { x: 1e9, z: 1e9, w: 0, sig: '' };
+function ownedLookSig() {
+  let s = '';
+  for (const f of fields) {
+    if (!f.bUnit || f.bUnit.look === 'hold') continue;
+    s += f.idx + ':' + f.bUnit.look + ':' + (f.bUnit.sweep ? f.bUnit.sweep.look : '') + '|';
+  }
+  return s;
+}
 function rebuildPlants(cx, cz, W) {
-  plantWin = { x: cx, z: cz, w: W };
+  plantWin = { x: cx, z: cz, w: W, sig: ownedLookSig() };
   const counts = {}; for (const s of SHAPES) counts[s] = 0;
   const fi0 = Math.max(0, Math.floor((cx - W - L.X0) / (L.BP / L.PER)) - 1), fi1 = Math.min(NFX - 1, Math.floor((cx + W - L.X0) / (L.BP / L.PER)) + 1);
   const fj0 = Math.max(0, Math.floor((cz - W - L.Z0) / (L.BP / L.PER)) - 1), fj1 = Math.min(NFZ - 1, Math.floor((cz + W - L.Z0) / (L.BP / L.PER)) + 1);
@@ -1058,8 +1088,16 @@ function rebuildPlants(cx, cz, W) {
     // hold 仍用生成时的旧作物。已经进入 B 阶段的田改用拉斯提卡的网格和株行距。
     const bActive = !!(f.bUnit && f.bUnit.look && f.bUnit.look !== 'hold');
     const vis = PLANT_CROPS.lastika.visual;
+    const sweepLook = f.bUnit?.sweep?.look;
+    let bShape = vis.shape;
+    if (bActive) {
+      if (f.bUnit.look === 'harvested') bShape = 'stubble';
+      else if (f.bUnit.look === 'sown' || f.bUnit.look === 'mature' || sweepLook === 'sown' || sweepLook === 'harvested') bShape = 'bush';
+      else bShape = '';
+    }
+    if (bActive && !bShape) continue;
     const cr = bActive
-      ? { id: 'lastika', shape: vis.shape, tex: vis.tex, row: potDraw.workshop ? potDraw.row : vis.row, along: potDraw.workshop ? potDraw.along : vis.along }
+      ? { id: 'lastika', shape: bShape, tex: vis.tex, row: potDraw.workshop ? potDraw.row : vis.row, along: potDraw.workshop ? potDraw.along : vis.along }
       : CROPS[f.crop];
     const im = plantMeshes[cr.shape];
     if (!im) continue;
@@ -3269,7 +3307,8 @@ function frame(now) {
   // 单株窗口
   const W = Math.min(64, Math.max(30, d * 1.1));
   const plantOn = d < 95;
-  if (plantOn && (Math.hypot(camS.x - plantWin.x, camS.z - plantWin.z) > W * 0.2 || Math.abs(W - plantWin.w) > W * 0.25)) rebuildPlants(camS.x, camS.z, W);
+  const lookSig = ownedLookSig();
+  if (plantOn && (Math.hypot(camS.x - plantWin.x, camS.z - plantWin.z) > W * 0.2 || Math.abs(W - plantWin.w) > W * 0.25 || lookSig !== plantWin.sig)) rebuildPlants(camS.x, camS.z, W);
   for (const s2 of SHAPES) plantMeshes[s2].visible = plantOn;
   U.uPlantWin.value.set(plantWin.x, plantWin.z, plantWin.w, plantOn ? 1 : 0);
   // 收割机：离镜头中心最近的 N 台用完整模型
@@ -3296,6 +3335,12 @@ function frame(now) {
   };
   if (rigShown) for (const r of rigs) {
     if (inCut(r.x, r.z, 8)) continue;
+    if (r.bDrive && rigMesh.omni) {
+      r.va = r.ang;
+      showRig('omni', r.x, r.z, r.va);
+      if (r.busy && d < 700) for (let e = 0; e < 2; e++) emitDust(r.x, r.z, r.va);
+      continue;
+    }
     const profile = rigProfile(r.kind);
     const platform = profile?.logicId && rigMesh[profile.logicId] ? profile.logicId : 'tractor_gen';
     r.va = r.ang;
@@ -3466,7 +3511,7 @@ window.__farm = {
       dock: f ? dockOf(f) : null,
       i: f?.i, j: f?.j,
       look: f?.bUnit?.look || null,
-      g: vis?.g, mask: vis?.mask,
+      g: vis?.g, mask: vis?.mask, next: vis?.next ?? null,
       rig: rig && { x: rig.x, z: rig.z, ang: rig.ang, busy: !!rig.busy, doing: rig.bRead?.doing || '', frac: rig.bRead?.frac || 0 },
     };
   },

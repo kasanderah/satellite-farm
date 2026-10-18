@@ -1,6 +1,6 @@
 // 把框架 B 接到环面上的一块田。旧的垄扫不读这里的工单。
 import {
-  OMNI, JOBS, createFarm, addField, addMachine, requestPrep, requestPlant,
+  OMNI, JOBS, TURN_SECONDS, createFarm, addField, addMachine, requestPrep, requestPlant,
   stepFarm, describeField, plotAddress,
 } from './framework-b.js';
 
@@ -52,6 +52,7 @@ function readout(order, unit) {
   const home = !order && unit && Math.hypot(unit.x - unit.parkX, unit.z - unit.parkZ) <= 1.2;
   let doing = '停在机库';
   if (order?.phase === 'cruise') doing = '开往田块';
+  else if (order?.phase === 'turn') doing = '地头转弯';
   else if (order?.phase === 'work') doing = job?.name || '作业';
   else if (!home) doing = '返回机库';
   const moving = !!order || !home;
@@ -66,14 +67,39 @@ function readout(order, unit) {
   };
 }
 
+function turnArc(a, b, t) {
+  const chord = Math.hypot(b.x - a.x, b.z - a.z) || 1;
+  const handle = Math.max(8, chord * 0.55);
+  const p1x = a.x + Math.cos(a.ang) * handle;
+  const p1z = a.z + Math.sin(a.ang) * handle;
+  const p2x = b.x - Math.cos(b.ang) * handle;
+  const p2z = b.z - Math.sin(b.ang) * handle;
+  const u = 1 - t;
+  const x = u * u * u * a.x + 3 * u * u * t * p1x + 3 * u * t * t * p2x + t * t * t * b.x;
+  const z = u * u * u * a.z + 3 * u * u * t * p1z + 3 * u * t * t * p2z + t * t * t * b.z;
+  const dx = 3 * u * u * (p1x - a.x) + 6 * u * t * (p2x - p1x) + 3 * t * t * (b.x - p2x);
+  const dz = 3 * u * u * (p1z - a.z) + 6 * u * t * (p2z - p1z) + 3 * t * t * (b.z - p2z);
+  return { x, z, ang: Math.atan2(dz, dx) };
+}
+
 function paintRig(order) {
   const unit = rig();
   if (!unit) return;
   unit.bWidth = OMNI.width;
   unit.busy = !!order;
   unit.bRead = readout(order, unit);
+  const f = order ? meshOf(order.fieldId) : null;
+  if (order?.phase === 'turn' && f && order.turnFrom && order.turnTo) {
+    const a = worldPose(f, order.turnFrom);
+    const b = worldPose(f, order.turnTo);
+    const t = Math.max(0, Math.min(1, (order.turnT || 0) / TURN_SECONDS));
+    const at = turnArc(a, b, t);
+    unit.x = at.x;
+    unit.z = at.z;
+    unit.ang = at.ang;
+    return;
+  }
   if (order?.phase !== 'work') return;
-  const f = meshOf(order.fieldId);
   if (!f || !order.pose) return;
   const at = worldPose(f, order.pose);
   unit.x = at.x;
@@ -129,6 +155,8 @@ function syncFields() {
     if (!unit) continue;
     const desc = describeField(farm, id);
     const frac = unit.plant?.clock ? unit.plant.grow / unit.plant.need : 0;
+    const order = farm.orders.find(item => item.fieldId === id);
+    const sweeping = order && (order.phase === 'work' || order.phase === 'turn') && order.pose;
     f.bUnit = {
       look: unit.look,
       growFrac: unit.look === 'sown' ? frac : 0,
@@ -136,6 +164,14 @@ function syncFields() {
       ground: unit.ground,
       plot: unit.plot,
     };
+    if (sweeping) {
+      f.bUnit.sweep = {
+        width: order.width,
+        pass: order.pose.pass,
+        alongFrac: order.pose.alongFrac || 0,
+        look: JOBS[order.jobId].look,
+      };
+    }
   }
 }
 

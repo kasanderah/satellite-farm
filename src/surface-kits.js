@@ -2,7 +2,7 @@
 // 垫圈、鲑鱼色选中环和光晕留在沙盒里，不进田。
 import * as THREE from 'three';
 import { createSurfaceBuilders } from './lab-surface.js';
-import { Kit } from './prefabs.js';
+import { Kit, omniKit } from './prefabs.js';
 
 const IDS = [
   'tractor_gen', 'harvester_combine', 'harvester_potato', 'harvester_cabbage', 'transplanter',
@@ -99,6 +99,7 @@ for (const id of IDS) {
   surfaceKits[id] = bakeOne(builders[id], { stripCraft: id === 'device_drone_base' });
   span[id] = spanOf(surfaceKits[id]);
 }
+surfaceKits.omni = omniKit();
 
 const tractorRear = span.tractor_gen.min.x;
 export const hitchOffset = {};

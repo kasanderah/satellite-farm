@@ -1,6 +1,6 @@
 // 框架 B · 最小闭环
-// 整地和种植是两条平行的阶段链。作业整块生效，田上不留半幅蒙版。
-// 硬作业锁住整块田，做完才改地面样子。软作业这一刀没有。
+// 整地和种植是两条平行的阶段链。硬作业锁住整块田，做完才改地面样子。
+// 作业进行中可以按幅宽扫过下一道样子；做完蒙版拿掉，整块定稿。软作业这一刀没有。
 
 export const HUB_PLOT = 'C0';
 
@@ -91,12 +91,21 @@ export function lookG(look, growFrac = 0) {
   return null;
 }
 
-// 整块田一个颜色。mask -1 只是告诉着色器「不要按垄扫」。进度不写进田。
+// 空闲和做完：mask -1，整块一个颜色。作业中 sweep 把机具幅宽和趟进度交给着色器，next 是扫过之后的样子。
 export function fieldShader(unit) {
   const g = unit ? lookG(unit.look, unit.growFrac || 0) : null;
   if (g == null) return null;
+  const sweep = unit.sweep;
+  if (sweep && sweep.width > 0) {
+    const widthDm = Math.max(1, Math.round(sweep.width * 10));
+    const along = Math.max(0, Math.min(1, sweep.alongFrac || 0));
+    const prog = (sweep.pass || 0) + along;
+    return { g, mask: widthDm * 100 + prog, next: lookG(sweep.look, 0) };
+  }
   return { g, mask: -1 };
 }
+
+export const TURN_SECONDS = 1.35;
 
 export function hitchStub() {
   return {
@@ -264,23 +273,61 @@ function metersOf(order, field) {
   return passesOf(order, field) * field.length;
 }
 
-export function writePose(farm, order, progress = order.progress) {
-  const field = farm.fields.get(order.fieldId);
+export function poseAlong(field, order, progress) {
   const span = order.width;
   const passes = passesOf(order, field);
   const travel = Math.max(0, Math.min(1, progress)) * metersOf(order, field);
   const pass = Math.min(passes - 1, Math.floor(travel / field.length + 1e-9));
   let along = travel - pass * field.length;
+  if (along < 0) along = 0;
   if (along > field.length) along = field.length;
   const forward = pass % 2 === 0;
   const uWork = forward ? along : field.length - along;
   const u = forward ? uWork - order.origin : uWork + order.origin;
   const v = Math.min(field.width - span * 0.5, (pass + 0.5) * span);
-  order.pose = {
+  return {
     u, v, pass, passes, heading: forward ? 0 : Math.PI,
     progress, width: order.width, origin: order.origin,
+    along, alongFrac: field.length > 0 ? along / field.length : 0,
   };
+}
+
+export function writePose(farm, order, progress = order.progress) {
+  const field = farm.fields.get(order.fieldId);
+  order.pose = poseAlong(field, order, progress);
   return order.pose;
+}
+
+function endOfPassPose(field, order, pass) {
+  const span = order.width;
+  const forward = pass % 2 === 0;
+  const along = field.length;
+  const uWork = forward ? along : 0;
+  const u = forward ? uWork - order.origin : uWork + order.origin;
+  const v = Math.min(field.width - span * 0.5, (pass + 0.5) * span);
+  return {
+    u, v, pass, passes: passesOf(order, field),
+    heading: forward ? 0 : Math.PI,
+    progress: ((pass + 1) * field.length) / metersOf(order, field),
+    width: order.width, origin: order.origin,
+    along, alongFrac: 1,
+  };
+}
+
+function beginTurn(order, field, pass) {
+  const boundary = (pass + 1) * field.length / metersOf(order, field);
+  order.progress = boundary;
+  order.turnFrom = endOfPassPose(field, order, pass);
+  order.turnTo = poseAlong(field, order, boundary);
+  order.pose = order.turnFrom;
+  order.phase = 'turn';
+  order.turnT = 0;
+}
+
+function passIndex(order, field) {
+  const travel = order.progress * metersOf(order, field);
+  const passes = passesOf(order, field);
+  return Math.min(passes - 1, Math.floor(travel / field.length + 1e-9));
 }
 
 function orderMachine(farm, order) {
@@ -294,12 +341,35 @@ function secondsLeft(farm, order) {
   return remain / machine.workSpeed;
 }
 
+function secondsToTurn(farm, order) {
+  const field = farm.fields.get(order.fieldId);
+  const machine = orderMachine(farm, order);
+  if (!field || !machine || order.phase !== 'work') return Infinity;
+  const passes = passesOf(order, field);
+  const cur = passIndex(order, field);
+  if (cur >= passes - 1) return Infinity;
+  const remain = (cur + 1) * field.length - order.progress * metersOf(order, field);
+  if (remain <= 1e-3) return 0;
+  return remain / machine.workSpeed;
+}
+
 function advanceWork(farm, order, slice) {
   const field = farm.fields.get(order.fieldId);
   const machine = orderMachine(farm, order);
-  const meters = machine.workSpeed * slice;
   const total = metersOf(order, field);
-  order.progress = Math.min(1, order.progress + meters / total);
+  const travel0 = order.progress * total;
+  const travel1 = Math.min(total, travel0 + machine.workSpeed * slice);
+  const passes = passesOf(order, field);
+  const cur = Math.min(passes - 1, Math.floor(travel0 / field.length + 1e-9));
+  if (cur < passes - 1) {
+    const boundaryTravel = (cur + 1) * field.length;
+    if (travel1 >= boundaryTravel - 1e-3) {
+      beginTurn(order, field, cur);
+      if (machine.powerOutKw > 0) machine.energyLeft = Math.max(0, machine.energyLeft - machine.powerOutKw * slice / 3600);
+      return;
+    }
+  }
+  order.progress = travel1 / total;
   writePose(farm, order);
   if (machine.powerOutKw > 0) machine.energyLeft = Math.max(0, machine.energyLeft - machine.powerOutKw * slice / 3600);
 }
@@ -393,9 +463,18 @@ function finishGrowth(farm) {
 export function stepFarm(farm, dt, env = null) {
   if (!(dt > 0)) return farm;
   let left = dt;
-  for (let guard = 0; guard < 16 && left > 1e-6; guard++) {
+  for (let guard = 0; guard < 48 && left > 1e-6; guard++) {
     dispatch(farm);
     const order = farm.orders[0] || null;
+    if (order?.phase === 'work') {
+      const field = farm.fields.get(order.fieldId);
+      const passes = passesOf(order, field);
+      const cur = passIndex(order, field);
+      if (cur < passes - 1) {
+        const remain = (cur + 1) * field.length - order.progress * metersOf(order, field);
+        if (remain <= 1e-3) beginTurn(order, field, cur);
+      }
+    }
     if (order?.phase === 'cruise') {
       const eta = env?.eta ? env.eta(farm, order) : 0;
       if (!(eta > 1e-4)) {
@@ -405,7 +484,8 @@ export function stepFarm(farm, dt, env = null) {
     }
     let horizon = Infinity;
     if (order?.phase === 'cruise') horizon = env.eta(farm, order);
-    if (order?.phase === 'work') horizon = Math.min(horizon, secondsLeft(farm, order));
+    if (order?.phase === 'work') horizon = Math.min(horizon, secondsLeft(farm, order), secondsToTurn(farm, order));
+    if (order?.phase === 'turn') horizon = Math.min(horizon, Math.max(0, TURN_SECONDS - (order.turnT || 0)));
     for (const field of farm.fields.values()) {
       const wait = growthLeft(field);
       if (wait != null) horizon = Math.min(horizon, wait);
@@ -420,6 +500,14 @@ export function stepFarm(farm, dt, env = null) {
     if (order?.phase === 'cruise' && env?.cruise) env.cruise(farm, order, slice);
     const skip = order && (order.phase === 'work' || order.phase === 'cruise') ? order.fieldId : null;
     if (order?.phase === 'work') advanceWork(farm, order, slice);
+    if (order?.phase === 'turn') {
+      order.turnT = (order.turnT || 0) + slice;
+      if (order.turnT >= TURN_SECONDS - 1e-6) {
+        order.phase = 'work';
+        order.pose = order.turnTo;
+        order.turnT = 0;
+      }
+    }
     applyGrowth(farm, slice, skip);
     left -= slice;
     if (order?.phase === 'work' && order.progress >= 1 - 1e-9) finishOrder(farm, order);
@@ -455,7 +543,7 @@ export function describeField(farm, fieldId) {
   else if (field.ground === 'general' && !field.plant && !work) stat = '一般田地 · 可以种植拉斯提卡';
   if (work && job) {
     const name = crop ? crop.name + ' · ' : (work.lane === 'prep' ? '清地 · ' : '');
-    const where = work.phase === 'cruise' ? '农机正在开来' : `${job.name} ${pct}%`;
+    const where = work.phase === 'cruise' ? '农机正在开来' : work.phase === 'turn' ? '地头转弯' : `${job.name} ${pct}%`;
     stat = `${name}${where}`;
   } else if (field.plant?.clock) {
     const sec = Math.floor(field.plant.grow);
@@ -465,7 +553,7 @@ export function describeField(farm, fieldId) {
     stat = `${crop.name} · ${stage?.name || ''}`;
   }
   const jobs = [];
-  if (work && job) jobs.push({ id: job.id, name: job.name, status: work.phase === 'cruise' ? '开来' : '执行中', pct });
+  if (work && job) jobs.push({ id: job.id, name: job.name, status: work.phase === 'cruise' ? '开来' : work.phase === 'turn' ? '转弯' : '执行中', pct });
   else if (field.plant?.clock) jobs.push({ id: 'mature', name: '成熟', status: '生长', pct: Math.round(field.plant.grow / field.plant.need * 100) });
   const chips = crop
     ? crop.stages.map((s, i) => ({ name: s.name, on: i === field.plant.index }))

@@ -37,6 +37,7 @@ uniform vec4 uCropP[NCROP];        // x 株高 / y 行距 / z 纹理类型 / w �
 uniform vec3 uCropRipe[NCROP];
 uniform vec3 uCropYoung[NCROP];
 uniform vec3 uCropStub[NCROP];
+uniform float uBCrop;
 // kind: 0 环壁下的检修带 / 1 田间路 / 2 主干走廊 / 3 田块 / 4 中枢硬化场地
 const vec3 CRATERS[${CRATERS.length}] = vec3[](${CRATERS.map(c => `vec3(${c.map(v => v.toFixed(1)).join(',')})`).join(',')});
 float craterD(vec2 p, out vec3 cr){ float best = 1e9; for (int i = 0; i < ${CRATERS.length}; i++){ float d = length(p - CRATERS[i].xy) / CRATERS[i].z; if (d < best){ best = d; cr = CRATERS[i]; } }
@@ -110,8 +111,13 @@ float canopyAt(vec2 p){
   vec4 d = texelFetch(uField, fij, 0);
   if (d.r < 0.) return 0.;
   vec2 uv = d.a > .5 ? loc.yx : loc;
-  bool bWhole = d.b < -0.5 && fract(d.a) < 0.0004;
-  if (bWhole) return bGrowthVis(d.g) * uCropP[int(d.r + 0.5)].x;
+  bool bField = abs(d.r - uBCrop) < 0.25;
+  if (bField) {
+    float visG = d.g;
+    if (d.b >= 20.0 && jobSwept(uv, d.b)) visG = floor(fract(d.a) * 100.0 + 0.5);
+    if (visG >= 6.5 && visG < 8.5) return 0.12 * uCropP[int(d.r + 0.5)].x;
+    return bGrowthVis(visG) * uCropP[int(d.r + 0.5)].x;
+  }
   float stage = floor(d.g + 0.001);
   float front = harvestFront(d.b);
   if (front > 0.0 && laneCut(uv, front)) return 0.02;

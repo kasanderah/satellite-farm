@@ -425,6 +425,13 @@ export function plantGeometry(shape) {
     P.push(blob(new THREE.IcosahedronGeometry(0.22, 0), [1, 0.8, 1], 0.55, 0.85));
   } else if (shape === 'tuft') {  // 稻/苜蓿：直立细叶丛
     for (let i = 0; i < 6; i++) P.push(leaf(0.05, 0.9 + (i % 2) * 0.1, 0.12, i * 1.05, 0.12 + (i % 3) * 0.08));
+  } else if (shape === 'stubble') { // 收割后的秸秆残茬。高度按作物株高再缩一截，近景要能认出是一丛茬。
+    for (let i = 0; i < 7; i++) {
+      const a = i * 0.9, r = 0.05 + (i % 3) * 0.028;
+      const h = 0.85 + (i % 3) * 0.22;
+      const stalk = blob(new THREE.CylinderGeometry(0.02, 0.032, h, 4), [1, 1, 1], h * 0.5, 1.05);
+      P.push(stalk.translate(Math.cos(a) * r, 0, Math.sin(a) * r));
+    }
   } else {                        // rosette 甘蓝：外叶杯 + 球心
     for (let i = 0; i < 6; i++) P.push(leaf(0.5, 0.55, 0.0, i * 1.047, 1.05, 0.05, 0.45, 0.95));
     P.push(blob(new THREE.IcosahedronGeometry(0.3, 1), [1, 0.85, 1], 0.38, 1.1));
@@ -433,6 +440,25 @@ export function plantGeometry(shape) {
 }
 
 // ---------------- 传感灯杆（14 m） ----------------
+// 万能农机占位：车头朝 +X，宽割台，不借用通用拖拉机。
+export function omniKit() {
+  const k = new Kit();
+  k.box('dark', 5.2, 1.15, 2.5, [-0.35, 1.2, 0], [0, 0, 0], 'metalDk');
+  k.box('light', 2.15, 1.25, 2.2, [0.45, 2.28, 0], [0, 0, 0], 'haze');
+  k.box('glass', 1.65, 0.78, 1.85, [0.7, 2.5, 0]);
+  k.box('light', 1.55, 0.72, 2.25, [-2.15, 2.05, 0], [0, 0, 0], 'regoLt');
+  k.cyl('emis', 0.14, 0.14, 0.22, [0.15, 3.15, 0], [0, 0, 0], glow('data', 8), 8);
+  k.box('dark', 1.35, 0.55, 6.4, [2.55, 0.9, 0]);
+  k.box('light', 0.42, 0.72, 6.55, [3.2, 1.2, 0], [0, 0, 0], 'olive');
+  k.box('emis', 0.08, 0.1, 6.2, [3.38, 0.58, 0], [0, 0, 0], glow('harvest', 6));
+  for (const z of [-3.2, 3.2]) k.box('light', 0.7, 0.85, 0.12, [2.75, 1.05, z], [0, 0, 0], 'harvest');
+  for (const x of [-1.65, 1.2]) for (const s of [-1, 1]) {
+    k.cyl('dark', 0.62, 0.62, 0.4, [x, 0.62, s * 1.18], [Math.PI / 2, 0, 0], null, 12);
+  }
+  k.cyl('emis', 0.12, 0.12, 0.22, [-2.15, 2.62, 0], [0, 0, 0], glow('alert', 10), 6);
+  return k.build();
+}
+
 export function mastKit() {
   const k = new Kit();
   k.cyl('dark', 0.16, 0.24, 14, [0, 7, 0], [0, 0, 0], null, 6);
