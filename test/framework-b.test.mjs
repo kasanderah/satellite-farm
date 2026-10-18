@@ -244,7 +244,7 @@ test('作业中按幅宽刷下一道，地头有转弯，做完整块定稿', ()
 });
 
 test('拉斯提卡阶段和版本戳来自同一份定义', () => {
-  assert.equal(HUD_VERSION, '环穗 v2.2');
+  assert.equal(HUD_VERSION, '环穗 v2.3');
   const crop = installShippedLastika();
   assert.equal(crop.name, '拉斯提卡');
   assert.deepEqual(crop.stages.map(s => s.name), ['播种', '成熟', '收割', '收拾']);

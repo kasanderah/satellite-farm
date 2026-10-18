@@ -1059,7 +1059,7 @@ varying vec3 vCropCol;`).replace('#include <begin_vertex>', `#include <begin_ver
   if (uCutOn > 0.5 && abs(io.x - uCut.x) < uCut.z + 0.5 && abs(io.z - uCut.y) < uCut.w + 0.5) edge = 0.;
   vec4 P = uCropP[c];
   float hs = P.x * pow(max(sc, 0.), 0.85) * edge, ws = P.w * 2.4 * (0.35 + 0.65 * sc) * edge;
-  if (uBStub > 0.5) { hs = 0.46 * sc * edge; ws = 1.7 * sc * edge; }
+  if (uBStub > 0.5) { hs = 1.0 * sc * edge; ws = 1.15 * sc * edge; }
   transformed.xz *= ws; transformed.y *= hs;
   bool bPlant = abs(d.r - uBCrop) < 0.25;
   float visCol = d.g;
@@ -1067,7 +1067,7 @@ varying vec3 vCropCol;`).replace('#include <begin_vertex>', `#include <begin_ver
   bool strawCol = bPlant && visCol >= 6.5 && visCol < 8.5;
   float growB = clamp((visCol - 2.0) / 3.0, 0.0, 1.0);
   vCropCol = bPlant
-    ? (strawCol ? mix(uBStraw, vec3(0.93, 0.86, 0.62), 0.45) : mix(uBYoung, uBRipe, smoothstep(0.12, 0.9, growB)))
+    ? (strawCol ? (uBStub > 0.5 ? vec3(0.86, 0.68, 0.32) : mix(uBStraw, vec3(0.93, 0.86, 0.62), 0.45)) : mix(uBYoung, uBRipe, smoothstep(0.12, 0.9, growB)))
     : mix(uCropYoung[c], uCropRipe[c], smoothstep(0.45, 1.0, gg));
   if (bPlant) {
     // 冠层色已经按拉斯提卡写好。不要再掉进下面的杀秧锈色，也不混商品薯赭黄。
@@ -1176,10 +1176,13 @@ function rebuildPlants(cx, cz, W) {
           const ju = u + (hr() - 0.5) * al * alongJit, jv = v + (hr() - 0.5) * rowS * acrossJit;
           const x = f.dir === 0 ? f.x0 + ju : f.x0 + jv, z = f.dir === 0 ? f.z0 + jv : f.z0 + ju;
           const s = 0.8 + hr() * 0.4;
+          const yj = 0.85 + hr() * 0.3;
           const rowAng = f.dir === 0 ? 0 : Math.PI / 2;
-          tmpM.compose(tmpP.set(x, 0, z), tmpQ.setFromAxisAngle(UP, bWhole ? rowAng : hr() * 6.283), tmpS.set(s, s * (0.85 + hr() * 0.3), s));
+          const scv = shape === 'stubble' ? 1 : s;
+          const scy = shape === 'stubble' ? 1 : s * yj;
+          tmpM.compose(tmpP.set(x, 0, z), tmpQ.setFromAxisAngle(UP, bWhole ? rowAng : hr() * 6.283), tmpS.set(scv, scy, scv));
           im.setMatrixAt(n, tmpM);
-          if (shape === 'stubble') im.instanceColor.setXYZ(n, 1, 0.96, 0.84);
+          if (shape === 'stubble') im.instanceColor.setXYZ(n, 1, 0.94, 0.72);
           else { const j = 0.9 + hr() * 0.2; im.instanceColor.setXYZ(n, j, j * (0.97 + hr() * 0.06), j); }
           counts[cr.shape] = n + 1;
         }
