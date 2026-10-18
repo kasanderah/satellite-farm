@@ -195,7 +195,11 @@ function writeFields() {
     const o = (f.j * NFX + f.i) * 4;
     const v = fieldVisual(f);
     let alpha = encodeDir(v);
-    if (v.next != null && v.mask > 20 && CROPS[v.crop]?.id === 'lastika') {
+    if (v.holdSweep && v.mask > 20) {
+      const orient = v.dir > 0.5 ? 1 : 0;
+      const kept = Math.max(0, Math.min(0.015, (v.s || 0) / 1000));
+      alpha = orient + 0.37 + kept;
+    } else if (v.next != null && v.mask > 20 && CROPS[v.crop]?.id === 'lastika') {
       const orient = v.dir > 0.5 ? 1 : 0;
       alpha = orient + (Math.round(v.next) % 100) / 100;
     }
@@ -577,9 +581,29 @@ vec3 farmAlbedo(vec2 p){
     float slope = -sin(6.2832 * ph);
     float g = d.g;
     bool cut = d.b >= 0.0 && d.b < 20.0 && laneCut(uv, d.b);
-    float patchy = (n1 - 0.5) * 0.12 + (n2 - 0.5) * 0.05;
-    float pst = floor(g + 0.001);
-    if ((bWhole || bSweep) && tex == 2) {
+      float patchy = (n1 - 0.5) * 0.12 + (n2 - 0.5) * 0.05;
+      float pst = floor(g + 0.001);
+      // hold 犁地：0.37 只是哨兵。未扫过清掉蒙版，继续走开局那套填充；扫过的条才涂成一般田地。
+      bool holdPlow = abs(d.r - uBCrop) > 0.25 && d.b >= 20.0 && abs(fract(d.a) - 0.37) < 0.02;
+      bool holdSwept = holdPlow && jobSwept(uv, d.b);
+      if (holdPlow && !holdSwept) {
+        float keptS = max(fract(d.a) - 0.37, 0.0) * 1000.0;
+        d.b = keptS > 0.2 ? keptS : 0.0;
+        d.a = d.a > 0.5 ? 1.0 : 0.0;
+        cut = d.b > 0.0 && d.b < 20.0 && laneCut(uv, d.b);
+      }
+      if (holdSwept) {
+        float edgeInH = min(min(loc.x, FIELD - loc.x), min(loc.y, FIELD - loc.y));
+        float edgeFadeH = smoothstep(0.0, 1.8, edgeInH);
+        float rowPhH = uv.y / 0.75;
+        float rowSeeH = (1.0 - smoothstep(0.22, 0.55, fwidth(rowPhH))) * edgeFadeH;
+        float profH = 0.5 + 0.5 * cos(6.2832 * rowPhH);
+        float slopeH = -sin(6.2832 * rowPhH);
+        col = g_soil * (0.86 + 0.08 * profH * rowSeeH) * (1.0 + patchy);
+        gTilt = acrossW * slopeH * 0.72 * rowSeeH;
+        gRough = 0.94;
+        canopyHere = false;
+      } else if ((bWhole || bSweep) && tex == 2) {
       // 扫过的格子用下一道。做完以后蒙版回到 -1，整块回到同一个 g。
       float edgeIn = min(min(loc.x, FIELD - loc.x), min(loc.y, FIELD - loc.y));
       float edgeFade = smoothstep(0.0, 1.8, edgeIn);
@@ -997,6 +1021,13 @@ varying vec3 vCropCol;`).replace('#include <begin_vertex>', `#include <begin_ver
     d = texelFetch(uField, fij, 0); c = int(d.r + .5);
     uv = d.a > .5 ? loc.yx : loc;
     if (d.r >= 0.) {
+      bool holdPlow = abs(d.r - uBCrop) > 0.25 && d.b >= 20.0 && abs(fract(d.a) - 0.37) < 0.02;
+      bool holdSwept = holdPlow && jobSwept(uv, d.b);
+      if (holdPlow && !holdSwept) {
+        float keptS = max(fract(d.a) - 0.37, 0.0) * 1000.0;
+        d.b = keptS > 0.2 ? keptS : 0.0;
+        d.a = d.a > 0.5 ? 1.0 : 0.0;
+      }
       stage = floor(d.g + 0.001);
       bool bField = abs(d.r - uBCrop) < 0.25;
       bool bSweep = bField && d.b >= 20.0;
@@ -1019,6 +1050,7 @@ varying vec3 vCropCol;`).replace('#include <begin_vertex>', `#include <begin_ver
         if (opened) gg = 0.;
         if (stage > 8.5) gg = 0.04;
       }
+      if (holdSwept) gg = 0.;
       sc = gg;
     }
   }
@@ -1027,7 +1059,7 @@ varying vec3 vCropCol;`).replace('#include <begin_vertex>', `#include <begin_ver
   if (uCutOn > 0.5 && abs(io.x - uCut.x) < uCut.z + 0.5 && abs(io.z - uCut.y) < uCut.w + 0.5) edge = 0.;
   vec4 P = uCropP[c];
   float hs = P.x * pow(max(sc, 0.), 0.85) * edge, ws = P.w * 2.4 * (0.35 + 0.65 * sc) * edge;
-  if (uBStub > 0.5) hs *= 0.85;
+  if (uBStub > 0.5) { hs = 0.46 * sc * edge; ws = 1.7 * sc * edge; }
   transformed.xz *= ws; transformed.y *= hs;
   bool bPlant = abs(d.r - uBCrop) < 0.25;
   float visCol = d.g;
@@ -1052,7 +1084,7 @@ varying vec3 vCropCol;`).replace('#include <begin_vertex>', `#include <begin_ver
     if (stage > 4.5 && stage < 5.5) vCropCol = uCropStub[c];
   }
   float sw = sin(uTime * 1.6 + io.x * 0.31 + io.z * 0.17) + 0.5 * sin(uTime * 2.7 + io.x * 0.9);
-  transformed.x += sw * 0.06 * position.y * hs; transformed.z += sw * 0.03 * position.y * hs;`)
+  if (uBStub < 0.5) { transformed.x += sw * 0.06 * position.y * hs; transformed.z += sw * 0.03 * position.y * hs; }`)
     .replace('#include <project_vertex>', CURVE_PROJECT);
   if (!depth) s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vCropCol;')
     .replace('#include <color_fragment>', '#include <color_fragment>\n diffuseColor.rgb *= vCropCol * 1.08; { float lm = dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722)); diffuseColor.rgb = max(mix(vec3(lm), diffuseColor.rgb, 1.15), 0.); }');
@@ -1067,7 +1099,7 @@ cropDepth.onBeforeCompile = s => {   // 阴影也要按生长度和收割状态�
 const plantMeshes = {};
 for (const sh of SHAPES) {
   const im = new THREE.InstancedMesh(plantGeometry(sh), MAT.crop, PLANT_CAP);
-  im.count = 0; im.castShadow = true; im.receiveShadow = true; im.frustumCulled = false; im.customDepthMaterial = cropDepth;
+  im.count = 0; im.castShadow = sh !== 'stubble'; im.receiveShadow = true; im.frustumCulled = false; im.customDepthMaterial = cropDepth;
   const col = new Float32Array(PLANT_CAP * 3); im.instanceColor = new THREE.InstancedBufferAttribute(col, 3);
   scene.add(im); plantMeshes[sh] = im;
   im.userData.shape = sh;
@@ -1093,8 +1125,8 @@ function rebuildPlants(cx, cz, W) {
   for (let j = fj0; j <= fj1; j++) for (let i = fi0; i <= fi1; i++) {
     const f = fields[j * NFX + i]; if (f.crop < 0) continue;
     if (viewLayer !== 'surface' && f.inPlot) continue;
-    // hold 仍用生成时的旧作物。已经进入 B 阶段的田改用拉斯提卡的网格和株行距。
-    const bActive = !!(f.bUnit && f.bUnit.look && (f.bUnit.look !== 'hold' || f.bUnit.sweep));
+    // hold 仍用生成时的旧作物，犁地扫过也不换成拉斯提卡株型。已经离开 hold 的田改用拉斯提卡的网格和株行距。
+    const bActive = !!(f.bUnit && f.bUnit.look && f.bUnit.look !== 'hold');
     const vis = PLANT_CROPS.lastika.visual;
     const sweepLook = f.bUnit?.sweep?.look;
     // 残茬跟垄走：沿行距（跨行）和株距（沿垄，与收割趟同一条）铺。收割扫过才显示，没割的地方仍是冠层。
@@ -1147,7 +1179,8 @@ function rebuildPlants(cx, cz, W) {
           const rowAng = f.dir === 0 ? 0 : Math.PI / 2;
           tmpM.compose(tmpP.set(x, 0, z), tmpQ.setFromAxisAngle(UP, bWhole ? rowAng : hr() * 6.283), tmpS.set(s, s * (0.85 + hr() * 0.3), s));
           im.setMatrixAt(n, tmpM);
-          const j = 0.9 + hr() * 0.2; im.instanceColor.setXYZ(n, j, j * (0.97 + hr() * 0.06), j);
+          if (shape === 'stubble') im.instanceColor.setXYZ(n, 1, 0.96, 0.84);
+          else { const j = 0.9 + hr() * 0.2; im.instanceColor.setXYZ(n, j, j * (0.97 + hr() * 0.06), j); }
           counts[cr.shape] = n + 1;
         }
       }
@@ -3522,6 +3555,7 @@ window.__farm = {
       i: f?.i, j: f?.j,
       look: f?.bUnit?.look || null,
       g: vis?.g, mask: vis?.mask, next: vis?.next ?? null,
+      crop: vis?.crop ?? null, hold: !!vis?.holdSweep,
       rig: rig && { x: rig.x, z: rig.z, ang: rig.ang, busy: !!rig.busy, doing: rig.bRead?.doing || '', frac: rig.bRead?.frac || 0 },
     };
   },

@@ -111,6 +111,9 @@ float canopyAt(vec2 p){
   vec4 d = texelFetch(uField, fij, 0);
   if (d.r < 0.) return 0.;
   vec2 uv = d.a > .5 ? loc.yx : loc;
+  bool holdPlow = abs(d.r - uBCrop) > 0.25 && d.b >= 20.0 && abs(fract(d.a) - 0.37) < 0.02;
+  if (holdPlow && jobSwept(uv, d.b)) return 0.0;
+  if (holdPlow) { float keptS = max(fract(d.a) - 0.37, 0.0) * 1000.0; d.b = keptS > 0.2 ? keptS : 0.0; }
   bool bField = abs(d.r - uBCrop) < 0.25;
   if (bField) {
     float visG = d.g;

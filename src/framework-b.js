@@ -92,20 +92,22 @@ export function lookG(look, growFrac = 0) {
 }
 
 // 空闲和做完：mask -1，整块一个颜色。作业中 sweep 把机具幅宽和趟进度交给着色器，next 是扫过之后的样子。
-// 没下过第一道活的田 look 是 hold，平时仍留旧画面。犁地一开始也要刷：未扫过按未整地，扫过按下一道。
+// 没下过第一道活的田 look 是 hold，空闲仍留开局定格冠层。犁地开工不换底：keep 表示未扫过继续用那套填充，扫过才换成下一道。做完整块才定稿。
 export function fieldShader(unit) {
   if (!unit) return null;
   const sweep = unit.sweep;
   const sweeping = !!(sweep && sweep.width > 0);
-  let g = lookG(unit.look, unit.growFrac || 0);
-  if (g == null && sweeping) g = 0;
-  if (g == null) return null;
+  const g = lookG(unit.look, unit.growFrac || 0);
+  if (g == null && !sweeping) return null;
   if (sweeping) {
     const widthDm = Math.max(1, Math.round(sweep.width * 10));
     const along = Math.max(0, Math.min(1, sweep.alongFrac || 0));
     const prog = (sweep.pass || 0) + along;
-    const next = lookG(sweep.look, 0);
-    return { g, mask: widthDm * 100 + prog, next: next == null ? g : next };
+    const nextG = lookG(sweep.look, 0);
+    const next = nextG == null ? (g == null ? 0 : g) : nextG;
+    const mask = widthDm * 100 + prog;
+    if (g == null) return { keep: true, mask, next };
+    return { g, mask, next };
   }
   return { g, mask: -1 };
 }

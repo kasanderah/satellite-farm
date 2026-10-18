@@ -7,6 +7,7 @@ import {
 } from '../src/framework-b.js';
 import { installShippedLastika } from '../src/lastika-stage.js';
 import { HUD_VERSION } from '../src/version.js';
+import { fieldVisual, CROPS } from '../src/_shared.js';
 
 function slice() {
   const farm = createFarm();
@@ -166,9 +167,25 @@ test('整块颜色和地块编号', () => {
     look: 'hold',
     sweep: { width: 16, pass: 2, alongFrac: 0.4, look: 'general' },
   });
-  assert.equal(prepSweep.g, 0);
+  assert.equal(prepSweep.keep, true);
+  assert.equal(prepSweep.g, undefined);
   assert.equal(prepSweep.next, 1);
   assert.ok(Math.abs(prepSweep.mask - (160 * 100 + 2.4)) < 1e-6, prepSweep.mask);
+  const wheat = CROPS.findIndex(c => c.id === 'wheat');
+  const held = fieldVisual({
+    crop: wheat,
+    dir: 0,
+    state: 2,
+    g: 1,
+    s: 0,
+    live: false,
+    bUnit: { look: 'hold', sweep: { width: 16, pass: 2, alongFrac: 0.4, look: 'general' } },
+  });
+  assert.equal(held.holdSweep, true);
+  assert.equal(held.crop, wheat);
+  assert.equal(held.g, 1);
+  assert.equal(held.next, 1);
+  assert.notEqual(CROPS[held.crop].id, 'lastika');
   const addr = plotAddress(13, 9, 10, 10);
   assert.equal(addr.hub, HUB_PLOT);
   assert.equal(addr.code, 'P(3,-1)');
@@ -200,6 +217,7 @@ test('作业中按幅宽刷下一道，地头有转弯，做完整块定稿', ()
         look: 'raw',
         sweep: { width: order.width, pass: order.pose.pass, alongFrac: 1, look: 'general' },
       });
+      assert.equal(shade.keep, undefined);
       assert.equal(shade.g, 0);
       assert.equal(shade.next, 1);
       assert.ok(Math.abs(shade.mask - (160 * 100 + order.pose.pass + 1)) < 1e-6, shade.mask);
@@ -210,6 +228,7 @@ test('作业中按幅宽刷下一道，地头有转弯，做完整块定稿', ()
         look: 'raw',
         sweep: { width: order.width, pass: order.pose.pass, alongFrac: order.pose.alongFrac, look: 'general' },
       });
+      assert.equal(shade.keep, undefined);
       assert.equal(shade.next, 1);
       assert.ok(shade.mask > 20);
       assert.equal(farm.fields.get('a').look, 'raw');
@@ -225,7 +244,7 @@ test('作业中按幅宽刷下一道，地头有转弯，做完整块定稿', ()
 });
 
 test('拉斯提卡阶段和版本戳来自同一份定义', () => {
-  assert.equal(HUD_VERSION, '环穗 v2.1');
+  assert.equal(HUD_VERSION, '环穗 v2.2');
   const crop = installShippedLastika();
   assert.equal(crop.name, '拉斯提卡');
   assert.deepEqual(crop.stages.map(s => s.name), ['播种', '成熟', '收割', '收拾']);

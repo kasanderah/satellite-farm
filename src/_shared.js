@@ -652,10 +652,15 @@ function stageBlend(def, day) {
 }
 export function fieldVisual(f) {
   const shade = f?.bUnit ? fieldShader(f.bUnit) : null;
-  if (shade) {
+  if (shade && !shade.keep) {
     const lastika = CROPS.findIndex(c => c.id === 'lastika');
     return { crop: lastika, g: shade.g, s: 0, dir: f.dir, mask: shade.mask, next: shade.next };
   }
+  const vis = fieldVisualHeld(f);
+  if (!shade?.keep) return vis;
+  return { ...vis, mask: shade.mask, next: shade.next, holdSweep: true };
+}
+function fieldVisualHeld(f) {
   const id = f && f.crop >= 0 ? CROPS[f.crop]?.id : null;
   const potato = id === 'potato';
   if (f?.failed === 'rot') {

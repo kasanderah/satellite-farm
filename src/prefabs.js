@@ -425,12 +425,19 @@ export function plantGeometry(shape) {
     P.push(blob(new THREE.IcosahedronGeometry(0.22, 0), [1, 0.8, 1], 0.55, 0.85));
   } else if (shape === 'tuft') {  // 稻/苜蓿：直立细叶丛
     for (let i = 0; i < 6; i++) P.push(leaf(0.05, 0.9 + (i % 2) * 0.1, 0.12, i * 1.05, 0.12 + (i % 3) * 0.08));
-  } else if (shape === 'stubble') { // 收割后的秸秆残茬。高度按作物株高再缩一截，近景要能认出是一丛茬。
-    for (let i = 0; i < 7; i++) {
-      const a = i * 0.9, r = 0.05 + (i % 3) * 0.028;
-      const h = 0.85 + (i % 3) * 0.22;
-      const stalk = blob(new THREE.CylinderGeometry(0.02, 0.032, h, 4), [1, 1, 1], h * 0.5, 1.05);
+  } else if (shape === 'stubble') { // 短粗茬 + 沿垄倒下的碎秸。细长竖针在斜视里会收成深色 V/Y。
+    for (let i = 0; i < 5; i++) {
+      const a = i * 1.26, r = 0.045 + (i % 2) * 0.03;
+      const h = 0.22 + (i % 3) * 0.07;
+      const rad = 0.07 + (i % 3) * 0.016;
+      const stalk = blob(new THREE.CylinderGeometry(rad * 0.82, rad, h, 5), [1, 1, 1], h * 0.5, 1.12);
       P.push(stalk.translate(Math.cos(a) * r, 0, Math.sin(a) * r));
+    }
+    for (let i = 0; i < 3; i++) {
+      const chip = new THREE.BoxGeometry(0.36, 0.03, 0.09);
+      chip.rotateY(i * 0.62 + 0.15);
+      blob(chip, [1, 1, 1], 0.02, 1.2);
+      P.push(chip.translate((i - 1) * 0.07, 0, (i - 1) * 0.045));
     }
   } else {                        // rosette 甘蓝：外叶杯 + 球心
     for (let i = 0; i < 6; i++) P.push(leaf(0.5, 0.55, 0.0, i * 1.047, 1.05, 0.05, 0.45, 0.95));
