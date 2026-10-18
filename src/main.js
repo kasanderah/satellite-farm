@@ -26,6 +26,7 @@ import { CULT_EMPTY } from './lab-catalog.js';
 import { makeColony } from './colony-art.js';
 import { bootSlice, tickSlice, prepField, plantCrop, dockOf } from './b-bind.js';
 import { PLANT_CROPS } from './framework-b.js';
+import { HUD_VERSION } from './version.js';
 
 const Q = new URLSearchParams(location.search);
 const VIEW = Q.get('view') || '', PREWARM = +Q.get('t') || 0, NOPOST = Q.has('nopost'), SHOWFPS = Q.has('fps');
@@ -3443,6 +3444,7 @@ function frame(now) {
   requestAnimationFrame(frame);
 }
 if (SHOWFPS) document.body.classList.add('showfps');
+{ const rev = document.getElementById('buildrev'); if (rev) rev.textContent = HUD_VERSION; }
 window.__scene = scene;
 if (Q.has('nohud')) document.body.classList.add('nohud');
 requestAnimationFrame(frame);

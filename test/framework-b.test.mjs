@@ -5,6 +5,8 @@ import {
   GROW_SECONDS, HUB_PLOT, plotAddress, lookG, fieldShader, hitchStub,
   createFarm, addField, addMachine, requestPrep, requestPlant, stepFarm, fieldWork, describeField,
 } from '../src/framework-b.js';
+import { installShippedLastika } from '../src/lastika-stage.js';
+import { HUD_VERSION } from '../src/version.js';
 
 function slice() {
   const farm = createFarm();
@@ -169,4 +171,17 @@ test('整块颜色和地块编号', () => {
   until(farm, () => farm.fields.get('a').ground === 'general');
   assert.match(describeField(farm, 'a').stat, /一般田地/);
   assert.match(describeField(farm, 'a').stat, /拉斯提卡/);
+});
+
+test('拉斯提卡阶段和版本戳来自同一份定义', () => {
+  assert.equal(HUD_VERSION, '环穗 v1');
+  const crop = installShippedLastika();
+  assert.equal(crop.name, '拉斯提卡');
+  assert.deepEqual(crop.stages.map(s => s.name), ['播种', '成熟', '收割', '收拾']);
+  assert.deepEqual(crop.stages.map(s => s.kind), ['hard', 'time', 'hard', 'hard']);
+  assert.equal(crop.growSeconds, 36);
+  assert.equal(crop.visual.row, 0.75);
+  assert.equal(crop.visual.height, 0.7);
+  assert.equal(crop.visual.along, 0.36);
+  assert.equal(crop.visual.tex, 'ridges');
 });

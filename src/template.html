@@ -62,6 +62,7 @@ body.nohud .hud,body.nohud #labels{opacity:0!important}
 #sheet .rowbtn b{display:block;font-weight:500;font-size:13px;letter-spacing:.12em}
 #sheet .rowbtn small{display:block;color:var(--mut);font-size:10px;letter-spacing:.04em;margin-top:2px}
 #scale{bottom:30px;right:24px;display:flex;align-items:center;gap:10px;font-size:11px;letter-spacing:.16em}
+#buildrev{bottom:8px;right:24px;font-size:10px;letter-spacing:.18em;color:var(--mut);text-align:right}
 #scalebar{height:5px;border:1px solid var(--fg);border-top:0}
 /* 阶段图例并进底栏信息框。这块不再单独占一角。 */
 #legend{display:none}
@@ -228,5 +229,6 @@ body.underground #dock{display:none}
 <div class="hud panel hit" id="planmenu"></div>
 <div id="viewer"><div class="bar"><div><h2>资产</h2><div class="sub">当前的薯田阶段、机器和田块。每张卡片是名字加上现在的样子。点一张就能指着它改。这是查看，不能上传。</div></div><button type="button" id="viewer-close">关闭</button></div><div class="sec">商品薯阶段</div><div class="grid" id="view-stages"></div><div class="sec">机器</div><div class="grid" id="view-machines"></div><div class="sec">田块</div><div class="grid" id="view-tiles"></div></div>
 <div class="hud" id="scale"><span id="scaletxt"></span><div id="scalebar"></div></div>
+<div class="hud" id="buildrev">环穗 v1</div>
 <script>__BUNDLE__</script>
 </body></html>

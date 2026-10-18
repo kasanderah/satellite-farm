@@ -15,6 +15,7 @@ import {
   OP_MACHINE_CHOICES, addStageOp, removeStageOp, patchStageOp,
 } from './field-stages.js';
 import potatoBRaw from '../data/field-stages/potato-b.json' with { type: 'json' };
+import lastikaRaw from '../data/field-stages/lastika.json' with { type: 'json' };
 
 const PREVIEW = { width: 36, length: 28 };
 // 一条垄至少这么多段，陡壁和平顶才不会被 10 来个顶点收成圆丘。行数最多 16。
@@ -50,6 +51,10 @@ const HELP = `打开：左侧「田间 / 阶段编辑器」。
 
 function potatoDoc() {
   return parseFieldStageDoc(structuredClone(potatoBRaw));
+}
+
+function lastikaDoc() {
+  return parseFieldStageDoc(structuredClone(lastikaRaw));
 }
 
 function cropVisual(crop) {
@@ -189,8 +194,8 @@ function makeMachine() {
 export function createFieldWorkshop(els) {
   const { panel, bar } = els;
   const builtin = CROPS.filter(c => c.plantable).map(cropVisual);
-  let docs = { potato: potatoDoc() };
-  let cropId = 'potato';
+  let docs = { lastika: lastikaDoc(), potato: potatoDoc() };
+  let cropId = 'lastika';
   let sim = null;
   let playing = false;
   let speed = 1;
@@ -230,6 +235,7 @@ export function createFieldWorkshop(els) {
       }
       const indexed = indexCropLibrary(pairs);
       if (!indexed.potato) indexed.potato = docs.potato;
+      if (!indexed.lastika) indexed.lastika = lastikaDoc();
       docs = indexed;
       if (raw.cropId && docs[raw.cropId]) cropId = raw.cropId;
     } catch { /* 空浏览器 */ }
@@ -569,7 +575,11 @@ export function createFieldWorkshop(els) {
   }
 
   function cropOptions() {
-    const ids = PLANTABLE_CROP_IDS.filter(id => builtin.some(c => c.id === id) || docs[id]);
+    const ids = [];
+    if (docs.lastika) ids.push('lastika');
+    for (const id of PLANTABLE_CROP_IDS) {
+      if (!ids.includes(id) && (builtin.some(c => c.id === id) || docs[id])) ids.push(id);
+    }
     const extra = Object.keys(docs).filter(id => !ids.includes(id)).sort();
     ids.push(...extra);
     const sel = panel.querySelector('#fs-crop');
@@ -587,7 +597,9 @@ export function createFieldWorkshop(els) {
     const el = panel.querySelector('#fs-editing');
     if (!el) return;
     const plantable = PLANTABLE_CROP_IDS.includes(cropId);
-    el.textContent = plantable
+    el.textContent = cropId === 'lastika'
+      ? '正在编辑拉斯提卡。主游戏框架 B 读这四段：播种、成熟、收割、收拾。成熟的天数是 1× 下的生长秒数。'
+      : plantable
       ? '正在编辑 ' + cropId + '。这是主游戏种植位。显示名只改文案，不改 id。'
       : '正在编辑 ' + cropId + '。仅工坊可编辑，主游戏种植菜单不会出现。';
   }

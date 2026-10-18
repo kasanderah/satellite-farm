@@ -9,6 +9,7 @@
 import { FIELD_STAGE_SCHEMA, FIELD_STAGE_STORE } from './field-stages.js';
 import { cropDef, installPotatoProfile, potatoProfileFromRaw, shippedPotatoProfile, surfaceProfileFromRaw, installSurfaceProfile } from './surface-crops.js';
 import potatoBRaw from '../data/field-stages/potato-b.json' with { type: 'json' };
+import { installLastikaDoc, installShippedLastika } from './lastika-stage.js';
 
 export { FIELD_STAGE_STORE };
 
@@ -204,7 +205,17 @@ export function resumePotatoStage(storage) {
 // stagesParam 为 repo 时忽略浏览器里的工坊存档。其余值留给地址栏上的 JSON 地址，由页面自己去取。
 // potatoSuspended 是「仓库默认」留下的：土豆文档还在，这一轮先不套上。重读会先清掉这个标记。
 // 这三条都装仓库里的土豆B。坏掉的 JSON 同样退回土豆B，避免可玩页停在占位链上。
+function bootLastika(storage, stagesParam) {
+  if (stagesParam === 'repo') return installShippedLastika();
+  const payload = readStageStore(storage);
+  const doc = payload && !payload.__parseError ? payload.crops?.lastika : null;
+  if (!doc || !Array.isArray(doc.stages)) return installShippedLastika();
+  try { return installLastikaDoc(doc); }
+  catch { return installShippedLastika(); }
+}
+
 export function bootFieldStageSource(storage, stagesParam) {
+  bootLastika(storage, stagesParam);
   if (stagesParam === 'repo') {
     installShippedPotato();
     return { ok: true, origin: 'repo', skipped: true };
