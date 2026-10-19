@@ -78,7 +78,6 @@ const U = {
   uBYoung: { value: C('oliveDp').clone().lerp(C('moss'), 0.35) },
   uBRipe: { value: C('oliveDp').clone().lerp(C('olive'), 0.62) },
   uBStraw: { value: C('straw') },
-  uBStub: { value: 0 },
   uBCrop: { value: CROPS.findIndex(c => c.id === 'lastika') },
 };
 const POT_SLOTS = POTATO_PAINT_SLOTS;
@@ -1005,13 +1004,21 @@ vec3 wallAlbedo(){
 // ---------------- 近景单株（只在镜头附近的窗口里实例化；生长 / 收割由着色器读田块纹理决定） ----------------
 const SHAPES = ['ear', 'stalk', 'bush', 'tuft', 'rosette', 'stubble'];
 const PLANT_CAP = 60000;
-function plantPatch(s, depth) {
+function plantPatch(s, depth, stub) {
   Object.assign(s.uniforms, U);
+  // 残茬和冠层各编一份。不能靠共享 uniform 在 onBeforeRender 里切换：同材质只在第一次绑定上传 uniform。
+  const gate = stub
+    ? 'gg = straw ? 1.0 : 0.0;'
+    : 'gg = (straw || visG < 1.5) ? 0.0 : smoothstep(1.6, 4.2, visG);';
+  const stubScale = stub ? 'hs = 1.0 * sc * edge; ws = 1.15 * sc * edge;' : '';
+  const strawTint = stub ? 'vec3(0.86, 0.68, 0.32)' : 'mix(uBStraw, vec3(0.93, 0.86, 0.62), 0.45)';
+  const sway = stub ? '' : `float sw = sin(uTime * 1.6 + io.x * 0.31 + io.z * 0.17) + 0.5 * sin(uTime * 2.7 + io.x * 0.9);
+  transformed.x += sw * 0.06 * position.y * hs; transformed.z += sw * 0.03 * position.y * hs;`;
   s.vertexShader = s.vertexShader.replace('#include <common>', `#include <common>
 ${CURVE_DECL}
 ${NOISE}
 ${FARM}
-uniform float uTime, uCutOn, uPotOn, uBStub; uniform vec4 uPlantWin, uCut; uniform vec3 uBYoung, uBRipe, uBStraw;
+uniform float uTime, uCutOn, uPotOn; uniform vec4 uPlantWin, uCut; uniform vec3 uBYoung, uBRipe, uBStraw;
 uniform sampler2D uPotTint;
 varying vec3 vCropCol;`).replace('#include <begin_vertex>', `#include <begin_vertex>
   vec4 io = modelMatrix * instanceMatrix * vec4(0., 0., 0., 1.);
@@ -1039,8 +1046,7 @@ varying vec3 vCropCol;`).replace('#include <begin_vertex>', `#include <begin_ver
       speck = bField ? 0.0 : step(hash12(floor(io.xz * 0.45)), frac);
       if (bField) {
         // 残茬网格只在秸秆档长出来。冠层网格在扫过收割带后藏起来，不涂锈色。
-        if (uBStub > 0.5) gg = straw ? 1.0 : 0.0;
-        else gg = (straw || visG < 1.5) ? 0.0 : smoothstep(1.6, 4.2, visG);
+        ${gate}
       } else {
         gg = mix(growthVis(stage + 0.2), growthVis(stage + 1.2), speck);
         if (stage < 1.5) gg = 0.;
@@ -1059,7 +1065,7 @@ varying vec3 vCropCol;`).replace('#include <begin_vertex>', `#include <begin_ver
   if (uCutOn > 0.5 && abs(io.x - uCut.x) < uCut.z + 0.5 && abs(io.z - uCut.y) < uCut.w + 0.5) edge = 0.;
   vec4 P = uCropP[c];
   float hs = P.x * pow(max(sc, 0.), 0.85) * edge, ws = P.w * 2.4 * (0.35 + 0.65 * sc) * edge;
-  if (uBStub > 0.5) { hs = 1.0 * sc * edge; ws = 1.15 * sc * edge; }
+  ${stubScale}
   transformed.xz *= ws; transformed.y *= hs;
   bool bPlant = abs(d.r - uBCrop) < 0.25;
   float visCol = d.g;
@@ -1067,7 +1073,7 @@ varying vec3 vCropCol;`).replace('#include <begin_vertex>', `#include <begin_ver
   bool strawCol = bPlant && visCol >= 6.5 && visCol < 8.5;
   float growB = clamp((visCol - 2.0) / 3.0, 0.0, 1.0);
   vCropCol = bPlant
-    ? (strawCol ? (uBStub > 0.5 ? vec3(0.86, 0.68, 0.32) : mix(uBStraw, vec3(0.93, 0.86, 0.62), 0.45)) : mix(uBYoung, uBRipe, smoothstep(0.12, 0.9, growB)))
+    ? (strawCol ? ${strawTint} : mix(uBYoung, uBRipe, smoothstep(0.12, 0.9, growB)))
     : mix(uCropYoung[c], uCropRipe[c], smoothstep(0.45, 1.0, gg));
   if (bPlant) {
     // 冠层色已经按拉斯提卡写好。不要再掉进下面的杀秧锈色，也不混商品薯赭黄。
@@ -1083,27 +1089,34 @@ varying vec3 vCropCol;`).replace('#include <begin_vertex>', `#include <begin_ver
     if (stage > 3.5 && stage < 4.5 && position.y > 0.48) vCropCol = vec3(0.76, 0.64, 0.86);
     if (stage > 4.5 && stage < 5.5) vCropCol = uCropStub[c];
   }
-  float sw = sin(uTime * 1.6 + io.x * 0.31 + io.z * 0.17) + 0.5 * sin(uTime * 2.7 + io.x * 0.9);
-  if (uBStub < 0.5) { transformed.x += sw * 0.06 * position.y * hs; transformed.z += sw * 0.03 * position.y * hs; }`)
+  ${sway}`)
     .replace('#include <project_vertex>', CURVE_PROJECT);
   if (!depth) s.fragmentShader = s.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vCropCol;')
     .replace('#include <color_fragment>', '#include <color_fragment>\n diffuseColor.rgb *= vCropCol * 1.08; { float lm = dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722)); diffuseColor.rgb = max(mix(vec3(lm), diffuseColor.rgb, 1.15), 0.); }');
 }
-MAT.crop.onBeforeCompile = s => plantPatch(s, false);
+MAT.crop.onBeforeCompile = s => plantPatch(s, false, false);
 const cropDepth = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, side: THREE.DoubleSide });
 cropDepth.onBeforeCompile = s => {   // 阴影也要按生长度和收割状态缩放（不弯曲：阴影坐标用未弯曲的世界）
   Object.assign(s.uniforms, U);
-  plantPatch(s, true);
+  plantPatch(s, true, false);
+  s.vertexShader = s.vertexShader.replace(CURVE_PROJECT, '#include <project_vertex>');
+};
+const stubMat = MAT.crop.clone();
+stubMat.onBeforeCompile = s => plantPatch(s, false, true);
+const stubDepth = cropDepth.clone();
+stubDepth.onBeforeCompile = s => {
+  Object.assign(s.uniforms, U);
+  plantPatch(s, true, true);
   s.vertexShader = s.vertexShader.replace(CURVE_PROJECT, '#include <project_vertex>');
 };
 const plantMeshes = {};
 for (const sh of SHAPES) {
-  const im = new THREE.InstancedMesh(plantGeometry(sh), MAT.crop, PLANT_CAP);
-  im.count = 0; im.castShadow = sh !== 'stubble'; im.receiveShadow = true; im.frustumCulled = false; im.customDepthMaterial = cropDepth;
+  const stub = sh === 'stubble';
+  const im = new THREE.InstancedMesh(plantGeometry(sh), stub ? stubMat : MAT.crop, PLANT_CAP);
+  im.count = 0; im.castShadow = !stub; im.receiveShadow = true; im.frustumCulled = false; im.customDepthMaterial = stub ? stubDepth : cropDepth;
   const col = new Float32Array(PLANT_CAP * 3); im.instanceColor = new THREE.InstancedBufferAttribute(col, 3);
   scene.add(im); plantMeshes[sh] = im;
   im.userData.shape = sh;
-  im.onBeforeRender = () => { U.uBStub.value = sh === 'stubble' ? 1 : 0; };
 }
 const tmpM = new THREE.Matrix4(), tmpQ = new THREE.Quaternion(), tmpS = new THREE.Vector3(), tmpP = new THREE.Vector3(), UP = new THREE.Vector3(0, 1, 0);
 let hseed = 1; const hr = () => (hseed = (hseed * 16807) % 2147483647) / 2147483647;

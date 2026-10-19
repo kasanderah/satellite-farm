@@ -404,11 +404,14 @@ function blob(geo, s, y, shade) {
   const n = geo.attributes.position.count; geo.setAttribute('color', new THREE.Float32BufferAttribute(new Array(n * 3).fill(shade), 3));
   return geo.index ? geo : geo;
 }
-function finish(parts) {
+function finish(parts, biasUp = true) {
   const ps = parts.map(p => { p.deleteAttribute('normal'); return p.index ? p.toNonIndexed() : p; });
   const g = mergeGeometries(ps); g.computeVertexNormals();
-  // 叶片法线向上偏，避免背面发黑（植被常用做法）
-  const n = g.attributes.normal; for (let i = 0; i < n.count; i++) { const v = V(n.getX(i), n.getY(i), n.getZ(i)); if (v.y < 0) v.negate(); v.lerp(V(0, 1, 0), 0.55).normalize(); n.setXYZ(i, v.x, v.y, v.z); }
+  // 叶片法线向上偏，避免背面发黑。残茬是圆柱和薄片，留真实法线，四面才都受光。
+  if (biasUp) {
+    const n = g.attributes.normal;
+    for (let i = 0; i < n.count; i++) { const v = V(n.getX(i), n.getY(i), n.getZ(i)); if (v.y < 0) v.negate(); v.lerp(V(0, 1, 0), 0.55).normalize(); n.setXYZ(i, v.x, v.y, v.z); }
+  }
   return g;
 }
 export function plantGeometry(shape) {
@@ -443,7 +446,7 @@ export function plantGeometry(shape) {
     for (let i = 0; i < 6; i++) P.push(leaf(0.5, 0.55, 0.0, i * 1.047, 1.05, 0.05, 0.45, 0.95));
     P.push(blob(new THREE.IcosahedronGeometry(0.3, 1), [1, 0.85, 1], 0.38, 1.1));
   }
-  return finish(P);
+  return finish(P, shape !== 'stubble');
 }
 
 // ---------------- 传感灯杆（14 m） ----------------
