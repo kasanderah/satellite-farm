@@ -146,6 +146,21 @@ test('成熟段软作业记完成度，窗口过了挂起，不锁田也不改�
   assert.equal(field.lock, null);
   assert.equal(field.look, 'sown');
   assert.equal(field.plant.stageId, 'mature');
+  const softOrder = farm.orders.find(order => order.jobId === 'topdress');
+  assert.equal(softOrder.passCap, 1);
+  assert.equal(softOrder.pose.passes, 1);
+  assert.equal(JOBS.topdress.look, '不影响');
+  assert.equal(JOBS.topdress.sweep, 'mature');
+  assert.equal(JOBS.topdress.passes, 1);
+  const stripe = fieldShader({
+    look: 'sown',
+    growFrac: field.plant.grow / field.plant.need,
+    sweep: { width: softOrder.width, pass: softOrder.pose.pass, alongFrac: softOrder.pose.alongFrac, look: 'mature' },
+  });
+  assert.equal(stripe.next, lookG('mature'));
+  assert.ok(Math.abs(stripe.g - lookG('sown', field.plant.grow / field.plant.need)) < 1e-6);
+  assert.notEqual(Math.round(stripe.next), Math.round(stripe.g));
+  assert.ok(stripe.mask > 20);
   const live = describeField(farm, 'a').jobs.find(job => job.id === 'topdress');
   assert.equal(live.status, '执行中');
   assert.ok(live.pct > 0 && live.pct < 100, live.pct);
@@ -300,7 +315,7 @@ test('作业中按幅宽刷下一道，地头有转弯，做完整块定稿', ()
 });
 
 test('拉斯提卡阶段和版本戳来自同一份定义', () => {
-  assert.equal(HUD_VERSION, '环穗 v3');
+  assert.equal(HUD_VERSION, '环穗 v3.1');
   const doc = parseFieldStageDoc(structuredClone(lastikaRaw));
   const windows = jobWindows(doc, alignFieldCalendar(doc)).filter(item => item.op.kind === 'optional');
   assert.deepEqual(windows.map(item => item.op.id), ['topdress', 'hill']);

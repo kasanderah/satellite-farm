@@ -2,6 +2,7 @@
 // 整地和种植是两条平行的阶段链。硬作业锁住整块田，做完才改地面样子。
 // 作业进行中可以按幅宽扫过下一道样子；做完蒙版拿掉，整块定稿。
 // 软作业挂在阶段上，只报完成或错过，不写下一阶段。窗口过了记过期，不锁田。
+// 做完不改整块样子。作业进行中跟车蒙版仍刷 sweep 那一档，和硬作业同一条刷色。
 
 export const HUB_PLOT = 'C0';
 
@@ -32,9 +33,10 @@ export const JOBS = {
   sow: { id: 'sow', name: '播种', kind: 'hard', caps: ['播种'], look: 'sown' },
   harvest: { id: 'harvest', name: '收割', kind: 'hard', caps: ['收割'], look: 'harvested' },
   tidy: { id: 'tidy', name: '收拾', kind: 'hard', caps: ['收拾'], look: 'general' },
-  // look 为不影响：做完不改田面，阶段图自己走。窗口写在阶段上，不写在这里。
-  topdress: { id: 'topdress', name: '追肥', kind: 'soft', caps: ['追肥'], look: '不影响' },
-  hill: { id: 'hill', name: '培土', kind: 'soft', caps: ['培土'], look: '不影响' },
+  // look 为不影响：做完不改田面，阶段图自己走。sweep 只给跟车蒙版，扫过的一条用这个样子。
+  // passes 是软作业趟数。1 趟才能落进 36 秒成熟；硬作业不写 passes，仍铺满整块。
+  topdress: { id: 'topdress', name: '追肥', kind: 'soft', caps: ['追肥'], look: '不影响', sweep: 'mature', passes: 1 },
+  hill: { id: 'hill', name: '培土', kind: 'soft', caps: ['培土'], look: '不影响', sweep: 'mature', passes: 1 },
 };
 
 export const PREP_RECIPES = {
@@ -274,7 +276,7 @@ function dispatch(farm) {
       progress: 0,
       phase: 'cruise',
       pose: null,
-      passCap: soft ? 1 : 0,
+      passCap: soft ? Math.max(1, job.passes || 1) : 0,
     };
     writePose(farm, order);
     if (!soft) field.lock = order.id;

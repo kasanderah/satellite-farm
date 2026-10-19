@@ -169,7 +169,7 @@ function syncFields() {
         width: order.width,
         pass: order.pose.pass,
         alongFrac: order.pose.alongFrac || 0,
-        look: JOBS[order.jobId].look,
+        look: JOBS[order.jobId].sweep || JOBS[order.jobId].look,
       };
     }
   }
