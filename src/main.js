@@ -2201,9 +2201,11 @@ function rigLine(r) {
   }
   const pct = Math.round((info.charge ?? 1) * 100);
   const width = fleetWidth(r);
-  if (!r.busy && r.mode !== 'charge') return `停在机库 · 电 ${pct}%${width}`;
+  const role = r.bDrive && r.role ? `${r.role} · ` : '';
+  const caps = r.bDrive && r.caps?.length ? ` · ${r.caps.join('、')}` : '';
+  if (!r.busy && r.mode !== 'charge') return `${role}停在机库 · 电 ${pct}%${width}${caps}`;
   const where = r.f ? ' · ' + fieldCode(r.f) : '';
-  return `${info.doing}${where} · 电 ${pct}%${width}`;
+  return `${role}${info.doing}${where} · 电 ${pct}%${width}${caps}`;
 }
 function paintLock() {
   const el = $('rigread');
@@ -3434,9 +3436,14 @@ function frame(now) {
   };
   if (rigShown) for (const r of rigs) {
     if (inCut(r.x, r.z, 8)) continue;
-    if (r.bDrive && rigMesh.omni) {
+    if (r.bDrive) {
       r.va = r.ang;
-      showRig('omni', r.x, r.z, r.va);
+      const mesh = r.kind === 'tractor' ? 'tractor_gen' : 'omni';
+      showRig(mesh, r.x, r.z, r.va);
+      if (mesh === 'tractor_gen' && r.impl && hitchOffset[r.impl] != null) {
+        const ox = hitchOffset[r.impl];
+        showRig(r.impl, r.x + ox * Math.cos(r.va), r.z + ox * Math.sin(r.va), r.va);
+      }
       if (r.busy && d < 700) for (let e = 0; e < 2; e++) emitDust(r.x, r.z, r.va);
       continue;
     }
@@ -3604,7 +3611,7 @@ window.__farm = {
   snapshot: exportSnapshot, plant: () => doPlant(), prep: () => doPrep(), select: (i, j) => selectField(fieldAt(i, j)),
   b() {
     const f = selected;
-    const rig = rigs.find(r => r.bDrive) || null;
+    const rig = rigs.find(r => r.bDrive && r.busy) || rigs.find(r => r.bDrive) || null;
     const vis = f ? fieldVisual(f) : null;
     return {
       dock: f ? dockOf(f) : null,

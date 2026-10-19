@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  CAPABILITIES, GROUNDS, JOBS, PREP_RECIPES, PLANT_CROPS, OMNI, MACHINE_CLASSES,
+  CAPABILITIES, GROUNDS, JOBS, PREP_RECIPES, PLANT_CROPS, OMNI, TRACTOR, PLOW, MACHINE_CLASSES,
   GROW_SECONDS, HUB_PLOT, plotAddress, lookG, fieldShader, hitchStub,
-  createFarm, addField, addMachine, requestPrep, requestPlant, stepFarm, fieldWork, describeField,
+  createFarm, addField, addMachine, mountHitch, chooseMachine, requestPrep, requestPlant, stepFarm, fieldWork, describeField,
 } from '../src/framework-b.js';
 import { installShippedLastika } from '../src/lastika-stage.js';
 import { alignFieldCalendar, jobWindows, parseFieldStageDoc } from '../src/field-stages.js';
@@ -231,6 +231,42 @@ test('调度优先更快的自走一体机，拖挂单独派不出去', () => {
   assert.ok(omni.energyLeft < omni.energyKwh);
 });
 
+test('能力调度：一体机优先于更快的拖挂，忙了才派拖拉机', () => {
+  const farm = createFarm();
+  addMachine(farm, { ...OMNI, caps: OMNI.caps.slice(), energyLeft: OMNI.energyKwh });
+  addMachine(farm, { ...TRACTOR, caps: [], workSpeed: 30, cruiseSpeed: 30, energyLeft: TRACTOR.energyKwh });
+  addMachine(farm, { ...PLOW, caps: PLOW.caps.slice(), width: 30 });
+  assert.equal(mountHitch(farm, PLOW.id, TRACTOR.id).ok, true);
+  addMachine(farm, {
+    id: 'wing', classId: 'air', className: '飞行机', integral: false, name: '飞机',
+    caps: ['追肥'], origin: 0, width: 40, workSpeed: 40, cruiseSpeed: 40,
+    powerOutKw: 10, energy: 'electric', energyKwh: 10, energyLeft: 10,
+  });
+  addField(farm, { id: 'a', length: 128, width: 128, ground: 'raw', look: 'raw' });
+  addField(farm, { id: 'b', length: 128, width: 128, ground: 'raw', look: 'raw' });
+  for (const cap of ['犁田', '播种', '收割', '收拾', '追肥', '培土']) {
+    assert.equal(chooseMachine(farm, [cap]).id, 'omni', cap);
+  }
+  assert.equal(chooseMachine(farm, ['没有这种能力']), null);
+  assert.ok(chooseMachine(farm, ['犁田']).score < 30 * 30);
+  requestPrep(farm, 'a');
+  assert.equal(fieldWork(farm, 'a').machineId, 'omni');
+  assert.equal(fieldWork(farm, 'a').hitchId, null);
+  requestPrep(farm, 'b');
+  const backup = fieldWork(farm, 'b');
+  assert.equal(backup.machineId, 'tractor');
+  assert.equal(backup.hitchId, 'plow');
+  assert.equal(backup.width, 30);
+  assert.equal(farm.machines.find(m => m.id === 'plow').busy, true);
+  assert.equal(mountHitch(farm, 'plow', 'omni').reason, 'mounted');
+  const weak = createFarm();
+  addMachine(weak, { ...TRACTOR, caps: [], powerOutKw: 10, energyLeft: 10 });
+  addMachine(weak, { ...PLOW, caps: ['犁田'], powerNeedKw: 80 });
+  assert.equal(mountHitch(weak, 'plow', 'tractor').reason, 'power');
+  assert.equal(chooseMachine(weak, ['犁田']), null);
+  assert.equal(MACHINE_CLASSES.air.id, 'air');
+});
+
 test('第二块田排队，等第一块解锁', () => {
   const farm = slice();
   addField(farm, { id: 'b', length: 128, width: 128, ground: 'raw', look: 'raw' });
@@ -332,7 +368,7 @@ test('作业中按幅宽刷下一道，地头有转弯，做完整块定稿', ()
 });
 
 test('拉斯提卡阶段和版本戳来自同一份定义', () => {
-  assert.equal(HUD_VERSION, '环穗 v3.3');
+  assert.equal(HUD_VERSION, '环穗 v4');
   const doc = parseFieldStageDoc(structuredClone(lastikaRaw));
   const windows = jobWindows(doc, alignFieldCalendar(doc)).filter(item => item.op.kind === 'optional');
   assert.deepEqual(windows.map(item => item.op.id), ['topdress', 'hill']);

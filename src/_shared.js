@@ -1838,12 +1838,16 @@ export function rigReadout(r) {
   };
   const garageAt = hubPad(3, 2);
   garageOrigin = { x: garageAt.x, z: garageAt.z };
-  {
-    const x = garageAt.x, z = garageAt.z + 22;
+  const stalls = [
+    { id: 0, kind: 'omni', machineId: 'omni', label: '万能农机', role: '自走一体', caps: ['犁田', '播种', '收割', '收拾', '追肥', '培土'], width: 16, z: garageAt.z + 14 },
+    { id: 1, kind: 'tractor', machineId: 'tractor', label: '拖拉机', role: '拖拉机+犁', caps: ['犁田'], width: 12, impl: 'impl_subsoiler', z: garageAt.z + 32 },
+  ];
+  for (const stall of stalls) {
     const rig = {
-      id: 0, kind: 'omni', label: '万能农机', logicId: 'tractor_gen', bDrive: true, bWidth: 16,
+      id: stall.id, kind: stall.kind, machineId: stall.machineId, label: stall.label, role: stall.role,
+      caps: stall.caps, impl: stall.impl || null, logicId: 'tractor_gen', bDrive: true, bWidth: stall.width,
       busy: false, f: null, job: null, mode: 'park', intent: null, route: null, ri: 0,
-      charge: 1, lane: 0, u: 0, bin: 0, cargo: 0, parkX: x, parkZ: z, x, z, ang: -Math.PI / 2,
+      charge: 1, lane: 0, u: 0, bin: 0, cargo: 0, parkX: garageAt.x, parkZ: stall.z, x: garageAt.x, z: stall.z, ang: -Math.PI / 2,
     };
     bootRig(rig);
     rigs.push(rig);

@@ -87,6 +87,34 @@ export const OMNI = {
   energyKwh: 180,
 };
 
+// 拖拉机自己不带作业能力，犁挂上去才有犁田。幅宽乘速度低于一体机，一体机空闲时不会抢它的活。
+export const TRACTOR = {
+  id: 'tractor',
+  classId: 'self',
+  className: '自走机',
+  integral: false,
+  name: '拖拉机',
+  caps: [],
+  origin: 2.4,
+  width: 3,
+  workSpeed: 12,
+  cruiseSpeed: 20,
+  powerOutKw: 55,
+  energy: 'electric',
+  energyKwh: 140,
+};
+
+export const PLOW = {
+  id: 'plow',
+  classId: 'hitch',
+  className: '拖挂',
+  name: '犁',
+  caps: ['犁田'],
+  width: 12,
+  origin: 1.8,
+  powerNeedKw: 35,
+};
+
 export function plotAddress(i, j, originI, originJ) {
   const x = i - originI;
   const y = j - originJ;
@@ -180,10 +208,24 @@ export function addMachine(farm, spec) {
     energy: spec.energy || null,
     energyKwh: spec.energyKwh || 0,
     energyLeft: spec.energyLeft != null ? spec.energyLeft : (spec.energyKwh || 0),
+    hitchId: spec.hitchId || null,
+    hostId: spec.hostId || null,
     busy: false,
   };
   farm.machines.push(machine);
   return machine;
+}
+
+export function mountHitch(farm, hitchId, hostId) {
+  const hitch = farm.machines.find(m => m.id === hitchId);
+  const host = farm.machines.find(m => m.id === hostId);
+  if (!hitch || hitch.classId !== 'hitch') return { ok: false, reason: 'hitch' };
+  if (!host || host.classId !== 'self') return { ok: false, reason: 'host' };
+  if (hitch.hostId) return { ok: false, reason: 'mounted' };
+  if ((host.powerOutKw || 0) < (hitch.powerNeedKw || 0)) return { ok: false, reason: 'power' };
+  hitch.hostId = host.id;
+  host.hitchId = hitch.id;
+  return { ok: true };
 }
 
 function pushEvent(farm, ev) {
@@ -236,12 +278,46 @@ export function requestPlant(farm, fieldId, cropId = 'lastika') {
   return { ok: true, queued: true, jobId: job.id };
 }
 
-function machineScore(machine, caps) {
-  if (machine.busy) return null;
-  if (machine.classId === 'hitch') return null;
-  if (!caps.every(cap => machine.caps.includes(cap))) return null;
-  if (machine.energyLeft <= 0 && machine.energy) return null;
-  return machine.width * machine.workSpeed;
+function hitchOf(farm, machine) {
+  if (!machine?.hitchId) return null;
+  return farm.machines.find(m => m.id === machine.hitchId) || null;
+}
+
+// 自走机身体上的能力，加上已经挂住的拖挂。拖挂和飞行机不能单独出工。
+export function chooseMachine(farm, caps) {
+  const need = caps || [];
+  let best = null;
+  for (const machine of farm.machines) {
+    if (machine.busy) continue;
+    if (machine.classId === 'hitch' || machine.classId === 'air') continue;
+    const hitch = hitchOf(farm, machine);
+    if (hitch?.busy) continue;
+    const have = new Set(machine.caps);
+    if (hitch) for (const cap of hitch.caps) have.add(cap);
+    if (!need.every(cap => have.has(cap))) continue;
+    if (machine.energyLeft <= 0 && machine.energy) continue;
+    const fromHitch = need.some(cap => !machine.caps.includes(cap));
+    const width = fromHitch ? hitch.width : machine.width;
+    const origin = fromHitch ? (hitch.origin || 0) : (machine.origin || 0);
+    if (!(width > 0) || !(machine.workSpeed > 0)) continue;
+    const integral = !!machine.integral && need.every(cap => machine.caps.includes(cap));
+    const offer = {
+      id: machine.id,
+      machine,
+      hitchId: fromHitch ? hitch.id : null,
+      width,
+      origin,
+      score: width * machine.workSpeed,
+      integral,
+    };
+    if (!best) { best = offer; continue; }
+    if (offer.integral !== best.integral) {
+      if (offer.integral) best = offer;
+      continue;
+    }
+    if (offer.score > best.score) best = offer;
+  }
+  return best;
 }
 
 function dispatch(farm) {
@@ -253,14 +329,7 @@ function dispatch(farm) {
       farm.queue.shift();
       continue;
     }
-    let best = null;
-    let bestScore = -1;
-    for (const machine of farm.machines) {
-      const score = machineScore(machine, item.caps);
-      if (score == null || score <= bestScore) continue;
-      best = machine;
-      bestScore = score;
-    }
+    const best = chooseMachine(farm, item.caps);
     if (!best) return;
     farm.queue.shift();
     const job = JOBS[item.jobId];
@@ -270,6 +339,7 @@ function dispatch(farm) {
       fieldId: field.id,
       jobId: item.jobId,
       machineId: best.id,
+      hitchId: best.hitchId,
       lane: item.lane,
       width: best.width,
       origin: best.origin,
@@ -280,9 +350,13 @@ function dispatch(farm) {
     };
     writePose(farm, order);
     if (!soft) field.lock = order.id;
-    best.busy = true;
+    best.machine.busy = true;
+    if (best.hitchId) {
+      const hitch = farm.machines.find(m => m.id === best.hitchId);
+      if (hitch) hitch.busy = true;
+    }
     farm.orders.push(order);
-    pushEvent(farm, { type: 'dispatch', fieldId: field.id, jobId: item.jobId, machineId: best.id, width: order.width, origin: order.origin });
+    pushEvent(farm, { type: 'dispatch', fieldId: field.id, jobId: item.jobId, machineId: best.id, hitchId: best.hitchId, width: order.width, origin: order.origin });
   }
 }
 
@@ -408,6 +482,10 @@ function releaseOrder(farm, order) {
   const machine = orderMachine(farm, order);
   farm.orders = farm.orders.filter(item => item !== order);
   if (machine) machine.busy = false;
+  if (order.hitchId) {
+    const hitch = farm.machines.find(m => m.id === order.hitchId);
+    if (hitch) hitch.busy = false;
+  }
   if (field && field.lock === order.id) field.lock = null;
 }
 
@@ -479,9 +557,9 @@ function growthLeft(field) {
   return Math.max(0, field.plant.need - field.plant.grow);
 }
 
-function applyGrowth(farm, slice, skipId) {
+function applyGrowth(farm, slice, skip) {
   for (const field of farm.fields.values()) {
-    if (field.id === skipId) continue;
+    if (skip instanceof Set ? skip.has(field.id) : field.id === skip) continue;
     if (!field.plant?.clock || field.lock) continue;
     field.plant.grow += slice;
   }
@@ -608,27 +686,30 @@ export function stepFarm(farm, dt, env = null) {
     queueSoft(farm);
     dispatch(farm);
     touchSoft(farm);
-    const order = farm.orders[0] || null;
-    if (order?.phase === 'work') {
-      const field = farm.fields.get(order.fieldId);
-      const passes = passesOf(order, field);
-      const cur = passIndex(order, field);
-      if (cur < passes - 1) {
-        const remain = (cur + 1) * field.length - order.progress * metersOf(order, field);
-        if (remain <= 1e-3) beginTurn(order, field, cur);
+    for (const order of farm.orders) {
+      if (order.phase === 'work') {
+        const field = farm.fields.get(order.fieldId);
+        const passes = passesOf(order, field);
+        const cur = passIndex(order, field);
+        if (cur < passes - 1) {
+          const remain = (cur + 1) * field.length - order.progress * metersOf(order, field);
+          if (remain <= 1e-3) beginTurn(order, field, cur);
+        }
       }
-    }
-    if (order?.phase === 'cruise') {
-      const eta = env?.eta ? env.eta(farm, order) : 0;
-      if (!(eta > 1e-4)) {
-        order.phase = 'work';
-        writePose(farm, order);
+      if (order.phase === 'cruise') {
+        const eta = env?.eta ? env.eta(farm, order) : 0;
+        if (!(eta > 1e-4)) {
+          order.phase = 'work';
+          writePose(farm, order);
+        }
       }
     }
     let horizon = Infinity;
-    if (order?.phase === 'cruise') horizon = env.eta(farm, order);
-    if (order?.phase === 'work') horizon = Math.min(horizon, secondsLeft(farm, order), secondsToTurn(farm, order));
-    if (order?.phase === 'turn') horizon = Math.min(horizon, Math.max(0, TURN_SECONDS - (order.turnT || 0)));
+    for (const order of farm.orders) {
+      if (order.phase === 'cruise') horizon = Math.min(horizon, env.eta(farm, order));
+      if (order.phase === 'work') horizon = Math.min(horizon, secondsLeft(farm, order), secondsToTurn(farm, order));
+      if (order.phase === 'turn') horizon = Math.min(horizon, Math.max(0, TURN_SECONDS - (order.turnT || 0)));
+    }
     for (const field of farm.fields.values()) {
       const wait = growthLeft(field);
       if (wait != null) horizon = Math.min(horizon, wait);
@@ -641,20 +722,25 @@ export function stepFarm(farm, dt, env = null) {
     }
     const slice = Math.min(left, Math.max(horizon, 0));
     if (!(slice > 1e-8)) break;
-    if (order?.phase === 'cruise' && env?.cruise) env.cruise(farm, order, slice);
-    const skip = order && order.lane !== 'soft' && (order.phase === 'work' || order.phase === 'cruise') ? order.fieldId : null;
-    if (order?.phase === 'work') advanceWork(farm, order, slice);
-    if (order?.phase === 'turn') {
-      order.turnT = (order.turnT || 0) + slice;
-      if (order.turnT >= TURN_SECONDS - 1e-6) {
-        order.phase = 'work';
-        order.pose = order.turnTo;
-        order.turnT = 0;
+    const skip = new Set();
+    for (const order of [...farm.orders]) {
+      if (order.phase === 'cruise' && env?.cruise) env.cruise(farm, order, slice);
+      if (order.lane !== 'soft' && (order.phase === 'work' || order.phase === 'cruise')) skip.add(order.fieldId);
+      if (order.phase === 'work') advanceWork(farm, order, slice);
+      if (order.phase === 'turn') {
+        order.turnT = (order.turnT || 0) + slice;
+        if (order.turnT >= TURN_SECONDS - 1e-6) {
+          order.phase = 'work';
+          order.pose = order.turnTo;
+          order.turnT = 0;
+        }
       }
     }
     applyGrowth(farm, slice, skip);
     left -= slice;
-    if (order?.phase === 'work' && order.progress >= 1 - 1e-9) finishOrder(farm, order);
+    for (const order of [...farm.orders]) {
+      if (order.phase === 'work' && order.progress >= 1 - 1e-9) finishOrder(farm, order);
+    }
     finishGrowth(farm);
   }
   touchSoft(farm);
@@ -674,6 +760,8 @@ export function fieldWork(farm, fieldId) {
     origin: order.origin,
     progress: order.progress,
     pose: order.pose,
+    machineId: order.machineId,
+    hitchId: order.hitchId || null,
   };
 }
 
@@ -683,14 +771,16 @@ export function describeField(farm, fieldId) {
   const work = fieldWork(farm, fieldId);
   const job = work ? JOBS[work.jobId] : null;
   const pct = work ? Math.round(work.progress * 100) : 0;
+  const machine = work ? farm.machines.find(m => m.id === work.machineId) : null;
   const crop = field.plant ? PLANT_CROPS[field.plant.cropId] : null;
   let stat = GROUNDS[field.ground]?.name || field.ground;
   if (field.look === 'raw' && !work) stat = '未整地 · 整地后成为一般田地';
   else if (field.ground === 'general' && !field.plant && !work) stat = '一般田地 · 可以种植拉斯提卡';
   if (work && job) {
     const name = crop ? crop.name + ' · ' : (work.lane === 'prep' ? '清地 · ' : '');
-    const where = work.phase === 'cruise' ? '农机正在开来' : work.phase === 'turn' ? '地头转弯' : `${job.name} ${pct}%`;
-    stat = `${name}${where}`;
+    const who = machine ? machine.name + ' · ' : '';
+    const where = work.phase === 'cruise' ? '正在开来' : work.phase === 'turn' ? '地头转弯' : `${job.name} ${pct}%`;
+    stat = `${name}${who}${where}`;
   } else if (field.plant?.clock) {
     const sec = Math.floor(field.plant.grow);
     stat = `${crop.name} · 播种已完成 · 生长 ${sec} / ${field.plant.need} 秒`;

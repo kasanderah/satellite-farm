@@ -1,7 +1,7 @@
 // 把框架 B 接到环面上的一块田。旧的垄扫不读这里的工单。
 import {
-  OMNI, JOBS, TURN_SECONDS, createFarm, addField, addMachine, requestPrep, requestPlant,
-  stepFarm, describeField, plotAddress,
+  OMNI, TRACTOR, PLOW, JOBS, TURN_SECONDS, createFarm, addField, addMachine, mountHitch,
+  requestPrep, requestPlant, stepFarm, describeField, plotAddress,
 } from './framework-b.js';
 
 let farm = null;
@@ -12,8 +12,16 @@ export function fieldKey(f) {
   return f.i + ':' + f.j;
 }
 
-function rig() {
-  return ctx.rigs.find(r => r.bDrive) || null;
+function driveRigs() {
+  return ctx.rigs.filter(r => r.bDrive);
+}
+
+function rigFor(machineId) {
+  return driveRigs().find(r => r.machineId === machineId) || null;
+}
+
+function machineOf(id) {
+  return farm?.machines.find(m => m.id === id) || null;
 }
 
 function meshOf(id) {
@@ -49,6 +57,7 @@ function moveToward(unit, x, z, ang, speed, slice) {
 
 function readout(order, unit) {
   const job = order ? JOBS[order.jobId] : null;
+  const machine = order ? machineOf(order.machineId) : machineOf(unit?.machineId);
   const home = !order && unit && Math.hypot(unit.x - unit.parkX, unit.z - unit.parkZ) <= 1.2;
   let doing = '停在机库';
   if (order?.phase === 'cruise') doing = '开往田块';
@@ -56,7 +65,7 @@ function readout(order, unit) {
   else if (order?.phase === 'work') doing = job?.name || '作业';
   else if (!home) doing = '返回机库';
   const moving = !!order || !home;
-  const rated = order?.phase === 'work' ? OMNI.workSpeed : OMNI.cruiseSpeed;
+  const rated = order?.phase === 'work' ? (machine?.workSpeed || 0) : (machine?.cruiseSpeed || 0);
   return {
     speed: moving && !ctx.paused() ? rated : 0,
     doing,
@@ -82,10 +91,9 @@ function turnArc(a, b, t) {
   return { x, z, ang: Math.atan2(dz, dx) };
 }
 
-function paintRig(order) {
-  const unit = rig();
+function paintRig(order, unit) {
   if (!unit) return;
-  unit.bWidth = OMNI.width;
+  unit.bWidth = order?.width || unit.bWidth;
   unit.busy = !!order;
   unit.bRead = readout(order, unit);
   const f = order ? meshOf(order.fieldId) : null;
@@ -107,11 +115,43 @@ function paintRig(order) {
   unit.ang = at.ang;
 }
 
+const SPECS = { omni: OMNI, tractor: TRACTOR };
+
 export function bootSlice(next) {
   ctx = next;
   farm = createFarm();
   byKey.clear();
-  addMachine(farm, { ...OMNI, caps: OMNI.caps.slice(), energyLeft: OMNI.energyKwh });
+  const keep = ctx.rigs.filter(r => r.bDrive);
+  ctx.rigs.length = 0;
+  for (const unit of keep) {
+    const spec = SPECS[unit.machineId] || SPECS[unit.kind] || OMNI;
+    unit.machineId = spec.id;
+    if (!farm.machines.some(m => m.id === spec.id)) {
+      addMachine(farm, { ...spec, caps: spec.caps.slice(), energyLeft: spec.energyKwh });
+    }
+    unit.x = unit.parkX;
+    unit.z = unit.parkZ;
+    unit.ang = -Math.PI / 2;
+    unit.busy = false;
+    unit.mode = 'park';
+    unit.bWidth = spec.width;
+    unit.label = spec.name;
+    unit.caps = spec.caps.slice();
+    unit.role = spec.integral ? '自走一体' : '自走机';
+    ctx.rigs.push(unit);
+  }
+  if (!farm.machines.some(m => m.id === PLOW.id) && farm.machines.some(m => m.id === TRACTOR.id)) {
+    addMachine(farm, { ...PLOW, caps: PLOW.caps.slice() });
+    mountHitch(farm, PLOW.id, TRACTOR.id);
+    const tractor = rigFor(TRACTOR.id);
+    if (tractor) {
+      tractor.impl = 'impl_subsoiler';
+      tractor.hitchId = PLOW.id;
+      tractor.role = '拖拉机+犁';
+      tractor.caps = PLOW.caps.slice();
+      tractor.bWidth = PLOW.width;
+    }
+  }
   for (const f of ctx.fields) {
     if (!f.owned) continue;
     const addr = plotAddress(f.i, f.j, ctx.originI, ctx.originJ);
@@ -131,21 +171,8 @@ export function bootSlice(next) {
     delete f.jobS;
     delete f.laneW;
   }
-  const keep = ctx.rigs.filter(r => r.bDrive);
-  ctx.rigs.length = 0;
-  const unit = keep[0];
-  if (unit) {
-    unit.x = unit.parkX;
-    unit.z = unit.parkZ;
-    unit.ang = -Math.PI / 2;
-    unit.busy = false;
-    unit.mode = 'park';
-    unit.bWidth = OMNI.width;
-    unit.label = OMNI.name;
-    ctx.rigs.push(unit);
-  }
   syncFields();
-  paintRig(null);
+  for (const unit of driveRigs()) paintRig(null, unit);
   return farm;
 }
 
@@ -180,28 +207,34 @@ export function tickSlice(dt) {
   stepFarm(farm, dt, {
     eta(_farm, order) {
       const f = meshOf(order.fieldId);
-      const unit = rig();
-      if (!f || !unit || !order.pose) return 0;
+      const unit = rigFor(order.machineId);
+      const machine = machineOf(order.machineId);
+      if (!f || !unit || !order.pose || !machine) return 0;
       const at = worldPose(f, order.pose);
       const dist = Math.hypot(at.x - unit.x, at.z - unit.z);
       if (dist < 1.5) return 0;
-      return dist / OMNI.cruiseSpeed;
+      return dist / machine.cruiseSpeed;
     },
     cruise(_farm, order, slice) {
       const f = meshOf(order.fieldId);
-      const unit = rig();
-      if (!f || !unit || !order.pose) return;
+      const unit = rigFor(order.machineId);
+      const machine = machineOf(order.machineId);
+      if (!f || !unit || !order.pose || !machine) return;
       const at = worldPose(f, order.pose);
-      moveToward(unit, at.x, at.z, at.ang, OMNI.cruiseSpeed, slice);
+      moveToward(unit, at.x, at.z, at.ang, machine.cruiseSpeed, slice);
     },
   });
   syncFields();
-  const order = farm.orders.find(item => item.machineId === OMNI.id) || null;
-  if (!order) {
-    const unit = rig();
-    if (unit) moveToward(unit, unit.parkX, unit.parkZ, -Math.PI / 2, OMNI.cruiseSpeed, dt);
+  for (const unit of driveRigs()) {
+    const order = farm.orders.find(item => item.machineId === unit.machineId) || null;
+    const machine = machineOf(unit.machineId);
+    if (!order) {
+      moveToward(unit, unit.parkX, unit.parkZ, -Math.PI / 2, machine?.cruiseSpeed || 20, dt);
+      paintRig(null, unit);
+      continue;
+    }
+    paintRig(order, unit);
   }
-  paintRig(order);
 }
 
 export function prepField(f, recipeId = 'clear_general') {
