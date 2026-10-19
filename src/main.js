@@ -2862,6 +2862,12 @@ function updateDock() {
   if (!stat) stat = !f.owned ? '邻区快照 · 只读' : (desc?.stat || '未整地');
   const addr = desc?.plot || '';
   $('selid').textContent = addr ? `C0 · ${addr}` : `F-${String(f.i).padStart(3, '0')}${String(f.j).padStart(2, '0')}`;
+  const workEl = $('selwork');
+  if (workEl) {
+    const badge = !selNote && f.owned ? (desc?.badge || '') : '';
+    workEl.hidden = !badge;
+    workEl.textContent = badge;
+  }
   $('selstat').textContent = stat;
   const jobsHost = $('dock-jobs');
   if (jobsHost) {
@@ -2985,7 +2991,7 @@ function bootStagesSync() {
 }
 const bootStageNote = bootStagesSync();
 $('kpi').innerHTML = `<div class="k-rev"><small>营收</small><b class="hv" id="kpi-rev">0</b></div><div class="k-day"><small>世界日</small><b id="kpi-day">0</b></div><div class="k-time"><small>时刻</small><span class="clk"><i class="face" id="kpi-face" aria-hidden="true"><i id="kpi-hh"></i><i id="kpi-mh"></i></i><b id="kpi-hm">00:00</b><b id="kpi-rate">1×</b></span></div><div class="k-act"><small>作业</small><b class="hv" id="kpi-act">0</b><em>/ ${rigs.length}</em></div>`;
-$('dock').innerHTML = `<div class="who"><b id="selid"></b><span id="selstat"></span></div><div id="dock-jobs" class="jobs" hidden></div><div id="dock-legend" class="legend" hidden></div><div id="bar"><i id="selbar"></i></div><div class="strip" id="prepbtns"></div><div class="strip" id="selbtns"></div><div class="ops"><button type="button" id="act-prep"><b>整地</b><small>选择田面</small></button><button type="button" id="act-plant"><b>种植</b><small>拉斯提卡</small></button></div>`;
+$('dock').innerHTML = `<div class="who"><div class="name"><b id="selid"></b><em id="selwork" hidden></em></div><span id="selstat"></span></div><div id="dock-jobs" class="jobs" hidden></div><div id="dock-legend" class="legend" hidden></div><div id="bar"><i id="selbar"></i></div><div class="strip" id="prepbtns"></div><div class="strip" id="selbtns"></div><div class="ops"><button type="button" id="act-prep"><b>整地</b><small>选择田面</small></button><button type="button" id="act-plant"><b>种植</b><small>拉斯提卡</small></button></div>`;
 {
   const b = document.createElement('button');
   b.type = 'button';

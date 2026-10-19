@@ -367,8 +367,74 @@ test('作业中按幅宽刷下一道，地头有转弯，做完整块定稿', ()
   assert.equal(done.next, undefined);
 });
 
+test('名称旁状态跟着工单走，犁地不被播种队头挡住', () => {
+  const farm = createFarm();
+  addMachine(farm, { ...OMNI, caps: OMNI.caps.slice(), energyLeft: OMNI.energyKwh });
+  addMachine(farm, { ...TRACTOR, caps: [], energyLeft: TRACTOR.energyKwh });
+  addMachine(farm, { ...PLOW, caps: PLOW.caps.slice() });
+  assert.equal(mountHitch(farm, PLOW.id, TRACTOR.id).ok, true);
+  addField(farm, { id: 'a', length: 128, width: 128, ground: 'raw', look: 'raw' });
+  addField(farm, { id: 'b', length: 128, width: 128, ground: 'general', look: 'general' });
+  addField(farm, { id: 'c', length: 128, width: 128, ground: 'raw', look: 'raw' });
+  addField(farm, { id: 'd', length: 128, width: 128, ground: 'raw', look: 'raw' });
+  assert.equal(describeField(farm, 'a').badge, null);
+  assert.match(describeField(farm, 'a').stat, /未整地/);
+  requestPrep(farm, 'a');
+  assert.equal(fieldWork(farm, 'a').machineId, 'omni');
+  assert.equal(describeField(farm, 'a').badge, '整地中');
+  assert.equal(requestPlant(farm, 'b').queued, true);
+  assert.equal(describeField(farm, 'b').badge, '等待播种');
+  requestPrep(farm, 'c');
+  assert.equal(fieldWork(farm, 'c').machineId, 'tractor');
+  assert.equal(fieldWork(farm, 'c').hitchId, 'plow');
+  assert.equal(describeField(farm, 'c').badge, '整地中');
+  assert.equal(farm.queue.some(item => item.fieldId === 'b' && item.jobId === 'sow'), true);
+  requestPrep(farm, 'd');
+  assert.equal(fieldWork(farm, 'd'), null);
+  assert.equal(describeField(farm, 'd').badge, '等待整地');
+  const pos = { omni: { x: 0, z: 0 }, tractor: { x: 0, z: 18 } };
+  const targets = { a: { x: 280, z: 0 }, c: { x: 0, z: 400 } };
+  const eta = (live, order) => {
+    const at = targets[order.fieldId];
+    const spot = pos[order.machineId];
+    const machine = live.machines.find(item => item.id === order.machineId);
+    const dist = Math.hypot(at.x - spot.x, at.z - spot.z);
+    return dist < 1.5 ? 0 : dist / machine.cruiseSpeed;
+  };
+  const cruise = (live, order, slice) => {
+    const at = targets[order.fieldId];
+    const spot = pos[order.machineId];
+    const machine = live.machines.find(item => item.id === order.machineId);
+    const dx = at.x - spot.x;
+    const dz = at.z - spot.z;
+    const dist = Math.hypot(dx, dz);
+    const step = machine.cruiseSpeed * slice;
+    if (dist <= step || dist < 0.8) { spot.x = at.x; spot.z = at.z; return; }
+    spot.x += (dx / dist) * step;
+    spot.z += (dz / dist) * step;
+  };
+  stepFarm(farm, 1, { eta, cruise });
+  assert.ok(pos.omni.x > 20, `一体机应马上开出，实际 x=${pos.omni.x}`);
+  assert.ok(pos.tractor.z > 30, `拖拉机应马上开出，实际 z=${pos.tractor.z}`);
+  assert.equal(describeField(farm, 'a').badge, '整地中');
+  assert.equal(describeField(farm, 'c').badge, '整地中');
+  until(farm, () => fieldWork(farm, 'a')?.phase === 'work');
+  assert.equal(describeField(farm, 'a').badge, '犁地中');
+  const hung = slice();
+  const field = hung.fields.get('a');
+  field.ground = 'general';
+  field.look = 'mature';
+  field.plant = {
+    cropId: 'lastika', index: 1, stageId: 'mature', grow: 30, need: 36, clock: false,
+    soft: { hill: { name: '培土', from: 20, to: 26, progress: 0.4, status: '过期' } },
+  };
+  assert.equal(describeField(hung, 'a').badge, '工单挂起提示');
+  assert.equal(describeField(hung, 'a').suspend.title, '工单挂起提示');
+  assert.match(describeField(hung, 'a').stat, /拉斯提卡/);
+});
+
 test('拉斯提卡阶段和版本戳来自同一份定义', () => {
-  assert.equal(HUD_VERSION, '环穗 v4');
+  assert.equal(HUD_VERSION, '环穗 v4.1');
   const doc = parseFieldStageDoc(structuredClone(lastikaRaw));
   const windows = jobWindows(doc, alignFieldCalendar(doc)).filter(item => item.op.kind === 'optional');
   assert.deepEqual(windows.map(item => item.op.id), ['topdress', 'hill']);

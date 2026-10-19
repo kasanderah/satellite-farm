@@ -321,8 +321,10 @@ export function chooseMachine(farm, caps) {
 }
 
 function dispatch(farm) {
-  let guard = 0;
-  while (farm.queue.length && guard++ < 8) {
+  // 队头派不出去时不要卡住后面。拖拉机能犁的田，不该等在一台一体机才做得了的播种后面。
+  const deferred = [];
+  const pending = farm.queue.length;
+  for (let i = 0; i < pending && farm.queue.length; i++) {
     const item = farm.queue[0];
     const field = farm.fields.get(item.fieldId);
     if (!field || field.lock) {
@@ -330,7 +332,10 @@ function dispatch(farm) {
       continue;
     }
     const best = chooseMachine(farm, item.caps);
-    if (!best) return;
+    if (!best) {
+      deferred.push(farm.queue.shift());
+      continue;
+    }
     farm.queue.shift();
     const job = JOBS[item.jobId];
     const soft = job?.kind === 'soft';
@@ -358,6 +363,7 @@ function dispatch(farm) {
     farm.orders.push(order);
     pushEvent(farm, { type: 'dispatch', fieldId: field.id, jobId: item.jobId, machineId: best.id, hitchId: best.hitchId, width: order.width, origin: order.origin });
   }
+  if (deferred.length) farm.queue = deferred.concat(farm.queue);
 }
 
 function passesOf(order, field) {
@@ -765,6 +771,28 @@ export function fieldWork(farm, fieldId) {
   };
 }
 
+const BADGE = {
+  plow: { wait: '等待整地', cruise: '整地中', run: '犁地中' },
+  sow: { wait: '等待播种', cruise: '播种中', run: '播种中' },
+  harvest: { wait: '等待收割', cruise: '收割中', run: '收割中' },
+  tidy: { wait: '等待收拾', cruise: '收拾中', run: '收拾中' },
+  topdress: { wait: '等待追肥', cruise: '追肥中', run: '追肥中' },
+  hill: { wait: '等待培土', cruise: '培土中', run: '培土中' },
+};
+
+// 名称旁的短状态。没有工单就返回 null，田面和阶段仍走原来的 stat。
+export function fieldBadge(farm, fieldId) {
+  const field = farm.fields.get(fieldId);
+  if (!field) return null;
+  const work = fieldWork(farm, fieldId);
+  const row = work ? BADGE[work.jobId] : null;
+  if (row) return work.phase === 'work' || work.phase === 'turn' ? row.run : row.cruise;
+  const queued = farm.queue.find(item => item.fieldId === fieldId);
+  if (queued && BADGE[queued.jobId]) return BADGE[queued.jobId].wait;
+  const hung = field.plant?.soft && Object.values(field.plant.soft).some(item => item.status === '过期');
+  return hung ? '工单挂起提示' : null;
+}
+
 export function describeField(farm, fieldId) {
   const field = farm.fields.get(fieldId);
   if (!field) return null;
@@ -813,6 +841,7 @@ export function describeField(farm, fieldId) {
     groundName: GROUNDS[field.ground]?.name || field.ground,
     look: field.look,
     stat,
+    badge: fieldBadge(farm, fieldId),
     jobs,
     suspend,
     chips,

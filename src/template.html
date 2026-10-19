@@ -177,7 +177,10 @@ body.underground #dock{display:none}
 #dock .strip{gap:6px;margin-top:8px;overflow-x:auto;flex-wrap:nowrap}
 #dock .strip button{flex:0 0 auto;min-width:148px}
 #dock .who{display:flex;flex-direction:column;gap:3px;font-size:12px;letter-spacing:.1em}
+#dock .who .name{display:flex;align-items:baseline;flex-wrap:wrap;gap:8px}
 #dock .who b{font-weight:500}#dock .who span{color:var(--mut);letter-spacing:.06em}
+#dock .who em{font-style:normal;color:var(--sig);letter-spacing:.08em}
+#dock .who em[hidden]{display:none}
 #dock .row{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px}
 #dock button{padding:6px 8px 5px}
 #dock button b{display:block;font-weight:500;font-size:13px;letter-spacing:.12em}
@@ -235,6 +238,6 @@ body.underground #dock{display:none}
 <div class="hud panel hit" id="planmenu"></div>
 <div id="viewer"><div class="bar"><div><h2>资产</h2><div class="sub">当前的薯田阶段、机器和田块。每张卡片是名字加上现在的样子。点一张就能指着它改。这是查看，不能上传。</div></div><button type="button" id="viewer-close">关闭</button></div><div class="sec">商品薯阶段</div><div class="grid" id="view-stages"></div><div class="sec">机器</div><div class="grid" id="view-machines"></div><div class="sec">田块</div><div class="grid" id="view-tiles"></div></div>
 <div class="hud" id="scale"><span id="scaletxt"></span><div id="scalebar"></div></div>
-<div class="hud" id="buildrev">环穗 v4</div>
+<div class="hud" id="buildrev">环穗 v4.1</div>
 <script>__BUNDLE__</script>
 </body></html>
