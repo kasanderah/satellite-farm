@@ -25,7 +25,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CULT_EMPTY } from './lab-catalog.js';
 import { makeColony } from './colony-art.js';
 import { bootSlice, tickSlice, prepField, plantCrop, dockOf } from './b-bind.js';
-import { PLANT_CROPS } from './framework-b.js';
+import { PLANT_CROPS, PREP_RECIPES, JOBS } from './framework-b.js';
 import { HUD_VERSION } from './version.js';
 
 const Q = new URLSearchParams(location.search);
@@ -1832,7 +1832,7 @@ function applyDeckView() {
   document.body.classList.toggle('underground', on);
 }
 // 交互：左键平移 / 右键旋转 / 滚轮缩放 / WASD / QE / N 昼夜 / M 地图模式 / H 隐藏界面
-let drag = null, ptr = null, selected = null, selNote = '', plantOpen = false;
+let drag = null, ptr = null, selected = null, selNote = '', plantOpen = false, prepOpen = false;
 let mode = 'look', watchRig = null, pickedLot = null, pickedStack = null, shopPick = 'seed', rigPick = 'planter', cropPick = 'potato', deckTank = 0, deckBlock = null, deckHub = false, buildAct = 'place', buildKind = 'warehouse', buildPick = null, millPlace = false;
 let planCycle = false, planBuy = false;
 const pickedFields = new Set();
@@ -1854,7 +1854,7 @@ function pickFlat(cx, cy) {
   const th = Math.atan2(px - ax, R0 - py);
   return { x: ax + th * R0, z: pz };
 }
-function selectField(f, why) { selected = f || null; selNote = why || ''; plantOpen = false; }
+function selectField(f, why) { selected = f || null; selNote = why || ''; plantOpen = false; prepOpen = false; }
 function onMapClick(cx, cy) {
   const p = pickFlat(cx, cy);
   if (viewLayer !== 'surface' && mode !== 'build') {
@@ -1939,12 +1939,25 @@ function plantWhy(reason) {
   if (reason === 'busy' || reason === 'planting') return '这块正在种拉斯提卡';
   return '不能播种';
 }
-function doPrep() {
-  if (!selected?.owned) { toast('不能整地'); return { ok: false, reason: 'plot' }; }
-  const r = prepField(selected);
-  if (!r.ok) { toast(plantWhy(r.reason)); return r; }
+function prepWhy(reason) {
+  if (reason === 'lock') return '这块田还在作业';
+  if (reason === 'planting' || reason === 'busy') return '这块正在种，不能整地';
+  if (reason === 'recipe') return '没有这种田面';
+  return '不能整地';
+}
+function closeToolMenus() {
   plantOpen = false;
-  toast(r.skipped ? '已经是一般田地' : '清地 · 犁地');
+  prepOpen = false;
+}
+function doPrep(recipeId = 'clear_general') {
+  if (!selected?.owned) { toast('不能整地'); return { ok: false, reason: 'plot' }; }
+  const recipe = PREP_RECIPES[recipeId];
+  if (!recipe) { toast(prepWhy('recipe')); return { ok: false, reason: 'recipe' }; }
+  const r = prepField(selected, recipe.id);
+  if (!r.ok) { toast(prepWhy(r.reason)); return r; }
+  closeToolMenus();
+  const jobName = JOBS[recipe.steps[0]]?.name || '犁地';
+  toast(r.skipped ? `已经是${recipe.targetName}，不用再整` : `${recipe.name} · ${jobName}`);
   updateDock();
   return r;
 }
@@ -1952,7 +1965,7 @@ function doPlant() {
   if (!selected?.owned) { toast('不能播种'); return { ok: false, reason: 'plot' }; }
   const r = plantCrop(selected);
   if (!r.ok) { toast(plantWhy(r.reason)); return r; }
-  plantOpen = false;
+  closeToolMenus();
   plantWin = { x: 1e9, z: 1e9, w: 0 };
   toast('拉斯提卡 · 播种');
   updateDock();
@@ -2100,6 +2113,7 @@ addEventListener('keydown', e => {
   if (e.key === 'F2' || e.key === '\\') { e.preventDefault(); toggleAdmin(); }
   if (e.key === 'v' || e.key === 'V') toggleViewer();
   if (e.key === 'Escape') {
+    if (prepOpen || plantOpen) { closeToolMenus(); updateDock(); return; }
     $('admin').classList.remove('on');
     $('viewer').classList.remove('on');
     returnToLook();
@@ -2873,10 +2887,11 @@ function updateDock() {
     bar.innerHTML = `<i style="flex:1;background:linear-gradient(90deg,#c4b08a ${pct}%,rgba(232,216,208,.16) ${pct}%)"></i>`;
   }
   el.classList.toggle('picking', plantOpen && !!f.owned);
+  el.classList.toggle('prepping', prepOpen && !!f.owned);
   const plantBtn = $('act-plant');
   const prepBtn = $('act-prep');
-  if (plantBtn) plantBtn.disabled = !f.owned;
-  if (prepBtn) prepBtn.disabled = !f.owned;
+  if (plantBtn) { plantBtn.disabled = !f.owned; plantBtn.classList.toggle('on', plantOpen && !!f.owned); }
+  if (prepBtn) { prepBtn.disabled = !f.owned; prepBtn.classList.toggle('on', prepOpen && !!f.owned); }
 }
 function paintRates() {
   document.querySelectorAll('#rates button').forEach(b => b.classList.toggle('on', Math.abs(+b.dataset.rate - economy.timeScale) < 1e-6));
@@ -2968,21 +2983,36 @@ function bootStagesSync() {
 }
 const bootStageNote = bootStagesSync();
 $('kpi').innerHTML = `<div class="k-rev"><small>营收</small><b class="hv" id="kpi-rev">0</b></div><div class="k-day"><small>世界日</small><b id="kpi-day">0</b></div><div class="k-time"><small>时刻</small><span class="clk"><i class="face" id="kpi-face" aria-hidden="true"><i id="kpi-hh"></i><i id="kpi-mh"></i></i><b id="kpi-hm">00:00</b><b id="kpi-rate">1×</b></span></div><div class="k-act"><small>作业</small><b class="hv" id="kpi-act">0</b><em>/ ${rigs.length}</em></div>`;
-$('dock').innerHTML = `<div class="who"><b id="selid"></b><span id="selstat"></span></div><div id="dock-jobs" class="jobs" hidden></div><div id="dock-legend" class="legend" hidden></div><div id="bar"><i id="selbar"></i></div><div class="ops"><button type="button" id="act-prep"><b>整地</b><small>清地 · 一般田地</small></button><button type="button" id="act-plant"><b>种植</b><small>拉斯提卡</small></button></div><div class="row" id="selbtns"></div>`;
+$('dock').innerHTML = `<div class="who"><b id="selid"></b><span id="selstat"></span></div><div id="dock-jobs" class="jobs" hidden></div><div id="dock-legend" class="legend" hidden></div><div id="bar"><i id="selbar"></i></div><div class="strip" id="prepbtns"></div><div class="strip" id="selbtns"></div><div class="ops"><button type="button" id="act-prep"><b>整地</b><small>选择田面</small></button><button type="button" id="act-plant"><b>种植</b><small>拉斯提卡</small></button></div>`;
 {
   const b = document.createElement('button');
+  b.type = 'button';
   b.dataset.crop = 'lastika';
   b.innerHTML = '<b>拉斯提卡</b><small>播种之后开始生长</small>';
-  b.style.gridColumn = '1 / -1';
   b.addEventListener('click', () => doPlant());
   $('selbtns').appendChild(b);
+}
+for (const recipe of Object.values(PREP_RECIPES)) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.dataset.prep = recipe.id;
+  const jobName = JOBS[recipe.steps[0]]?.name || '犁地';
+  b.innerHTML = `<b>${recipe.targetName}</b><small>${recipe.name} · ${jobName}</small>`;
+  b.addEventListener('click', () => doPrep(recipe.id));
+  $('prepbtns').appendChild(b);
 }
 $('act-plant').addEventListener('click', () => {
   if (!selected?.owned) return;
   plantOpen = !plantOpen;
+  if (plantOpen) prepOpen = false;
   updateDock();
 });
-$('act-prep').addEventListener('click', () => doPrep());
+$('act-prep').addEventListener('click', () => {
+  if (!selected?.owned) return;
+  prepOpen = !prepOpen;
+  if (prepOpen) plantOpen = false;
+  updateDock();
+});
 const RATE_STOPS = [1, 4, 12, 120, 1000];
 $('rates').innerHTML = `<span>1×：1 分 = 2 世界时</span>` + RATE_STOPS.map(r => `<button type="button" data-rate="${r}">${r}×</button>`).join('') + `<input id="rate-in" type="text" inputmode="decimal" value="1" aria-label="世界钟倍率" autocomplete="off">`;
 function stepRate(dir) {

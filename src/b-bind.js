@@ -204,9 +204,9 @@ export function tickSlice(dt) {
   paintRig(order);
 }
 
-export function prepField(f) {
+export function prepField(f, recipeId = 'clear_general') {
   if (!farm || !f) return { ok: false, reason: 'field' };
-  return requestPrep(farm, fieldKey(f));
+  return requestPrep(farm, fieldKey(f), recipeId);
 }
 
 export function plantCrop(f) {

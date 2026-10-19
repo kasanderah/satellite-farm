@@ -64,6 +64,23 @@ test('清地只有犁地，犁完是一般田地，田上不留进度', () => {
   assert.equal(skip.skipped, true);
 });
 
+test('整地目标来自配方表，已经是该田面就不派车', () => {
+  const recipes = Object.values(PREP_RECIPES);
+  assert.ok(recipes.length >= 1);
+  assert.ok(recipes.every(recipe => GROUNDS[recipe.target] && recipe.targetName && recipe.steps.length));
+  assert.equal(recipes.find(recipe => recipe.id === 'clear_general').targetName, '一般田地');
+  const farm = slice();
+  const field = farm.fields.get('a');
+  field.ground = 'general';
+  field.look = 'general';
+  const skip = requestPrep(farm, 'a', 'clear_general');
+  assert.equal(skip.ok, true);
+  assert.equal(skip.skipped, true);
+  assert.equal(farm.queue.length, 0);
+  assert.equal(farm.orders.length, 0);
+  assert.equal(field.ground, 'general');
+});
+
 test('没整地不能种；播种做完才开始生长', () => {
   const farm = slice();
   const denied = requestPlant(farm, 'a', 'lastika');
@@ -315,7 +332,7 @@ test('作业中按幅宽刷下一道，地头有转弯，做完整块定稿', ()
 });
 
 test('拉斯提卡阶段和版本戳来自同一份定义', () => {
-  assert.equal(HUD_VERSION, '环穗 v3.2');
+  assert.equal(HUD_VERSION, '环穗 v3.3');
   const doc = parseFieldStageDoc(structuredClone(lastikaRaw));
   const windows = jobWindows(doc, alignFieldCalendar(doc)).filter(item => item.op.kind === 'optional');
   assert.deepEqual(windows.map(item => item.op.id), ['topdress', 'hill']);
