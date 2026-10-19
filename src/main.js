@@ -2818,11 +2818,17 @@ function paintWorldClock() {
 }
 function updateDock() {
   const el = $('dock');
+  const desc = selected?.owned ? dockOf(selected) : null;
+  const chip = $('suspend');
+  if (chip) {
+    const title = desc?.suspend?.title || '';
+    chip.classList.toggle('on', !!title);
+    chip.textContent = title;
+  }
   const show = viewLayer === 'surface' && selected && (mode === 'look' || mode === 'plan');
   if (!show) { el.classList.remove('on'); return; }
   el.classList.add('on');
   const f = selected;
-  const desc = f.owned ? dockOf(f) : null;
   let stat = selNote;
   if (!stat) stat = !f.owned ? '邻区快照 · 只读' : (desc?.stat || '未整地');
   const addr = desc?.plot || '';
@@ -2833,7 +2839,11 @@ function updateDock() {
     const rows = desc?.jobs || [];
     jobsHost.hidden = !rows.length;
     jobsHost.innerHTML = rows.length
-      ? rows.map(job => `<div class="jb${job.status === '执行中' || job.status === '生长' ? ' run' : ''}"><b>${job.name}</b><span>${job.status} ${job.pct}%</span></div>`).join('')
+      ? rows.map(job => {
+        const hot = job.status === '执行中' || job.status === '生长' || job.status === '开来' || job.status === '转弯';
+        const miss = job.status === '过期';
+        return `<div class="jb${hot ? ' run' : ''}${miss ? ' miss' : ''}"><b>${job.name}</b><span>${job.status} ${job.pct}%</span></div>`;
+      }).join('')
       : '';
   }
   const legendHost = $('dock-legend');

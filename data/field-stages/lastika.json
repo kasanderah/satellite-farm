@@ -1,7 +1,7 @@
 {
   "schema": "ringsheaf.field-stage/1",
   "profile": "lastika",
-  "readme": "拉斯提卡。框架 B 只读四段：A 播种、B 成熟、D 收割、E 收拾。B 的天数是主游戏 1× 下的生长秒数。不写半幅蒙版。",
+  "readme": "拉斯提卡。框架 B 只读四段：A 播种、B 成熟、D 收割、E 收拾。B 的天数是主游戏 1× 下的生长秒数。B 上的可选作业带阶段内窗口，主游戏当成软作业。不写半幅蒙版。",
   "cropId": "lastika",
   "logicId": "crop_lastika",
   "cropName": "拉斯提卡",
@@ -30,6 +30,8 @@
   ],
   "ops": [
     { "id": "sow", "name": "播种", "kind": "required", "via": "sow", "stage": "O", "requiresMask": false, "requiresUnlocked": true, "writesMask": false, "locksUnswept": false, "sweepDays": 1, "machine": "impl_seeder" },
+    { "id": "topdress", "name": "追肥", "kind": "optional", "via": "topdress", "stage": "B", "requiresMask": false, "requiresUnlocked": false, "writesMask": false, "locksUnswept": false, "sweepDays": 1, "window": { "from": 4, "to": 30 } },
+    { "id": "hill", "name": "培土", "kind": "optional", "via": "hill", "stage": "B", "requiresMask": false, "requiresUnlocked": false, "writesMask": false, "locksUnswept": false, "sweepDays": 1, "window": { "from": 20, "to": 26 } },
     { "id": "harvest", "name": "收割", "kind": "required", "via": "harvest", "stage": "D", "requiresMask": false, "requiresUnlocked": false, "writesMask": false, "locksUnswept": false, "sweepDays": 1, "machine": "harvester_potato" },
     { "id": "clear", "name": "收拾", "kind": "special", "via": "clear", "stage": "E", "requiresMask": false, "requiresUnlocked": false, "writesMask": false, "locksUnswept": false, "breaksMask": false, "sweepDays": 1, "machine": "impl_cultivator" }
   ],

@@ -6,6 +6,8 @@ import {
   createFarm, addField, addMachine, requestPrep, requestPlant, stepFarm, fieldWork, describeField,
 } from '../src/framework-b.js';
 import { installShippedLastika } from '../src/lastika-stage.js';
+import { alignFieldCalendar, jobWindows, parseFieldStageDoc } from '../src/field-stages.js';
+import lastikaRaw from '../data/field-stages/lastika.json' with { type: 'json' };
 import { HUD_VERSION } from '../src/version.js';
 import { fieldVisual, CROPS } from '../src/_shared.js';
 
@@ -116,7 +118,61 @@ test('成熟后收割再收拾，回到可种的一般田地', () => {
   assert.equal(JOBS.sow.kind, 'hard');
   assert.equal(JOBS.harvest.kind, 'hard');
   assert.equal(JOBS.tidy.kind, 'hard');
-  assert.ok(Object.values(JOBS).every(job => job.kind === 'hard'));
+  assert.equal(JOBS.plow.kind, 'hard');
+  assert.deepEqual(
+    Object.values(JOBS).filter(job => job.kind === 'hard').map(job => job.id).sort(),
+    ['harvest', 'plow', 'sow', 'tidy'],
+  );
+  for (const job of Object.values(JOBS)) {
+    assert.equal(job.next, undefined);
+    assert.equal(job.nextStage, undefined);
+    assert.equal(job.stageId, undefined);
+  }
+});
+
+test('成熟段软作业记完成度，窗口过了挂起，不锁田也不改阶段', () => {
+  const farm = slice();
+  requestPrep(farm, 'a');
+  until(farm, () => farm.fields.get('a').ground === 'general');
+  requestPlant(farm, 'a');
+  const field = farm.fields.get('a');
+  until(farm, () => field.plant?.clock);
+  assert.equal(field.lock, null);
+  assert.equal(field.plant.stageId, 'mature');
+  assert.equal(field.plant.soft.topdress.status, '未执行');
+  assert.equal(field.plant.soft.hill.status, '未执行');
+  assert.equal(describeField(farm, 'a').suspend, null);
+  until(farm, () => field.plant.soft.topdress.status === '执行中' && field.plant.soft.topdress.progress > 0.05);
+  assert.equal(field.lock, null);
+  assert.equal(field.look, 'sown');
+  assert.equal(field.plant.stageId, 'mature');
+  const live = describeField(farm, 'a').jobs.find(job => job.id === 'topdress');
+  assert.equal(live.status, '执行中');
+  assert.ok(live.pct > 0 && live.pct < 100, live.pct);
+  until(farm, () => field.plant.soft.topdress.status === '执行完');
+  assert.equal(field.plant.soft.topdress.progress, 1);
+  assert.equal(field.plant.stageId, 'mature');
+  const done = farm.events.find(ev => ev.type === 'job-complete' && ev.jobId === 'topdress');
+  assert.equal(done.look, '不影响');
+  assert.equal('stageId' in done, false);
+  assert.equal('next' in done, false);
+  until(farm, () => field.plant.soft.hill.status === '过期');
+  assert.ok(field.plant.soft.hill.progress > 0 && field.plant.soft.hill.progress < 1);
+  assert.equal(field.lock, null);
+  assert.equal(field.look, 'sown');
+  assert.equal(field.plant.stageId, 'mature');
+  const hung = describeField(farm, 'a');
+  assert.equal(hung.suspend.title, '工单挂起提示');
+  const hill = hung.jobs.find(job => job.id === 'hill');
+  assert.equal(hill.status, '过期');
+  assert.ok(hill.pct > 0 && hill.pct < 100, hill.pct);
+  const missed = farm.events.find(ev => ev.type === 'job-missed' && ev.jobId === 'hill');
+  assert.equal('stageId' in missed, false);
+  assert.equal('next' in missed, false);
+  assert.ok(missed.progress > 0 && missed.progress < 1);
+  until(farm, () => field.look === 'mature');
+  assert.equal(field.plant.stageId, 'harvest');
+  assert.equal(fieldWork(farm, 'a')?.jobId, 'harvest');
 });
 
 test('调度优先更快的自走一体机，拖挂单独派不出去', () => {
@@ -244,11 +300,19 @@ test('作业中按幅宽刷下一道，地头有转弯，做完整块定稿', ()
 });
 
 test('拉斯提卡阶段和版本戳来自同一份定义', () => {
-  assert.equal(HUD_VERSION, '环穗 v2.3');
+  assert.equal(HUD_VERSION, '环穗 v3');
+  const doc = parseFieldStageDoc(structuredClone(lastikaRaw));
+  const windows = jobWindows(doc, alignFieldCalendar(doc)).filter(item => item.op.kind === 'optional');
+  assert.deepEqual(windows.map(item => item.op.id), ['topdress', 'hill']);
   const crop = installShippedLastika();
   assert.equal(crop.name, '拉斯提卡');
   assert.deepEqual(crop.stages.map(s => s.name), ['播种', '成熟', '收割', '收拾']);
   assert.deepEqual(crop.stages.map(s => s.kind), ['hard', 'time', 'hard', 'hard']);
+  const mature = crop.stages.find(stage => stage.id === 'mature');
+  assert.deepEqual(mature.soft, [
+    { job: 'topdress', name: '追肥', from: 4, to: 30 },
+    { job: 'hill', name: '培土', from: 20, to: 26 },
+  ]);
   assert.equal(crop.growSeconds, 36);
   assert.equal(crop.visual.row, 0.75);
   assert.equal(crop.visual.height, 0.7);

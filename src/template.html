@@ -168,6 +168,9 @@ body.underground #dock{display:none}
 #dock .jb b{font-weight:500;color:var(--fg);letter-spacing:.08em}
 #dock .jb span{white-space:nowrap;font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1}
 #dock .jb.run b,#dock .jb.run span{color:var(--sig)}
+#dock .jb.miss b,#dock .jb.miss span{color:var(--sig)}
+#suspend{right:22px;top:46%;display:none;padding:6px 10px;background:rgba(10,12,20,.82);border:1px solid var(--sig);color:var(--sig);font-size:12px;letter-spacing:.12em}
+#suspend.on{display:block}
 #dock .ops{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px}
 #dock #selbtns{display:none}
 #dock.picking #selbtns{display:grid}
@@ -223,12 +226,13 @@ body.underground #dock{display:none}
 <div class="hud panel hit" id="tiers"></div>
 <div class="hud panel hit" id="dock"></div>
 <div class="hud" id="toasts"></div>
+<div class="hud" id="suspend"></div>
 <div class="hud" id="hint">点一块田再选作物。播种走完才出苗。底部工具再点一次，或按 Esc，回到查看<br>拖动 平移 · 规划时拖框选田、右键指定作物 · 右键 旋转 · 滚轮 缩放 · C 培育层</div>
 <div id="picks"></div>
 <div id="marquee"></div>
 <div class="hud panel hit" id="planmenu"></div>
 <div id="viewer"><div class="bar"><div><h2>资产</h2><div class="sub">当前的薯田阶段、机器和田块。每张卡片是名字加上现在的样子。点一张就能指着它改。这是查看，不能上传。</div></div><button type="button" id="viewer-close">关闭</button></div><div class="sec">商品薯阶段</div><div class="grid" id="view-stages"></div><div class="sec">机器</div><div class="grid" id="view-machines"></div><div class="sec">田块</div><div class="grid" id="view-tiles"></div></div>
 <div class="hud" id="scale"><span id="scaletxt"></span><div id="scalebar"></div></div>
-<div class="hud" id="buildrev">环穗 v2.3</div>
+<div class="hud" id="buildrev">环穗 v3</div>
 <script>__BUNDLE__</script>
 </body></html>

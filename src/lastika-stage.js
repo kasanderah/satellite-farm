@@ -1,8 +1,22 @@
 // 框架 B 的拉斯提卡和阶段编辑器读同一份文档。
 // 只取四段名字、成熟时长、植株尺寸。不把工坊蒙版扫进田里。
 import { parseFieldStageDoc, stageByGroup } from './field-stages.js';
-import { PLANT_CROPS } from './framework-b.js';
+import { JOBS, PLANT_CROPS } from './framework-b.js';
 import lastikaRaw from '../data/field-stages/lastika.json' with { type: 'json' };
+
+// 阶段编辑器里没有单独的 soft 字段。可选作业加上阶段内窗口，就是软窗口。
+function softJobsFromDoc(doc, stage) {
+  if (!stage) return [];
+  const days = Number(stage.days) || 0;
+  return (doc.ops || []).flatMap(op => {
+    if (!op || op.kind !== 'optional' || op.stage !== stage.id || !op.window) return [];
+    const from = Number(op.window.from);
+    const to = Number(op.window.to);
+    if (!(to > from) || from < 0 || to > days + 1e-6) return [];
+    if (!JOBS[op.id] || JOBS[op.id].kind !== 'soft') return [];
+    return [{ job: op.id, name: op.name || JOBS[op.id].name, from, to }];
+  });
+}
 
 export function lastikaSpecFromDoc(doc) {
   const sow = stageByGroup(doc, 'A');
@@ -24,7 +38,7 @@ export function lastikaSpecFromDoc(doc) {
     },
     stages: [
       { id: 'sow', name: sow.name || '播种', kind: 'hard', job: 'sow' },
-      { id: 'mature', name: mature.name || '成熟', kind: 'time' },
+      { id: 'mature', name: mature.name || '成熟', kind: 'time', soft: softJobsFromDoc(doc, mature) },
       { id: 'harvest', name: harvest.name || '收割', kind: 'hard', job: 'harvest' },
       { id: 'tidy', name: tidy.name || '收拾', kind: 'hard', job: 'tidy' },
     ],

@@ -1,6 +1,7 @@
 // 框架 B · 最小闭环
 // 整地和种植是两条平行的阶段链。硬作业锁住整块田，做完才改地面样子。
-// 作业进行中可以按幅宽扫过下一道样子；做完蒙版拿掉，整块定稿。软作业这一刀没有。
+// 作业进行中可以按幅宽扫过下一道样子；做完蒙版拿掉，整块定稿。
+// 软作业挂在阶段上，只报完成或错过，不写下一阶段。窗口过了记过期，不锁田。
 
 export const HUB_PLOT = 'C0';
 
@@ -16,6 +17,8 @@ export const CAPABILITIES = {
   播种: { id: '播种', name: '播种' },
   收割: { id: '收割', name: '收割' },
   收拾: { id: '收拾', name: '收拾' },
+  追肥: { id: '追肥', name: '追肥' },
+  培土: { id: '培土', name: '培土' },
 };
 
 export const GROUNDS = {
@@ -29,6 +32,9 @@ export const JOBS = {
   sow: { id: 'sow', name: '播种', kind: 'hard', caps: ['播种'], look: 'sown' },
   harvest: { id: 'harvest', name: '收割', kind: 'hard', caps: ['收割'], look: 'harvested' },
   tidy: { id: 'tidy', name: '收拾', kind: 'hard', caps: ['收拾'], look: 'general' },
+  // look 为不影响：做完不改田面，阶段图自己走。窗口写在阶段上，不写在这里。
+  topdress: { id: 'topdress', name: '追肥', kind: 'soft', caps: ['追肥'], look: '不影响' },
+  hill: { id: 'hill', name: '培土', kind: 'soft', caps: ['培土'], look: '不影响' },
 };
 
 export const PREP_RECIPES = {
@@ -53,7 +59,10 @@ export const PLANT_CROPS = {
     visual: { shape: 'bush', tex: 'ridges', height: 0.7, row: 0.75, along: 0.36 },
     stages: [
       { id: 'sow', name: '播种', kind: 'hard', job: 'sow' },
-      { id: 'mature', name: '成熟', kind: 'time' },
+      { id: 'mature', name: '成熟', kind: 'time', soft: [
+        { job: 'topdress', name: '追肥', from: 4, to: 30 },
+        { job: 'hill', name: '培土', from: 20, to: 26 },
+      ] },
       { id: 'harvest', name: '收割', kind: 'hard', job: 'harvest' },
       { id: 'tidy', name: '收拾', kind: 'hard', job: 'tidy' },
     ],
@@ -66,7 +75,7 @@ export const OMNI = {
   className: '自走机',
   integral: true,
   name: '万能农机',
-  caps: ['犁田', '播种', '收割', '收拾'],
+  caps: ['犁田', '播种', '收割', '收拾', '追肥', '培土'],
   origin: 3.2,
   width: 16,
   workSpeed: 18,
@@ -252,6 +261,8 @@ function dispatch(farm) {
     }
     if (!best) return;
     farm.queue.shift();
+    const job = JOBS[item.jobId];
+    const soft = job?.kind === 'soft';
     const order = {
       id: farm.seq++,
       fieldId: field.id,
@@ -263,9 +274,10 @@ function dispatch(farm) {
       progress: 0,
       phase: 'cruise',
       pose: null,
+      passCap: soft ? 1 : 0,
     };
     writePose(farm, order);
-    field.lock = order.id;
+    if (!soft) field.lock = order.id;
     best.busy = true;
     farm.orders.push(order);
     pushEvent(farm, { type: 'dispatch', fieldId: field.id, jobId: item.jobId, machineId: best.id, width: order.width, origin: order.origin });
@@ -273,7 +285,9 @@ function dispatch(farm) {
 }
 
 function passesOf(order, field) {
-  return Math.max(1, Math.ceil(field.width / order.width));
+  const full = Math.max(1, Math.ceil(field.width / order.width));
+  if (order.passCap > 0) return Math.max(1, Math.min(full, order.passCap));
+  return full;
 }
 
 function metersOf(order, field) {
@@ -387,13 +401,35 @@ function applyLook(field, job) {
   return true;
 }
 
-function finishOrder(farm, order) {
+function releaseOrder(farm, order) {
   const field = farm.fields.get(order.fieldId);
-  const job = JOBS[order.jobId];
   const machine = orderMachine(farm, order);
   farm.orders = farm.orders.filter(item => item !== order);
   if (machine) machine.busy = false;
-  if (field) field.lock = null;
+  if (field && field.lock === order.id) field.lock = null;
+}
+
+function finishOrder(farm, order) {
+  const field = farm.fields.get(order.fieldId);
+  const job = JOBS[order.jobId];
+  if (job?.kind === 'soft') {
+    const row = field?.plant?.soft?.[order.jobId];
+    if (row && row.status !== '过期') {
+      row.progress = 1;
+      row.status = '执行完';
+    }
+    releaseOrder(farm, order);
+    pushEvent(farm, {
+      type: 'job-complete',
+      fieldId: field?.id,
+      jobId: job.id,
+      look: job.look,
+      lane: order.lane,
+      progress: row ? row.progress : 1,
+    });
+    return;
+  }
+  releaseOrder(farm, order);
   pushEvent(farm, { type: 'job-complete', fieldId: field?.id, jobId: job.id, look: job.look, lane: order.lane });
   if (field) applyLook(field, job);
   if (field?.prep && order.lane === 'prep') {
@@ -425,6 +461,7 @@ function finishOrder(farm, order) {
         if (next.kind === 'time') {
           field.plant.grow = 0;
           field.plant.clock = true;
+          bindSoft(field);
           pushEvent(farm, { type: 'clock-start', fieldId: field.id, stageId: next.id });
         } else if (next.kind === 'hard') {
           const nextJob = JOBS[next.job];
@@ -446,6 +483,100 @@ function applyGrowth(farm, slice, skipId) {
     if (!field.plant?.clock || field.lock) continue;
     field.plant.grow += slice;
   }
+}
+
+function stageRow(field) {
+  if (!field.plant) return null;
+  const crop = PLANT_CROPS[field.plant.cropId];
+  return crop?.stages[field.plant.index] || null;
+}
+
+function bindSoft(field) {
+  if (!field.plant?.clock) return;
+  const stage = stageRow(field);
+  const specs = stage?.kind === 'time' ? (stage.soft || []) : [];
+  if (!specs.length) return;
+  if (!field.plant.soft) field.plant.soft = {};
+  for (const spec of specs) {
+    const job = JOBS[spec.job];
+    if (!job || job.kind !== 'soft') continue;
+    if (field.plant.soft[spec.job]) continue;
+    field.plant.soft[spec.job] = {
+      name: spec.name || job.name,
+      from: spec.from,
+      to: spec.to,
+      progress: 0,
+      status: '未执行',
+    };
+  }
+}
+
+function expireSoft(farm, field, jobId, row) {
+  if (row.status === '执行完' || row.status === '过期') return;
+  const order = farm.orders.find(item => item.fieldId === field.id && item.jobId === jobId);
+  if (order) {
+    row.progress = order.progress;
+    releaseOrder(farm, order);
+  }
+  farm.queue = farm.queue.filter(item => !(item.fieldId === field.id && item.jobId === jobId));
+  row.status = '过期';
+  pushEvent(farm, { type: 'job-missed', fieldId: field.id, jobId, progress: row.progress });
+}
+
+function touchSoft(farm) {
+  for (const field of farm.fields.values()) {
+    bindSoft(field);
+    const book = field.plant?.soft;
+    if (!book) continue;
+    const grow = field.plant.grow;
+    const clock = !!field.plant.clock;
+    for (const [jobId, row] of Object.entries(book)) {
+      if (row.status === '执行完' || row.status === '过期') continue;
+      if (!clock || grow + 1e-4 >= row.to) expireSoft(farm, field, jobId, row);
+    }
+    const order = farm.orders.find(item => item.fieldId === field.id && item.lane === 'soft');
+    if (!order) continue;
+    const row = book[order.jobId];
+    if (!row || row.status === '过期' || row.status === '执行完') continue;
+    row.status = '执行中';
+    row.progress = order.progress;
+  }
+}
+
+function queueSoft(farm) {
+  for (const field of farm.fields.values()) {
+    const book = field.plant?.soft;
+    if (!book || !field.plant.clock || field.lock) continue;
+    if (farm.orders.some(item => item.fieldId === field.id)) continue;
+    if (farm.queue.some(item => item.fieldId === field.id)) continue;
+    const grow = field.plant.grow;
+    const open = Object.entries(book).find(([, row]) => (
+      row.status === '未执行' && grow + 1e-4 >= row.from && grow < row.to - 1e-4
+    ));
+    if (!open) continue;
+    const job = JOBS[open[0]];
+    if (!job) continue;
+    farm.queue.push({
+      id: farm.seq++,
+      fieldId: field.id,
+      jobId: job.id,
+      caps: job.caps.slice(),
+      lane: 'soft',
+    });
+  }
+}
+
+function softHorizon(field) {
+  const book = field.plant?.soft;
+  if (!field.plant?.clock || !book) return Infinity;
+  const grow = field.plant.grow;
+  let wait = Infinity;
+  for (const row of Object.values(book)) {
+    if (row.status === '执行完' || row.status === '过期') continue;
+    if (grow < row.from) wait = Math.min(wait, row.from - grow);
+    if (grow < row.to) wait = Math.min(wait, row.to - grow);
+  }
+  return wait;
 }
 
 function finishGrowth(farm) {
@@ -471,7 +602,10 @@ export function stepFarm(farm, dt, env = null) {
   if (!(dt > 0)) return farm;
   let left = dt;
   for (let guard = 0; guard < 48 && left > 1e-6; guard++) {
+    touchSoft(farm);
+    queueSoft(farm);
     dispatch(farm);
+    touchSoft(farm);
     const order = farm.orders[0] || null;
     if (order?.phase === 'work') {
       const field = farm.fields.get(order.fieldId);
@@ -496,6 +630,7 @@ export function stepFarm(farm, dt, env = null) {
     for (const field of farm.fields.values()) {
       const wait = growthLeft(field);
       if (wait != null) horizon = Math.min(horizon, wait);
+      horizon = Math.min(horizon, softHorizon(field));
     }
     if (!isFinite(horizon)) {
       applyGrowth(farm, left, null);
@@ -505,7 +640,7 @@ export function stepFarm(farm, dt, env = null) {
     const slice = Math.min(left, Math.max(horizon, 0));
     if (!(slice > 1e-8)) break;
     if (order?.phase === 'cruise' && env?.cruise) env.cruise(farm, order, slice);
-    const skip = order && (order.phase === 'work' || order.phase === 'cruise') ? order.fieldId : null;
+    const skip = order && order.lane !== 'soft' && (order.phase === 'work' || order.phase === 'cruise') ? order.fieldId : null;
     if (order?.phase === 'work') advanceWork(farm, order, slice);
     if (order?.phase === 'turn') {
       order.turnT = (order.turnT || 0) + slice;
@@ -520,6 +655,8 @@ export function stepFarm(farm, dt, env = null) {
     if (order?.phase === 'work' && order.progress >= 1 - 1e-9) finishOrder(farm, order);
     finishGrowth(farm);
   }
+  touchSoft(farm);
+  queueSoft(farm);
   dispatch(farm);
   return farm;
 }
@@ -560,8 +697,20 @@ export function describeField(farm, fieldId) {
     stat = `${crop.name} · ${stage?.name || ''}`;
   }
   const jobs = [];
-  if (work && job) jobs.push({ id: job.id, name: job.name, status: work.phase === 'cruise' ? '开来' : work.phase === 'turn' ? '转弯' : '执行中', pct });
-  else if (field.plant?.clock) jobs.push({ id: 'mature', name: '成熟', status: '生长', pct: Math.round(field.plant.grow / field.plant.need * 100) });
+  if (work && job && job.kind !== 'soft') jobs.push({ id: job.id, name: job.name, status: work.phase === 'cruise' ? '开来' : work.phase === 'turn' ? '转弯' : '执行中', pct });
+  if (field.plant?.soft) {
+    for (const [id, row] of Object.entries(field.plant.soft)) {
+      const active = work && work.jobId === id && row.status !== '过期' && row.status !== '执行完';
+      const status = active
+        ? (work.phase === 'cruise' ? '开来' : work.phase === 'turn' ? '转弯' : '执行中')
+        : row.status;
+      const rowPct = active ? pct : Math.round((row.progress || 0) * 100);
+      jobs.push({ id, name: row.name, status, pct: rowPct });
+    }
+  }
+  if (!jobs.length && field.plant?.clock) jobs.push({ id: 'mature', name: '成熟', status: '生长', pct: Math.round(field.plant.grow / field.plant.need * 100) });
+  const expired = jobs.find(item => item.status === '过期');
+  const suspend = expired ? { title: '工单挂起提示' } : null;
   const chips = crop
     ? crop.stages.map((s, i) => ({ name: s.name, on: i === field.plant.index }))
     : [{ name: field.ground === 'general' ? '一般田地' : '未整地', on: true }];
@@ -573,6 +722,7 @@ export function describeField(farm, fieldId) {
     look: field.look,
     stat,
     jobs,
+    suspend,
     chips,
     bar,
     canPrep: !field.plant && !fieldLocked(farm, field) && field.ground !== 'general',
