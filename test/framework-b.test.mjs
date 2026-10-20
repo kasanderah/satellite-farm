@@ -433,8 +433,28 @@ test('名称旁状态跟着工单走，犁地不被播种队头挡住', () => {
   assert.match(describeField(hung, 'a').stat, /拉斯提卡/);
 });
 
+test('浮标空闲用短文案，有工单时与名称旁状态相同', () => {
+  const farm = slice();
+  addField(farm, { id: 'h', length: 128, width: 128, ground: 'raw', look: 'hold' });
+  addField(farm, { id: 'g', length: 128, width: 128, ground: 'general', look: 'general' });
+  assert.equal(describeField(farm, 'a').float, '未整地');
+  assert.equal(describeField(farm, 'a').float.includes('整地后'), false);
+  assert.match(describeField(farm, 'a').stat, /未整地/);
+  assert.equal(describeField(farm, 'h').float, '定格冠层');
+  assert.equal(describeField(farm, 'g').float, '一般田地 · 可以种植拉斯提卡');
+  requestPrep(farm, 'a');
+  assert.equal(describeField(farm, 'a').badge, '整地中');
+  assert.equal(describeField(farm, 'a').float, describeField(farm, 'a').badge);
+  requestPrep(farm, 'h');
+  assert.equal(describeField(farm, 'h').float, '等待整地');
+  stepFarm(farm, 1);
+  assert.equal(describeField(farm, 'a').float, '犁地中');
+  until(farm, () => farm.fields.get('a').ground === 'general');
+  assert.equal(describeField(farm, 'a').float, '一般田地 · 可以种植拉斯提卡');
+});
+
 test('拉斯提卡阶段和版本戳来自同一份定义', () => {
-  assert.equal(HUD_VERSION, '环穗 v4.1');
+  assert.equal(HUD_VERSION, '环穗 v4.2');
   const doc = parseFieldStageDoc(structuredClone(lastikaRaw));
   const windows = jobWindows(doc, alignFieldCalendar(doc)).filter(item => item.op.kind === 'optional');
   assert.deepEqual(windows.map(item => item.op.id), ['topdress', 'hill']);

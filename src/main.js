@@ -2690,8 +2690,7 @@ function updateLabels(d) {
   if (aField > 0) for (const f of fields) {
     if (f.crop < 0) continue; const x = f.x0 + 64, z = f.z0 + 64; if (Math.hypot(x - camS.x, z - camS.z) > Math.min(d * 1.15, 720) || inCut(x, z, 40)) continue;
     const watch = cropWatch(f);
-    const bStat = f.bUnit && f.bUnit.look !== 'hold' ? f.bUnit.text : '';
-    const st = bStat || (watch ? `${watch.label} · 第 ${Math.floor(watch.day)} 日` : (f.state === 3 ? '作业' : '定格冠层'));
+    const st = f.bUnit?.label || (watch ? `${watch.label} · 第 ${Math.floor(watch.day)} 日` : (f.state === 3 ? '作业' : '定格冠层'));
     const sw = watch ? PALETTE.olive : PALETTE.rego;
     want.push({ x, z, pr: 2, a: aField, html: `<i style="background:${sw}"></i><b>F-${String(f.i).padStart(2, '0')}${String(f.j).padStart(2, '0')}</b><span>${st}</span>`, cls: 'fld' + ((f === selected || watch) ? ' act' : '') });
   }

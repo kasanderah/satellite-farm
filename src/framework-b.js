@@ -793,6 +793,23 @@ export function fieldBadge(farm, fieldId) {
   return hung ? '工单挂起提示' : null;
 }
 
+// 田块浮标只写短状态。有工单时与信息框名称旁的 badge 相同；空闲不把操作说明拼进浮标。
+export function fieldFloat(farm, fieldId) {
+  const badge = fieldBadge(farm, fieldId);
+  if (badge) return badge;
+  const field = farm.fields.get(fieldId);
+  if (!field) return '';
+  if (field.look === 'hold') return '定格冠层';
+  const crop = field.plant ? PLANT_CROPS[field.plant.cropId] : null;
+  if (crop) {
+    const stage = crop.stages[field.plant.index];
+    const name = stage?.name || '';
+    return name ? `${crop.name} · ${name}` : crop.name;
+  }
+  if (field.ground === 'general') return '一般田地 · 可以种植拉斯提卡';
+  return '未整地';
+}
+
 export function describeField(farm, fieldId) {
   const field = farm.fields.get(fieldId);
   if (!field) return null;
@@ -842,6 +859,7 @@ export function describeField(farm, fieldId) {
     look: field.look,
     stat,
     badge: fieldBadge(farm, fieldId),
+    float: fieldFloat(farm, fieldId),
     jobs,
     suspend,
     chips,

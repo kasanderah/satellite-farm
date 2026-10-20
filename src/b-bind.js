@@ -188,6 +188,7 @@ function syncFields() {
       look: unit.look,
       growFrac: unit.look === 'sown' ? frac : 0,
       text: desc?.stat || '',
+      label: desc?.float || '',
       ground: unit.ground,
       plot: unit.plot,
     };
