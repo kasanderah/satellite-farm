@@ -4,6 +4,7 @@ import lastika from '../data/field-stages/lastika.json' with { type: 'json' };
 import { cropDef } from '../src/surface-crops.js';
 import { PLANT_CROPS } from '../src/framework-b.js';
 import { installShippedLastika } from '../src/lastika-stage.js';
+import { DAY_SECONDS } from '../src/world-clock.js';
 import {
   applyStagePayload, lastikaDocFromPayload, bootFieldStageSource,
   writeStageStore, suspendLastikaStage, resumeLastikaStage, stageBadge, FIELD_STAGE_STORE, readStageStore,
@@ -37,7 +38,8 @@ test('editor lastika replaces the playable stages, windows, and paints', () => {
     assert.equal(stageBadge(), '工坊覆写');
     const crop = PLANT_CROPS.lastika;
     assert.equal(crop.name, '拉斯提卡工坊');
-    assert.equal(crop.growSeconds, 36);
+    assert.equal(crop.growDays, 36);
+    assert.equal(crop.growSeconds, 36 * DAY_SECONDS);
     assert.equal(crop.stages.find(s => s.id === 'mature').name, '熟透');
     assert.deepEqual(crop.stages.find(s => s.id === 'mature').soft, [
       { job: 'topdress', name: '追肥', from: 6, to: 12 },
@@ -52,7 +54,8 @@ test('editor lastika replaces the playable stages, windows, and paints', () => {
   }
   assert.equal(stageBadge(), '仓库默认');
   assert.equal(PLANT_CROPS.lastika.stages.find(s => s.id === 'mature').name, '成熟');
-  assert.equal(PLANT_CROPS.lastika.growSeconds, 36);
+  assert.equal(PLANT_CROPS.lastika.growDays, 36);
+  assert.equal(PLANT_CROPS.lastika.growSeconds, 36 * DAY_SECONDS);
 });
 
 test('a potato gantt payload is not the playable stage source', () => {
@@ -87,7 +90,8 @@ test('boot reads crops.lastika and repo ignores the workshop slot', () => {
     assert.equal(skipped.origin, 'repo');
     assert.equal(skipped.skipped, true);
     assert.equal(PLANT_CROPS.lastika.stages.find(s => s.id === 'mature').name, '成熟');
-    assert.equal(PLANT_CROPS.lastika.growSeconds, 36);
+    assert.equal(PLANT_CROPS.lastika.growDays, 36);
+    assert.equal(PLANT_CROPS.lastika.growSeconds, 36 * DAY_SECONDS);
     const again = bootFieldStageSource(store, null);
     assert.equal(again.origin, 'workshop');
     assert.equal(PLANT_CROPS.lastika.name, '拉斯提卡工坊');

@@ -14,11 +14,13 @@
 // edges 是显式边表。默认有一条启用的 E→O（via clear）。
 // 同时留着 E→A（via resow，enabled: false）。不要在主进程里写死「收获后只能回空地」。
 
+import { DAY_SECONDS } from './world-clock.js';
+
 export const FIELD_STAGE_SCHEMA = 'ringsheaf.field-stage/1';
 export const FIELD_STAGE_STORE = 'ringsheaf.assetlab.fieldStages.v1';
 
-// 1× 播放：1 游戏日 = 1 真实秒。加速只乘这个比例。
-export const FIELD_STAGE_SECONDS_PER_DAY = 1;
+// 1× 和主游戏同一口世界钟：1 世界日 = DAY_SECONDS 真实秒。加速只乘这个比例。
+export const FIELD_STAGE_SECONDS_PER_DAY = DAY_SECONDS;
 
 // 序列组是 O/A/B/C/D/E，不是阶段 id。必有 O、A、B、D、E。C 和标成 M 的中间段可以增减，并且排在 B 和 C 之间。
 export const SEQUENCE_GROUPS = ['O', 'A', 'B', 'M', 'C', 'D', 'E'];

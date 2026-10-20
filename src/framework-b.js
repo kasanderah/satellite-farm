@@ -3,6 +3,9 @@
 // 作业进行中可以按幅宽扫过下一道样子；做完蒙版拿掉，整块定稿。
 // 软作业挂在阶段上，只报完成或错过，不写下一阶段。窗口过了记过期，不锁田。
 // 做完不改整块样子。作业进行中跟车蒙版仍刷 sweep 那一档，和硬作业同一条刷色。
+// 生长和软窗记世界日。stepFarm 仍收真实秒，只在钟的边界换算。
+
+import { DAY_SECONDS } from './world-clock.js';
 
 export const HUB_PLOT = 'C0';
 
@@ -34,7 +37,7 @@ export const JOBS = {
   harvest: { id: 'harvest', name: '收割', kind: 'hard', caps: ['收割'], look: 'harvested' },
   tidy: { id: 'tidy', name: '收拾', kind: 'hard', caps: ['收拾'], look: 'general' },
   // look 为不影响：做完不改田面，阶段图自己走。sweep 只给跟车蒙版，扫过的一条用这个样子。
-  // passes 是软作业趟数。1 趟才能落进 36 秒成熟；硬作业不写 passes，仍铺满整块。
+  // passes 是软作业趟数。窗口按世界日。硬作业不写 passes，仍铺满整块。
   topdress: { id: 'topdress', name: '追肥', kind: 'soft', caps: ['追肥'], look: '不影响', sweep: 'mature', passes: 1 },
   hill: { id: 'hill', name: '培土', kind: 'soft', caps: ['培土'], look: '不影响', sweep: 'mature', passes: 1 },
 };
@@ -49,13 +52,16 @@ export const PREP_RECIPES = {
   },
 };
 
-export const GROW_SECONDS = 36;
+export const GROW_DAYS = 36;
+// 1× 下的现实秒。36 世界日 × 720 现实秒/世界日。钟本身记世界日，不把这个数写进 need。
+export const GROW_SECONDS = GROW_DAYS * DAY_SECONDS;
 
 export const PLANT_CROPS = {
   lastika: {
     id: 'lastika',
     name: '拉斯提卡',
     grounds: ['general'],
+    growDays: GROW_DAYS,
     growSeconds: GROW_SECONDS,
     // 株高、垄距、株距只属于拉斯提卡。不要借商品薯的 0.55 / 0.90 / 0.40。
     visual: { shape: 'bush', tex: 'ridges', height: 0.7, row: 0.75, along: 0.36 },
@@ -268,7 +274,7 @@ export function requestPlant(farm, fieldId, cropId = 'lastika') {
     index: 0,
     stageId: crop.stages[0].id,
     grow: 0,
-    need: crop.growSeconds,
+    need: crop.growDays,
     clock: false,
   };
   const job = JOBS[crop.stages[0].job];
@@ -608,7 +614,7 @@ function applyGrowth(farm, slice, skip) {
   for (const field of farm.fields.values()) {
     if (skip instanceof Set ? skip.has(field.id) : field.id === skip) continue;
     if (!field.plant?.clock || field.lock) continue;
-    field.plant.grow += slice;
+    field.plant.grow += slice / DAY_SECONDS;
   }
 }
 
@@ -759,8 +765,8 @@ export function stepFarm(farm, dt, env = null) {
     }
     for (const field of farm.fields.values()) {
       const wait = growthLeft(field);
-      if (wait != null) horizon = Math.min(horizon, wait);
-      horizon = Math.min(horizon, softHorizon(field));
+      if (wait != null) horizon = Math.min(horizon, wait * DAY_SECONDS);
+      horizon = Math.min(horizon, softHorizon(field) * DAY_SECONDS);
     }
     if (!isFinite(horizon)) {
       applyGrowth(farm, left, null);
@@ -868,8 +874,7 @@ export function describeField(farm, fieldId) {
     const where = work.phase === 'cruise' ? '正在开来' : work.phase === 'turn' ? '地头转弯' : `${job.name} ${pct}%`;
     stat = `${name}${who}${where}`;
   } else if (field.plant?.clock) {
-    const sec = Math.floor(field.plant.grow);
-    stat = `${crop.name} · 播种已完成 · 生长 ${sec} / ${field.plant.need} 秒`;
+    stat = `${crop.name} · 播种已完成 · 生长 ${field.plant.grow.toFixed(1)} / ${field.plant.need} 世界日`;
   } else if (field.plant && !work) {
     const stage = crop.stages[field.plant.index];
     stat = `${crop.name} · ${stage?.name || ''}`;

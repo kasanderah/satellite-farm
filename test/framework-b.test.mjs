@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   CAPABILITIES, GROUNDS, JOBS, PREP_RECIPES, PLANT_CROPS, OMNI, TRACTOR, PLOW, MACHINE_CLASSES,
-  GROW_SECONDS, HUB_PLOT, plotAddress, lookG, fieldShader, hitchStub,
+  GROW_DAYS, GROW_SECONDS, HUB_PLOT, plotAddress, lookG, fieldShader, hitchStub,
   createFarm, addField, addMachine, mountHitch, chooseMachine, requestPrep, requestPlant, stepFarm, fieldWork, describeField,
 } from '../src/framework-b.js';
 import { installShippedLastika } from '../src/lastika-stage.js';
@@ -10,6 +10,7 @@ import { alignFieldCalendar, jobWindows, parseFieldStageDoc } from '../src/field
 import lastikaRaw from '../data/field-stages/lastika.json' with { type: 'json' };
 import { HUD_VERSION } from '../src/version.js';
 import { fieldVisual, CROPS } from '../src/_shared.js';
+import { DAY_SECONDS, WORLD_MIN_PER_REAL_MIN } from '../src/world-clock.js';
 
 function slice() {
   const farm = createFarm();
@@ -18,11 +19,11 @@ function slice() {
   return farm;
 }
 
-function until(farm, pred, cap = 600) {
+function until(farm, pred, cap = 600, step = 1) {
   let t = 0;
   while (t < cap && !pred()) {
-    stepFarm(farm, 1);
-    t += 1;
+    stepFarm(farm, step);
+    t += step;
   }
   assert.ok(t < cap, '超时');
   return t;
@@ -103,7 +104,8 @@ test('没整地不能种；播种做完才开始生长', () => {
   const atStart = field.plant.grow;
   stepFarm(farm, 1);
   assert.ok(field.plant.grow > atStart);
-  assert.equal(field.plant.need, GROW_SECONDS);
+  assert.ok(field.plant.grow - atStart < 1);
+  assert.equal(field.plant.need, GROW_DAYS);
   assert.equal(PLANT_CROPS.lastika.name, '拉斯提卡');
   assert.deepEqual(PLANT_CROPS.lastika.grounds, ['general']);
   assert.deepEqual(PLANT_CROPS.lastika.stages.map(s => s.name), ['播种', '成熟', '收割', '收拾']);
@@ -121,7 +123,8 @@ test('成熟后收割再收拾，回到可种的一般田地', () => {
   until(farm, () => farm.fields.get('a').ground === 'general');
   requestPlant(farm, 'a');
   const field = farm.fields.get('a');
-  until(farm, () => field.look === 'mature');
+  until(farm, () => field.plant && field.plant.grow >= field.plant.need - 1.5, GROW_SECONDS + DAY_SECONDS * 2, DAY_SECONDS);
+  until(farm, () => field.look === 'mature', 2000);
   assert.equal(field.plant.stageId, 'harvest');
   assert.equal(field.plant.clock, false);
   until(farm, () => field.look === 'harvested');
@@ -156,9 +159,15 @@ test('成熟段软作业记完成度，窗口过了挂起，不锁田也不改�
   until(farm, () => field.plant?.clock);
   assert.equal(field.lock, null);
   assert.equal(field.plant.stageId, 'mature');
+  assert.equal(field.plant.need, GROW_DAYS);
+  assert.equal(field.plant.soft.topdress.from, 4);
+  assert.equal(field.plant.soft.topdress.to, 30);
+  assert.equal(field.plant.soft.hill.from, 20);
+  assert.equal(field.plant.soft.hill.to, 26);
   assert.equal(field.plant.soft.topdress.status, '未执行');
   assert.equal(field.plant.soft.hill.status, '未执行');
   assert.equal(describeField(farm, 'a').suspend, null);
+  until(farm, () => field.plant.grow >= 3.9, GROW_SECONDS, DAY_SECONDS);
   until(farm, () => field.plant.soft.topdress.status === '执行中' && field.plant.soft.topdress.progress > 0.05);
   assert.equal(field.lock, null);
   assert.equal(field.look, 'sown');
@@ -188,6 +197,10 @@ test('成熟段软作业记完成度，窗口过了挂起，不锁田也不改�
   assert.equal(done.look, '不影响');
   assert.equal('stageId' in done, false);
   assert.equal('next' in done, false);
+  until(farm, () => field.plant.grow >= 19, GROW_SECONDS, DAY_SECONDS);
+  until(farm, () => field.plant.grow >= 19.9, GROW_SECONDS, 30);
+  field.plant.soft.hill.to = field.plant.soft.hill.from + 3 / DAY_SECONDS;
+  until(farm, () => field.plant.soft.hill.status === '执行中' && field.plant.soft.hill.progress > 0.02);
   until(farm, () => field.plant.soft.hill.status === '过期');
   assert.ok(field.plant.soft.hill.progress > 0 && field.plant.soft.hill.progress < 1);
   assert.equal(field.lock, null);
@@ -202,7 +215,8 @@ test('成熟段软作业记完成度，窗口过了挂起，不锁田也不改�
   assert.equal('stageId' in missed, false);
   assert.equal('next' in missed, false);
   assert.ok(missed.progress > 0 && missed.progress < 1);
-  until(farm, () => field.look === 'mature');
+  until(farm, () => field.plant.grow >= field.plant.need - 1.5, GROW_SECONDS, DAY_SECONDS);
+  until(farm, () => field.look === 'mature', 2000);
   assert.equal(field.plant.stageId, 'harvest');
   assert.equal(fieldWork(farm, 'a')?.jobId, 'harvest');
 });
@@ -493,8 +507,32 @@ test('方案2：播种还在等一体机时犁地照样派拖拉机，一体机�
   assert.equal(chooseMachine(ties, ['犁田'], (id) => (id === 'far' ? 30 : 4)).id, 'near');
 });
 
+test('生长钟按世界日走', () => {
+  assert.equal(WORLD_MIN_PER_REAL_MIN, 120);
+  assert.equal(DAY_SECONDS, 720);
+  assert.equal(GROW_DAYS, 36);
+  assert.equal(GROW_SECONDS, 36 * 720);
+  assert.equal(lastikaRaw.secondsPerDayAt1x, 720);
+  const farm = slice();
+  requestPrep(farm, 'a');
+  until(farm, () => farm.fields.get('a').ground === 'general');
+  requestPlant(farm, 'a');
+  const field = farm.fields.get('a');
+  until(farm, () => field.plant.clock);
+  const before = field.plant.grow;
+  stepFarm(farm, DAY_SECONDS);
+  assert.ok(Math.abs(field.plant.grow - before - 1) < 1e-6);
+  assert.equal(field.plant.need, 36);
+  assert.match(describeField(farm, 'a').stat, /生长 1\.0 \/ 36 世界日/);
+  assert.equal(field.plant.soft.topdress.from, 4);
+  assert.equal(field.plant.soft.topdress.to, 30);
+  assert.equal(field.plant.soft.hill.from, 20);
+  assert.equal(field.plant.soft.hill.to, 26);
+  assert.equal(field.look, 'sown');
+});
+
 test('拉斯提卡阶段和版本戳来自同一份定义', () => {
-  assert.equal(HUD_VERSION, '环穗 v6');
+  assert.equal(HUD_VERSION, '环穗 v6.1');
   const doc = parseFieldStageDoc(structuredClone(lastikaRaw));
   const windows = jobWindows(doc, alignFieldCalendar(doc)).filter(item => item.op.kind === 'optional');
   assert.deepEqual(windows.map(item => item.op.id), ['topdress', 'hill']);
@@ -507,7 +545,8 @@ test('拉斯提卡阶段和版本戳来自同一份定义', () => {
     { job: 'topdress', name: '追肥', from: 4, to: 30 },
     { job: 'hill', name: '培土', from: 20, to: 26 },
   ]);
-  assert.equal(crop.growSeconds, 36);
+  assert.equal(crop.growDays, 36);
+  assert.equal(crop.growSeconds, 36 * DAY_SECONDS);
   assert.equal(crop.visual.row, 0.75);
   assert.equal(crop.visual.height, 0.7);
   assert.equal(crop.visual.along, 0.36);

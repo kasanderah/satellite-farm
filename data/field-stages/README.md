@@ -23,7 +23,7 @@
 | 组 | 主游戏 |
 | --- | --- |
 | A | 硬作业播种 |
-| B | 生长钟。`days` 是 1× 下的秒数。可选作业的窗口变成软作业 |
+| B | 生长钟。`days` 是世界日。1× 下一世界日 = 720 现实秒（12 现实分钟）。可选作业的窗口是同一单位的软窗 |
 | D | 硬作业收割 |
 | E | 硬作业收拾 |
 
@@ -58,7 +58,7 @@ const doc = parseFieldStageDoc(JSON.parse(text));
 | `schema` | `ringsheaf.field-stage/1` |
 | `cropId` / `logicId` | 拉斯提卡是 `lastika` / `crop_lastika` |
 | `cropName` / `name` | 显示名。主游戏浮标用它 |
-| `timeUnit` | `gameDay`。`secondsPerDayAt1x` 是工坊 1× 的换算 |
+| `timeUnit` | `gameDay`。`secondsPerDayAt1x` 与世界钟对齐：1× 下 1 世界日 = 720 现实秒 |
 | `rows` / `grid.along` | 垄行数，沿行蒙版格数 |
 | `chain` | 自然生长链。拉斯提卡是 A、B、D |
 | `stages[]` | `group` 是 O / A / B / C / D / E / M。`color` `canopy` `roughness` `cover` `plantScale` 是地面和植株。`ridge` 为 `null` 时用文档上的连锁截面 |

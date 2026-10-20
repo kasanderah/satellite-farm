@@ -2,6 +2,7 @@
 // 只取四段名字、成熟时长、植株尺寸。不把工坊蒙版扫进田里。
 import { parseFieldStageDoc, stageByGroup } from './field-stages.js';
 import { JOBS, PLANT_CROPS } from './framework-b.js';
+import { DAY_SECONDS } from './world-clock.js';
 import lastikaRaw from '../data/field-stages/lastika.json' with { type: 'json' };
 
 // 阶段编辑器里没有单独的 soft 字段。可选作业加上阶段内窗口，就是软窗口。
@@ -31,9 +32,11 @@ export function lastikaSpecFromDoc(doc) {
   if (!sow || !mature || !harvest || !tidy) throw new Error('拉斯提卡缺少播种、成熟、收割或收拾');
   const plant = doc.plant || {};
   const days = Number(mature.days);
+  const growDays = days > 0 ? days : PLANT_CROPS.lastika.growDays;
   return {
     name: doc.cropName || doc.name || '拉斯提卡',
-    growSeconds: days > 0 ? days : PLANT_CROPS.lastika.growSeconds,
+    growDays,
+    growSeconds: growDays * DAY_SECONDS,
     visual: {
       shape: plant.shape || 'bush',
       tex: 'ridges',
@@ -62,6 +65,7 @@ export function lastikaSpecFromDoc(doc) {
 export function applyLastikaSpec(spec, origin = 'repo') {
   const crop = PLANT_CROPS.lastika;
   crop.name = spec.name;
+  crop.growDays = spec.growDays;
   crop.growSeconds = spec.growSeconds;
   crop.visual = { ...crop.visual, ...spec.visual, tex: 'ridges' };
   crop.stages.splice(0, crop.stages.length, ...spec.stages);

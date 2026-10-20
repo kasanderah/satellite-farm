@@ -6,7 +6,7 @@ import { NOISE } from './glsl.js';
 import { plantGeometry } from './prefabs.js';
 import { CROPS, PALETTE } from './_shared.js';
 import {
-  FIELD_STAGE_SCHEMA, FIELD_STAGE_STORE, placeholderFieldDoc, parseFieldStageDoc,
+  FIELD_STAGE_SCHEMA, FIELD_STAGE_STORE, FIELD_STAGE_SECONDS_PER_DAY, placeholderFieldDoc, parseFieldStageDoc,
   createSim, stepSim, startJob, cancelWorkOrder, sampleRidge, appearanceOf,
   stageById, stageByGroup, insertGrowthStage, removeGrowthStage, dominant, tally,
   renameStageId, renameStageName, setStageGroup, orderedStageOps, moveStageOp, stageJobStrip, SEQUENCE_GROUPS,
@@ -35,7 +35,7 @@ const HELP = `打开：左侧「田间 / 阶段编辑器」。默认是拉斯提
 
 序列：O、A、B、D、E 必须有。C 和中间段可以加、也可以删。阶段名和 id 都能改。
 
-时长：点一个阶段，改游戏日。播放按这个比例走。1× 时 1 游戏日 = 1 秒。B 的天数就是主游戏生长秒数。
+时长：点一个阶段，改世界日。播放和主游戏同一口钟。1× 时 1 世界日 = 12 现实分钟（720 现实秒）。B 的天数就是主游戏生长的世界日，软窗 from/to 同单位。
 
 作业：色条从上到下就是执行顺序。硬作业锁到做完。软作业带窗口，过了窗口可以失败并挂起。田面可以选色、植株、垄截面，也可以不影响。
 
@@ -609,7 +609,7 @@ export function createFieldWorkshop(els) {
     if (!el) return;
     const plantable = PLANTABLE_CROP_IDS.includes(cropId);
     el.textContent = cropId === 'lastika'
-      ? '正在编辑拉斯提卡。主游戏只读这份：阶段名、软窗、田面色、生长钟。成熟天数是 1× 下的生长秒数。整地不在这条链里。'
+      ? '正在编辑拉斯提卡。主游戏只读这份：阶段名、软窗、田面色、生长钟。成熟天数和软窗都是世界日。1× 下一世界日约 12 现实分钟。整地不在这条链里。'
       : cropId === 'potato'
       ? '商品薯 B 是归档。主游戏不用。'
       : plantable
@@ -1346,7 +1346,7 @@ ${variants}
         const dt = lastNow ? Math.min(0.05, (now - lastNow) / 1000) : 0;
         lastNow = now;
         if (playing && dt > 0) {
-          stepSim(ensureSim(), current(), dt * speed);
+          stepSim(ensureSim(), current(), (dt * speed) / FIELD_STAGE_SECONDS_PER_DAY);
           driveDemo();
           dirty = true;
         }

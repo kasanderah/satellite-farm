@@ -5,6 +5,8 @@
 import { productById, recipeById, deviceById, shopRows, utilityCost, LOOP_OFFSETS } from './products.js';
 import { SAVE_VERSION } from './save-contract.js';
 import { fieldShader, PLANT_CROPS } from './framework-b.js';
+import { WORLD_MIN_PER_REAL_MIN, DAY_SECONDS } from './world-clock.js';
+export { WORLD_MIN_PER_REAL_MIN, DAY_SECONDS };
 import { cropDef, rigProfile, rigCan, rigHas, hitchPlan, hitchHasModes, droneCan, JOB_PENALTY, UNLOAD_WHILE_MOVING, BIN_LANES, UNLOAD_SECONDS, TRAILER_CARGO_CAP, HITCH_SWAP_S, RELOAD_S, MODE_SWITCH_S, SURFACE_CROPS, workWidthOf, lanesForWidth, binCapOf } from './surface-crops.js';
 export { cropDef, rigProfile, JOB_PENALTY, UNLOAD_WHILE_MOVING, BIN_LANES, SURFACE_CROPS, workWidthOf, lanesForWidth };
 
@@ -210,8 +212,6 @@ export const toWorld = (f, u, v) => f.dir === 0 ? [f.x0 + u, f.z0 + v] : [f.x0 +
 // 1×：一真实分钟 = 120 世界分钟（2 世界时）。一世界日 = 12 真实分钟。一真实日约 120 世界日。
 // 倍率仍同时加快这口钟和农机。暂停把两者都停住。
 // 农机按田里约 3 km/h，乘上这口钟的 120 倍，再 ÷10，画面上约 10 m/s。不要按 1440 去乘。
-export const WORLD_MIN_PER_REAL_MIN = 120;
-export const DAY_SECONDS = (1440 / WORLD_MIN_PER_REAL_MIN) * 60;
 export const MACHINE_MPS = (3000 / 3600) * WORLD_MIN_PER_REAL_MIN / 10;
 export const SIM = { CUT: MACHINE_MPS, MOVE: MACHINE_MPS, STUBBLE: 8, TILL: 0 };
 const potatoDef = cropDef('potato');
