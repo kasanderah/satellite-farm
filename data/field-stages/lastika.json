@@ -1,0 +1,43 @@
+{
+  "schema": "ringsheaf.field-stage/1",
+  "profile": "lastika",
+  "readme": "拉斯提卡。框架 B 只读四段：A 播种、B 成熟、D 收割、E 收拾。B 的天数是世界日，不是现实秒。1× 下一世界日 = 720 现实秒。软窗 from/to 同单位。不写半幅蒙版。",
+  "cropId": "lastika",
+  "logicId": "crop_lastika",
+  "cropName": "拉斯提卡",
+  "name": "拉斯提卡",
+  "timeUnit": "gameDay",
+  "secondsPerDayAt1x": 720,
+  "cycle": 38,
+  "rows": 8,
+  "grid": { "along": 14 },
+  "plant": {
+    "shape": "bush",
+    "height": 0.7,
+    "row": 0.75,
+    "along": 0.36,
+    "young": "#51542c",
+    "ripe": "#787c32",
+    "stub": "#b59a63"
+  },
+  "chain": ["A", "B", "D"],
+  "stages": [
+    { "id": "O", "group": "O", "name": "未整地", "kind": "idle", "days": 1, "color": "#6f6a61", "canopy": "#4a4844", "roughness": 0.97, "cover": 0, "plantScale": 0, "variants": [] },
+    { "id": "A", "group": "A", "name": "播种", "kind": "growth", "days": 1, "color": "#4a4844", "canopy": "#51542c", "roughness": 0.92, "cover": 0.2, "plantScale": 0.25, "variants": [] },
+    { "id": "B", "group": "B", "name": "成熟", "kind": "growth", "days": 36, "color": "#51542c", "canopy": "#787c32", "roughness": 0.66, "cover": 0.9, "plantScale": 1, "variants": [] },
+    { "id": "D", "group": "D", "name": "收割", "kind": "growth", "days": 1, "color": "#b59a63", "canopy": "#6f6a61", "roughness": 0.9, "cover": 0.08, "plantScale": 0.04, "variants": [] },
+    { "id": "E", "group": "E", "name": "收拾", "kind": "post", "days": 1, "color": "#6f6a61", "canopy": "#4a4844", "roughness": 0.96, "cover": 0, "plantScale": 0, "variants": [] }
+  ],
+  "ops": [
+    { "id": "sow", "name": "播种", "kind": "required", "via": "sow", "stage": "O", "surface": "plant", "requiresMask": false, "requiresUnlocked": true, "writesMask": false, "locksUnswept": false, "sweepDays": 1, "machine": "impl_seeder" },
+    { "id": "topdress", "name": "追肥", "kind": "optional", "via": "topdress", "stage": "B", "surface": "none", "requiresMask": false, "requiresUnlocked": false, "writesMask": false, "locksUnswept": false, "sweepDays": 1, "window": { "from": 4, "to": 30 } },
+    { "id": "hill", "name": "培土", "kind": "optional", "via": "hill", "stage": "B", "surface": "none", "requiresMask": false, "requiresUnlocked": false, "writesMask": false, "locksUnswept": false, "sweepDays": 1, "window": { "from": 20, "to": 26 } },
+    { "id": "harvest", "name": "收割", "kind": "required", "via": "harvest", "stage": "D", "surface": "plant", "requiresMask": false, "requiresUnlocked": false, "writesMask": false, "locksUnswept": false, "sweepDays": 1, "machine": "harvester_potato" },
+    { "id": "clear", "name": "收拾", "kind": "special", "via": "clear", "stage": "E", "surface": "color", "requiresMask": false, "requiresUnlocked": false, "writesMask": false, "locksUnswept": false, "breaksMask": false, "sweepDays": 1, "machine": "impl_cultivator" }
+  ],
+  "edges": [
+    { "from": "O", "fromVariant": "", "to": "A", "toVariant": "", "via": "sow", "when": "process", "enabled": true },
+    { "from": "D", "fromVariant": "", "to": "E", "toVariant": "", "via": "harvest", "when": "process", "enabled": true },
+    { "from": "E", "fromVariant": "", "to": "O", "toVariant": "", "via": "clear", "when": "process", "enabled": true }
+  ]
+}
