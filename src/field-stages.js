@@ -717,6 +717,9 @@ export function patchStageOp(doc, opId, patch) {
     const required = patch.kind === 'required';
     op.extensions = { ...(op.extensions || {}), required };
   }
+  if (patch.surface === 'none' || patch.surface === 'color' || patch.surface === 'plant' || patch.surface === 'ridge') {
+    op.surface = patch.surface;
+  }
   if (patch.window === null) delete op.window;
   else if (patch.window && Number.isFinite(+patch.window.from) && Number.isFinite(+patch.window.to)) {
     op.window = { from: +patch.window.from, to: +patch.window.to };

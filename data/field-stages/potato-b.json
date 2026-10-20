@@ -1,7 +1,7 @@
 {
   "schema": "ringsheaf.field-stage/1",
   "profile": "potato-b",
-  "readme": "土豆B。逻辑 id 仍是 crop_potato，对齐主进度里的土豆。日历中点来自 SURFACE_CROPS.potato 的 span(lo,hi)。侧卸不在田面阶段里。主进程用 parseFieldStageDoc 读。字段见 data/field-stages/README.md。",
+  "readme": "归档。主游戏不用。逻辑 id 仍是 crop_potato。可玩页不装这份甘特。字段见 data/field-stages/README.md。",
   "source": "SURFACE_CROPS.potato",
   "cropId": "potato",
   "logicId": "crop_potato",

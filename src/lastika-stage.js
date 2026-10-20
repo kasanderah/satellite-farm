@@ -18,7 +18,12 @@ function softJobsFromDoc(doc, stage) {
   });
 }
 
+function hexOf(value, fallback) {
+  return typeof value === 'string' && /^#[0-9a-fA-F]{6}$/.test(value) ? value : fallback;
+}
+
 export function lastikaSpecFromDoc(doc) {
+  const bare = stageByGroup(doc, 'O');
   const sow = stageByGroup(doc, 'A');
   const mature = stageByGroup(doc, 'B');
   const harvest = stageByGroup(doc, 'D');
@@ -36,6 +41,15 @@ export function lastikaSpecFromDoc(doc) {
       row: Number(plant.row) > 0 ? Number(plant.row) : PLANT_CROPS.lastika.visual.row,
       along: Number(plant.along) > 0 ? Number(plant.along) : PLANT_CROPS.lastika.visual.along,
     },
+    paints: {
+      raw: hexOf(bare?.color, '#6f6a61'),
+      young: hexOf(plant.young, hexOf(sow.canopy, '#51542c')),
+      ripe: hexOf(plant.ripe, hexOf(mature.canopy, '#787c32')),
+      straw: hexOf(plant.stub, hexOf(harvest.color, '#b59a63')),
+      sown: hexOf(sow.color, '#4a4844'),
+      mature: hexOf(mature.color, '#51542c'),
+      harvest: hexOf(harvest.color, '#b59a63'),
+    },
     stages: [
       { id: 'sow', name: sow.name || '播种', kind: 'hard', job: 'sow' },
       { id: 'mature', name: mature.name || '成熟', kind: 'time', soft: softJobsFromDoc(doc, mature) },
@@ -45,20 +59,22 @@ export function lastikaSpecFromDoc(doc) {
   };
 }
 
-export function applyLastikaSpec(spec) {
+export function applyLastikaSpec(spec, origin = 'repo') {
   const crop = PLANT_CROPS.lastika;
   crop.name = spec.name;
   crop.growSeconds = spec.growSeconds;
   crop.visual = { ...crop.visual, ...spec.visual, tex: 'ridges' };
   crop.stages.splice(0, crop.stages.length, ...spec.stages);
+  crop.paints = { ...spec.paints };
+  crop.origin = origin === 'workshop' ? 'workshop' : 'repo';
   return crop;
 }
 
-export function installLastikaDoc(raw) {
+export function installLastikaDoc(raw, origin = 'workshop') {
   const doc = parseFieldStageDoc(structuredClone(raw));
-  return applyLastikaSpec(lastikaSpecFromDoc(doc));
+  return applyLastikaSpec(lastikaSpecFromDoc(doc), origin);
 }
 
 export function installShippedLastika() {
-  return installLastikaDoc(lastikaRaw);
+  return installLastikaDoc(lastikaRaw, 'repo');
 }

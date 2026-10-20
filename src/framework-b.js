@@ -886,7 +886,10 @@ export function describeField(farm, fieldId) {
       jobs.push({ id, name: row.name, status, pct: rowPct });
     }
   }
-  if (!jobs.length && field.plant?.clock) jobs.push({ id: 'mature', name: '成熟', status: '生长', pct: Math.round(field.plant.grow / field.plant.need * 100) });
+  if (!jobs.length && field.plant?.clock) {
+    const growing = crop.stages.find(stage => stage.kind === 'time');
+    jobs.push({ id: 'mature', name: growing?.name || '成熟', status: '生长', pct: Math.round(field.plant.grow / field.plant.need * 100) });
+  }
   const expired = jobs.find(item => item.status === '过期');
   const suspend = expired ? { title: '工单挂起提示' } : null;
   const chips = crop

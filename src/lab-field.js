@@ -31,23 +31,19 @@ const REASON = {
   empty: '现在没有可扫的格子',
 };
 
-const HELP = `打开：左侧「田间 / 阶段编辑器」。
+const HELP = `打开：左侧「田间 / 阶段编辑器」。默认是拉斯提卡。主游戏只读这份。
 
-时长：点一个阶段，改游戏日。播放按这个比例走。1× 时 1 游戏日 = 1 秒。
+序列：O、A、B、D、E 必须有。C 和中间段可以加、也可以删。阶段名和 id 都能改。
 
-蒙版：播种扫过的格子进入 M。没扫到的锁住，本轮不能再播。半田只扫一半。
+时长：点一个阶段，改游戏日。播放按这个比例走。1× 时 1 游戏日 = 1 秒。B 的天数就是主游戏生长秒数。
 
-变体：喷水、施肥写在当前阶段上，后一次盖住前一次。到点仍进下一阶段。空地放久变成 O3，待收不割变成 D1、再变成 D2。
+作业：色条从上到下就是执行顺序。硬作业锁到做完。软作业带窗口，过了窗口可以失败并挂起。田面可以选色、植株、垄截面，也可以不影响。
 
-截面：横轴是垄宽，纵轴是高度。拖点即改预览。双击加一点，右键删一点。勾上「只改这一阶段」之后，别的阶段还用连锁截面。
+色、植株、垄截面旁边的问号是这三类切换。自然阶段的散点、推进、窗口仍可用。
 
-边：收获后 E→O（清田）和 E→A（复播）只留一条。默认是清田。勾一条，另一条关掉。
+整地不在这条链里。主游戏的清地 → 一般田地是旁边的配方，不要写回 O 到 A。
 
-作物：下拉是「显示名 · id」。显示名改不了 id。新作物复制当前阶段，另起 custom id。主游戏仍只种大豆、土豆、结球甘蓝、饲料大麦。
-
-作业：选中阶段后可增删改这一阶段的农机作业。留空的窗口表示整段。保存后主游戏只按窗口派单。
-
-存：保存进这台浏览器。下载得到 field-stage-<作物>.json。主进程用 parseFieldStageDoc 读同一结构，说明在 data/field-stages/README.md。`;
+存：保存进这台浏览器，钥匙仍是 ringsheaf.assetlab.fieldStages.v1，作物槽是 lastika。可玩页刷新或点「重读工坊」后生效。`;
 
 function potatoDoc() {
   return parseFieldStageDoc(structuredClone(potatoBRaw));
@@ -194,7 +190,7 @@ function makeMachine() {
 export function createFieldWorkshop(els) {
   const { panel, bar } = els;
   const builtin = CROPS.filter(c => c.plantable).map(cropVisual);
-  let docs = { lastika: lastikaDoc(), potato: potatoDoc() };
+  let docs = { lastika: lastikaDoc() };
   let cropId = 'lastika';
   let sim = null;
   let playing = false;
@@ -234,10 +230,9 @@ export function createFieldWorkshop(els) {
         try { pairs.push({ key, doc: parseFieldStageDoc(doc) }); } catch { /* 坏档跳过，用占位 */ }
       }
       const indexed = indexCropLibrary(pairs);
-      if (!indexed.potato) indexed.potato = docs.potato;
       if (!indexed.lastika) indexed.lastika = lastikaDoc();
       docs = indexed;
-      if (raw.cropId && docs[raw.cropId]) cropId = raw.cropId;
+      cropId = 'lastika';
     } catch { /* 空浏览器 */ }
   }
 
@@ -272,17 +267,8 @@ export function createFieldWorkshop(els) {
       paintStatus();
       return false;
     }
-    let prev = null;
-    try { prev = JSON.parse(localStorage.getItem(FIELD_STAGE_STORE) || 'null'); } catch { prev = null; }
     const crops = { ...docs };
-    if (prev?.crops && typeof prev.crops === 'object' && !Array.isArray(prev.crops)) {
-      if (!crops.potato && prev.crops.potato) crops.potato = prev.crops.potato;
-      if (!crops.crop_potato && prev.crops.crop_potato) crops.crop_potato = prev.crops.crop_potato;
-    }
-    const payload = { schema: FIELD_STAGE_SCHEMA, cropId, crops };
-    if (crops.potato) payload.potatoKeep = crops.potato;
-    else if (prev?.potatoKeep) payload.potatoKeep = prev.potatoKeep;
-    if (prev?.potatoSuspended) payload.potatoSuspended = true;
+    const payload = { schema: FIELD_STAGE_SCHEMA, cropId: 'lastika', crops };
     localStorage.setItem(FIELD_STAGE_STORE, JSON.stringify(payload));
     note = '已存进这台浏览器';
     return true;
@@ -331,6 +317,24 @@ export function createFieldWorkshop(els) {
       dirty = true;
     };
     const findOp = (pred) => doc.ops.find(pred);
+    if (demo.kind === 'lastika') {
+      const sow = findOp(op => op.via === 'sow');
+      const harvest = findOp(op => op.via === 'harvest');
+      const clear = findOp(op => op.via === 'clear');
+      const ripeId = stageByGroup(doc, 'D')?.id;
+      if (demo.step === 'sow') {
+        if (sow) go(sow.id, 1, 'grow');
+      } else if (demo.step === 'grow') {
+        if (ripeId && (info.phases[ripeId] || 0) > info.total * 0.45 && harvest) go(harvest.id, 1, 'harvest');
+      } else if (demo.step === 'harvest') {
+        if (clear) go(clear.id, 1, 'clear');
+      } else if (demo.step === 'clear') {
+        demo = null;
+        playing = false;
+        note = '拉斯提卡走完：播种、成熟、收割、收拾。整地不在这条链里。';
+      }
+      return;
+    }
     const till = findOp(op => op.via === 'till') || findOp(op => op.kind === 'special' && op.breaksMask);
     const sow = findOp(op => op.writesMask);
     const touch = findOp(op => op.kind === 'optional' && op.requiresMask);
@@ -398,7 +402,7 @@ export function createFieldWorkshop(els) {
 <button type="button" id="fs-reset-doc">恢复占位</button>
 <button type="button" id="fs-new">新作物</button>
 </div>
-<p class="fs-note">新作物复制当前阶段链，另起 id。主游戏仍只种大豆、土豆、结球甘蓝、饲料大麦。</p>
+<p class="fs-note">新作物复制当前阶段链，另起 id。主游戏种植只读拉斯提卡。整地不写进这条链。</p>
 <p id="fs-note" class="fs-note"></p>
 <p class="fs-help">${HELP.replace(/\n/g, '<br>')}</p>`;
 
@@ -471,7 +475,8 @@ export function createFieldWorkshop(els) {
     panel.querySelector('#fs-save').addEventListener('click', persist);
     panel.querySelector('#fs-dl').addEventListener('click', download);
     panel.querySelector('#fs-reset-doc').addEventListener('click', () => {
-      if (cropId === 'potato') docs.potato = potatoDoc();
+      if (cropId === 'lastika') docs.lastika = lastikaDoc();
+      else if (cropId === 'potato') docs.potato = potatoDoc();
       else {
         const seed = builtin.find(c => c.id === cropId) || cropVisual({ id: cropId, name: current().cropName, shape: current().plant.shape, height: current().plant.height, row: current().plant.row, along: current().plant.along, young: current().plant.young, ripe: current().plant.ripe, stub: current().plant.stub });
         docs[cropId] = placeholderFieldDoc({ ...seed, id: cropId, name: seed.name || current().cropName });
@@ -479,7 +484,7 @@ export function createFieldWorkshop(els) {
       resetSim();
       paintDynamic(true);
       persist();
-      note = '已恢复占位链';
+      note = cropId === 'lastika' ? '已恢复仓库里的拉斯提卡' : '已恢复占位链';
     });
     panel.querySelector('#fs-new').addEventListener('click', () => {
       const source = current();
@@ -569,8 +574,13 @@ export function createFieldWorkshop(els) {
     resetSim();
     speed = 4;
     playing = true;
-    demo = { step: 'o3' };
-    note = '整链：先久置成 O3，再翻地、播种半田、喷水，等到 D1 后收割清田';
+    if (cropId === 'lastika') {
+      demo = { kind: 'lastika', step: 'sow' };
+      note = '拉斯提卡：播种，等到成熟，再收割、收拾。整地不在这条链里。';
+    } else {
+      demo = { kind: 'archive', step: 'o3' };
+      note = '归档链演示。主游戏不读这份。';
+    }
     paintTransport();
   }
 
@@ -588,7 +598,8 @@ export function createFieldWorkshop(els) {
       const doc = docs[id];
       const known = builtin.find(c => c.id === id);
       const name = (doc && (doc.cropName || doc.name)) || (known && known.name) || id;
-      return `<option value="${esc(id)}">${esc(cropOptionLabel(name, id))}</option>`;
+      const tag = id === 'potato' ? '归档 · 主游戏不用' : cropOptionLabel(name, id);
+      return `<option value="${esc(id)}">${esc(id === 'potato' ? name + ' · ' + tag : tag)}</option>`;
     }).join('');
     if (ids.includes(prev)) sel.value = prev;
   }
@@ -598,10 +609,12 @@ export function createFieldWorkshop(els) {
     if (!el) return;
     const plantable = PLANTABLE_CROP_IDS.includes(cropId);
     el.textContent = cropId === 'lastika'
-      ? '正在编辑拉斯提卡。主游戏框架 B 读这四段：播种、成熟、收割、收拾。成熟的天数是 1× 下的生长秒数。'
+      ? '正在编辑拉斯提卡。主游戏只读这份：阶段名、软窗、田面色、生长钟。成熟天数是 1× 下的生长秒数。整地不在这条链里。'
+      : cropId === 'potato'
+      ? '商品薯 B 是归档。主游戏不用。'
       : plantable
-      ? '正在编辑 ' + cropId + '。这是主游戏种植位。显示名只改文案，不改 id。'
-      : '正在编辑 ' + cropId + '。仅工坊可编辑，主游戏种植菜单不会出现。';
+      ? '正在编辑 ' + cropId + '。主游戏种植不读这份。'
+      : '正在编辑 ' + cropId + '。主游戏种植不读这份。';
   }
 
   function paintTransport() {
@@ -674,15 +687,15 @@ ${v.auto ? `<label>停留日<input data-vdays="${v.id}" type="number" min="0.25"
 </div>
 <label>序列组<select id="fs-group">${groupOptions}</select></label>
 <div class="fs-split">
-<label>地面色<input id="fs-color" type="color" value="${st.color}"></label>
-<label>冠层色<input id="fs-canopy" type="color" value="${st.canopy}"></label>
+<label><span class="fs-lab">色<button type="button" class="qmark" title="色：这一阶段的土色。主游戏未整地、生长底色和收割后的田面读阶段色。">?</button></span><input id="fs-color" type="color" value="${st.color}"></label>
+<label><span class="fs-lab">植株<button type="button" class="qmark" title="植株：冠层色和植株比例。主游戏长出来的拉斯提卡读幼苗色和成熟色。">?</button></span><input id="fs-canopy" type="color" value="${st.canopy}"></label>
 </div>
 <div class="fs-split">
 <label>粗糙度<input id="fs-rough" type="number" min="0.04" max="1" step="0.02" value="${st.roughness}"></label>
 <label>盖度<input id="fs-cover" type="number" min="0" max="1" step="0.02" value="${st.cover}"></label>
 </div>
 <label>植株比例<input id="fs-pscale" type="number" min="0" max="1.4" step="0.02" value="${st.plantScale}"></label>
-<label class="fs-row"><input id="fs-own" type="checkbox" ${st.ridge ? 'checked' : ''}> 只改这一阶段的截面</label>
+<label class="fs-row"><input id="fs-own" type="checkbox" ${st.ridge ? 'checked' : ''}> 只改这一阶段的截面 <button type="button" class="qmark" title="垄截面：横轴是垄宽，纵轴是高度。不勾时各阶段共用文档上的连锁截面。">?</button></label>
 ${variants}
 <div class="fs-row">
 <button type="button" id="fs-insert">在此后插入</button>
@@ -813,10 +826,18 @@ ${variants}
     const machineOptions = (currentId) => machines.map(row => `<option value="${esc(row.id)}"${row.id === currentId ? ' selected' : ''}>${esc(row.name)} · ${esc(row.id)}</option>`).join('');
     const stageOptions = (currentId) => stageIds.map(id => `<option value="${esc(id)}"${id === currentId ? ' selected' : ''}>${esc(id)}</option>`).join('');
     const kindOptions = (op) => {
-      const rows = [['required', '必要'], ['optional', '可选']];
+      const rows = [['required', '硬'], ['optional', '软']];
       if (op.kind === 'special') rows.push(['special', '特殊']);
       return rows.map(([id, name]) => `<option value="${id}"${op.kind === id ? ' selected' : ''}>${name}</option>`).join('');
     };
+    const surfaceOf = (op) => {
+      if (op.surface === 'none' || op.surface === 'color' || op.surface === 'plant' || op.surface === 'ridge') return op.surface;
+      if (op.kind === 'optional') return 'none';
+      if (op.via === 'sow' || op.via === 'harvest') return 'plant';
+      return 'color';
+    };
+    const surfaceOptions = (op) => [['none', '不影响'], ['color', '色'], ['plant', '植株'], ['ridge', '垄截面']]
+      .map(([id, name]) => `<option value="${id}"${surfaceOf(op) === id ? ' selected' : ''}>${name}</option>`).join('');
     const cards = ops.map(op => `<div class="fs-job" data-job="${esc(op.id)}">
 <div class="fs-row"><b>${esc(op.name)}</b><span class="fs-note">${esc(op.id)}</span>${op.extensions?.framework || op.reserved ? '<span class="fs-note">预留，不派</span>' : ''}<button type="button" data-up-job="${esc(op.id)}">上移</button><button type="button" data-down-job="${esc(op.id)}">下移</button><button type="button" data-drop-job="${esc(op.id)}">删除</button></div>
 <div class="fs-split">
@@ -825,14 +846,15 @@ ${variants}
 </div>
 <div class="fs-split">
 <label>阶段<select data-job-stage="${esc(op.id)}">${stageOptions(op.stage)}</select></label>
-<label>必要<select data-job-kind="${esc(op.id)}">${kindOptions(op)}</select></label>
+<label>硬 / 软<select data-job-kind="${esc(op.id)}">${kindOptions(op)}</select></label>
 </div>
+<label><span class="fs-lab">田面<button type="button" class="qmark" title="色改土色，植株改冠层，垄截面改垄高低。不影响：这道作业做完不改田面。软作业过窗可挂起；硬作业锁到做完。">?</button></span><select data-job-surface="${esc(op.id)}">${surfaceOptions(op)}</select></label>
 <div class="fs-split">
 <label>窗口起（日）<input data-job-from="${esc(op.id)}" type="number" min="0" max="400" step="0.25" placeholder="整段" value="${op.window ? op.window.from : ''}"></label>
 <label>窗口止（日）<input data-job-to="${esc(op.id)}" type="number" min="0" max="400" step="0.25" placeholder="整段" value="${op.window ? op.window.to : ''}"></label>
 </div>
 </div>`).join('');
-    const hint = onChain ? '留空表示这一阶段整段都可派。' : '这阶段不在生长链上，进游戏不派这里的作业。';
+    const hint = (onChain ? '留空表示这一阶段整段都可派。' : '这阶段不在生长链上，进游戏不派这里的作业。') + ' 色条从上到下是执行顺序。软作业带窗口，过窗可挂起。硬作业锁到做完。';
     const bars = strip.map(row => `<div class="fs-jobbar"><i style="background:${esc(row.color)}"></i><span>${esc(row.name)}</span></div>`).join('');
     host.innerHTML = `<div class="fs-jobs"><h4>作业色条</h4><div class="fs-jobbars">${bars}</div><h4>执行顺序</h4><p class="fs-note">${hint}</p>${cards}<div class="fs-row"><button type="button" id="fs-add-job">增加作业</button></div></div>`;
     const touchJob = (opId, patch) => {
@@ -886,6 +908,9 @@ ${variants}
     });
     host.querySelectorAll('[data-job-kind]').forEach(input => {
       input.addEventListener('change', () => touchJob(input.dataset.jobKind, { kind: input.value }));
+    });
+    host.querySelectorAll('[data-job-surface]').forEach(input => {
+      input.addEventListener('change', () => touchJob(input.dataset.jobSurface, { surface: input.value }));
     });
     const readWindow = (opId) => {
       const fromEl = host.querySelector('[data-job-from="' + opId + '"]');

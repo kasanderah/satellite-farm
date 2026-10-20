@@ -12,7 +12,7 @@ import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { HorizontalTiltShiftShader } from 'three/addons/shaders/HorizontalTiltShiftShader.js';
 import { VerticalTiltShiftShader } from 'three/addons/shaders/VerticalTiltShiftShader.js';
 import { PALETTE, CROPS, TEX_ID, L, fields, harvesters, haulers, drones, step, TRUNKS_X, TRUNKS_Z, depots, inCrater, ROADS, RING, LAYERS, CUT, wrapX, PLOT, economy, focus, signals, log, plantField, abandonField, quote, setTimeScale, setPaused, paused, exportSnapshot, applySnapshot, fieldAtWorld, fieldAt, toWorld, onAfterStep, fieldOrigin, simTime, worldDay, stores, rigs, fieldVisual, cropWatch, stageBoard, POTATO_DAYS, POTATO_STAGES, warehouse, buildings, sellLot, sellStack, warehouseStacks, warehouseCapacity, placeBuilding, removeBuilding, rigReadout, SHOP, buySeed, buyItem, SEED_PER_FIELD, FERT_PER_FIELD, resetGame, CULTURES, DECK_CLIMATE, tanks, cultureWatch, startCulture, tendCulture, harvestCulture, BUILDING_KINDS, CULTURE_CELLS, tankSite, devices, potatoStock, fertPlan, cultureFeedPlan, millWatch, startMill, removeMill, orderProcess, HUB_SITES, cropDossier, MACHINE_SHOP, buyMachine, cropDef, boomWatch, rigProfile, DRONE_SHOP, workDrones, buyDrone, sectorLight, sectorWord, dayCenter, setWorldDay, RING_OMEGA, bindPotatoClock, bindSurfaceClock, formatTimeScale } from './_shared.js';
-import { applyStagePayload, bootFieldStageSource, writeStageStore, suspendPotatoStage, resumePotatoStage, stageBadge, installShippedPotato } from './field-stage-live.js';
+import { applyStagePayload, bootFieldStageSource, writeStageStore, suspendLastikaStage, resumeLastikaStage, stageBadge } from './field-stage-live.js';
 import { bootWorkshopMachines } from './machine-live.js';
 import { potatoDrawLooks, POTATO_PAINT_SLOTS, workWidthOf } from './surface-crops.js';
 import { ridgeCrestT } from './field-stages.js';
@@ -75,9 +75,10 @@ const U = {
   uMirrorOn: { value: 1 },
   uLockDay: { value: 0 },
   // 和地面 B 冠层同一条：幼苗 mix(oliveDp, moss, 0.35)，成熟 mix(oliveDp, olive, 0.62)。
-  uBYoung: { value: C('oliveDp').clone().lerp(C('moss'), 0.35) },
-  uBRipe: { value: C('oliveDp').clone().lerp(C('olive'), 0.62) },
-  uBStraw: { value: C('straw') },
+  uBRaw: { value: C('#6f6a61') },
+  uBYoung: { value: C('#51542c') },
+  uBRipe: { value: C('#787c32') },
+  uBStraw: { value: C('#b59a63') },
   uBCrop: { value: CROPS.findIndex(c => c.id === 'lastika') },
 };
 const POT_SLOTS = POTATO_PAINT_SLOTS;
@@ -144,18 +145,12 @@ function syncPotatoPaint() {
   const vis = PLANT_CROPS.lastika.visual;
   const packedL = U.uCropP.value[lastika];
   if (packedL) {
-    // 工坊覆写只改尺寸。默认垄距和株高是拉斯提卡，不落到商品薯 0.90 m。
-    if (draw.workshop) {
-      packedL.x = draw.height;
-      packedL.y = draw.row;
-      packedL.w = draw.along;
-    } else {
-      packedL.x = vis.height;
-      packedL.y = vis.row;
-      packedL.w = vis.along;
-    }
+    packedL.x = vis.height;
+    packedL.y = vis.row;
+    packedL.w = vis.along;
     packedL.z = TEX_ID[vis.tex];
   }
+  syncLastikaPaint();
   for (let s = 0; s < POT_SLOTS; s++) {
     const look = draw.slots[s] || draw.slots[1];
     const base = s * 12;
@@ -173,6 +168,14 @@ function syncPotatoPaint() {
   }
   potTintTex.needsUpdate = true;
   potRidgeTex.needsUpdate = true;
+}
+function syncLastikaPaint() {
+  const paints = PLANT_CROPS.lastika.paints;
+  if (!paints) return;
+  if (paints.raw) U.uBRaw.value.set(paints.raw);
+  if (paints.young) U.uBYoung.value.set(paints.young);
+  if (paints.ripe) U.uBRipe.value.set(paints.ripe);
+  if (paints.straw) U.uBStraw.value.set(paints.straw);
 }
 // 按期望法线确定三角形绕序（正面朝外，避免被背面剔除 / 双面材质翻转法线）
 function pushQuad(pos, A, B, Cc, D, n) {
@@ -406,6 +409,7 @@ ${FARM}
 uniform sampler2D uPotTint;
 uniform sampler2D uPotRidge;
 uniform float uPotOn;
+uniform vec3 uBRaw, uBYoung, uBRipe, uBStraw;
 float potRidgeAt(int slot, int i) {
   int pix = i < 4 ? 0 : 1;
   vec4 v = texelFetch(uPotRidge, ivec2(pix, slot), 0);
@@ -612,11 +616,11 @@ vec3 farmAlbedo(vec2 p){
       float profB = 0.5 + 0.5 * cos(6.2832 * rowPhB);
       float slopeB = -sin(6.2832 * rowPhB);
       vec3 soilB = g_soil * (0.86 + 0.08 * profB * rowSeeB) * (1.0 + patchy);
-      // 未整地是浅棕平土。一般田地是深棕，垄也更深。犁地扫过要能看出变色，不能只剩车辙。
-      vec3 rawSoil = mix(g_regoLt, g_rego, 0.28) * (0.98 + 0.04 * profB * rowSeeB) * (1.0 + patchy * 0.35);
+      // 未整地、幼苗、成熟、残茬读拉斯提卡文档。一般田地仍是犁地后的深土，不从种植链里取。
+      vec3 rawSoil = uBRaw * (0.98 + 0.04 * profB * rowSeeB) * (1.0 + patchy * 0.35);
       float growB = clamp((visG - 2.0) / 3.0, 0.0, 1.0);
-      vec3 youngB = mix(g_oliveDp, g_moss, 0.35);
-      vec3 ripeB = mix(g_oliveDp, g_olive, 0.62);
+      vec3 youngB = uBYoung;
+      vec3 ripeB = uBRipe;
       vec3 cropB = mix(youngB, ripeB, smoothstep(0.12, 0.9, growB)) * (1.0 + patchy * 0.35);
       if (visG < 0.5) {
         col = rawSoil;
@@ -638,7 +642,7 @@ vec3 farmAlbedo(vec2 p){
         gRough = mix(0.92, 0.66, coverB);
         canopyHere = coverB > 0.45;
       } else {
-        col = mix(soilB, g_straw, 0.38) * (1.0 + patchy * 0.25);
+        col = mix(soilB, uBStraw, 0.38) * (1.0 + patchy * 0.25);
         gTilt = acrossW * slopeB * 0.1 * rowSeeB;
         gRough = 0.9;
         canopyHere = false;
@@ -2907,7 +2911,7 @@ function paintRates() {
 }
 function paintStageChrome(note) {
   const label = $('stage-src-label');
-  if (label) label.innerHTML = `土豆阶段 · <b>${stageBadge()}</b>`;
+  if (label) label.innerHTML = `拉斯提卡 · <b>${stageBadge()}</b>`;
   const err = $('stage-src-err');
   if (err) err.textContent = note || '';
   plantWin = { x: 1e9, z: 1e9, w: 0 };
@@ -2930,7 +2934,7 @@ function adoptStageText(text, persist) {
   catch { paintStageChrome('这份不是 JSON'); return { ok: false }; }
   const applied = applyStagePayload(raw);
   if (!applied.ok) {
-    paintStageChrome(applied.message || '里面没有土豆的田间阶段');
+    paintStageChrome(applied.message || '里面没有拉斯提卡');
     return applied;
   }
   if (persist) {
@@ -2943,25 +2947,22 @@ function adoptStageText(text, persist) {
   return applied;
 }
 function reloadStageStore() {
-  try { resumePotatoStage(localStorage); } catch { /* 无痕模式 */ }
+  try { resumeLastikaStage(localStorage); } catch { /* 无痕模式 */ }
   const booted = bootFieldStageSource(localStorage, null);
   bindPlayableClocks();
   if (!booted.ok) {
     paintStageChrome(booted.message || '工坊存档读不了');
     return booted;
   }
-  if (booted.skipped) installShippedPotato();
-  bindPlayableClocks();
-  const extra = booted.siblingNotes?.length ? booted.siblingNotes.join('；') : '';
-  paintStageChrome(booted.skipped ? '这台浏览器里没有工坊存档，仍用仓库默认' : extra);
+  paintStageChrome(booted.skipped ? '这台浏览器里没有拉斯提卡工坊档，仍用仓库默认' : '');
   return booted;
 }
 function useRepoStages() {
   let kept = false;
-  try { kept = suspendPotatoStage(localStorage).kept; } catch { /* 无痕模式 */ }
-  installShippedPotato();
+  try { kept = suspendLastikaStage(localStorage).kept; } catch { /* 无痕模式 */ }
+  bootFieldStageSource(localStorage, 'repo');
   bindPlayableClocks();
-  paintStageChrome(kept ? '已改用仓库默认。土豆工坊档还在这台浏览器里，重读即可恢复，不用回工坊再存。' : '');
+  paintStageChrome(kept ? '已改用仓库里的拉斯提卡。工坊档还在这台浏览器里，重读即可恢复。' : '');
 }
 function bindPlayableClocks() {
   bindPotatoClock();
@@ -3106,9 +3107,16 @@ function paintCropBook() {
     if (!stages.length) return '';
     const growth = stages.map(s => `<i style="flex:${s.days} 1 0;background:${s.color}" title="${s.name} 第 ${s.from}–${s.to} 日"><em>${s.name}</em></i>`).join('');
     const jobs = stages.map(s => `<i style="flex:${s.days} 1 0;background:${s.machine ? s.color : 'transparent'}" title="${s.machine ? s.machine + ' 第 ' + s.machineAt + ' 日 · ' + s.effect : '这一段没有农机'}"><em>${s.machine || ''}</em></i>`).join('');
-    return `<div class="meta">生长阶段 · 同一时间只在一段里</div><div class="gantt">${growth}</div><div class="meta">作业窗口 · 机器和效果写在阶段上</div><div class="gantt jobs">${jobs}</div><p class="note">只读预览。改阶段仍写在作物定义里。农时这一站不拦播种。</p>`;
+    return `<div class="meta">生长阶段 · 同一时间只在一段里</div><div class="gantt">${growth}</div><div class="meta">作业窗口 · 机器和效果写在阶段上</div><div class="gantt jobs">${jobs}</div><p class="note">下面是旧作物表，主游戏种植不读。拉斯提卡在上面。</p>`;
   };
-  host.innerHTML = `<p class="lead">土豆阶段：${stageBadge()}。大豆、大麦、甘蓝仍是仓库里的旧表。条是只读预览。</p>` + CROPS.map(c => {
+  const bCrop = PLANT_CROPS.lastika;
+  const bPaints = bCrop.paints || {};
+  const bStages = bCrop.stages.map(s => {
+    const soft = (s.soft || []).map(j => `${j.name} ${j.from}–${j.to} 秒`).join('，');
+    const kind = s.kind === 'time' ? `${bCrop.growSeconds} 秒` : '硬作业';
+    return `<div class="io"><span>${s.name}</span><span>${kind}${soft ? ' · ' + soft : ''}</span></div>`;
+  }).join('');
+  host.innerHTML = `<p class="lead">拉斯提卡 · ${stageBadge()}。阶段、软窗、田面色和生长钟只读工坊或仓库 lastika.json。整地不在这条链里。</p><div class="crop"><b>${bCrop.name}</b><div class="meta">生长 ${bCrop.growSeconds} 秒 · 田面 ${bPaints.raw || ''} / ${bPaints.young || ''} / ${bPaints.ripe || ''}</div>${bStages}</div>` + CROPS.map(c => {
     const d = cropDossier(c.id);
     const stages = d.stages.length
       ? d.stages.map(s => `<div class="io"><span><i style="background:${s.color}"></i>${s.name}</span><span>第 ${s.from}–${s.to} 日 · ${s.days} 日${s.machine ? ' · ' + s.machine : ''}</span></div>`).join('')

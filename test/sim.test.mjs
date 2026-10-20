@@ -15,8 +15,7 @@ import {
   devices, potatoStock, fertPlan, cultureFeedPlan, millWatch, startMill, orderProcess, removeMill,
 } from '../src/_shared.js';
 import { productById, recipeById, deviceById, flowModel, LOOP_OFFSETS } from '../src/products.js';
-import { auditDispatch, rigCan, rigHas, hitchPlan, workWidthOf, lanesForWidth, potatoDrawLooks } from '../src/surface-crops.js';
-import { applyStagePayload, revertPotatoStages } from '../src/field-stage-live.js';
+import { auditDispatch, rigCan, rigHas, hitchPlan, workWidthOf, lanesForWidth, potatoDrawLooks, installPotatoProfile, potatoProfileFromRaw, shippedPotatoProfile } from '../src/surface-crops.js';
 import potatoB from '../data/field-stages/potato-b.json' with { type: 'json' };
 
 test('one colonist plot is about 4 km on the ring', () => {
@@ -506,8 +505,9 @@ test('asset lab lists the workshop classes and the live placeholders', () => {
   const editor = LAB_ENTRIES.find(e => e.id === 'field-stage');
   assert.equal(editor.cls, 'field');
   assert.equal(editor.name, '阶段编辑器');
-  assert.match(editor.notes, /土豆B/);
-  assert.match(editor.notes, /potato-b\.json/);
+  assert.match(editor.notes, /拉斯提卡/);
+  assert.match(editor.notes, /lastika\.json/);
+  assert.match(editor.notes, /主游戏不用/);
   for (const id of ['ref-tractor-compare', 'ref-kenney-shovel', 'ref-sketchfab-combine']) {
     const entry = LAB_ENTRIES.find(e => e.id === id);
     assert.ok(entry, id);
@@ -1413,9 +1413,8 @@ test('sowing progress paints past an idle preplant job, and a variant keeps its 
 
 test('shallow till after emergence paints only the swept lanes and keeps that color when the pass ends', () => {
   resetGame();
-  const applied = applyStagePayload({ schema: 'ringsheaf.field-stage/1', cropId: 'potato', crops: { potato: potatoB } });
+  installPotatoProfile(potatoProfileFromRaw(structuredClone(potatoB)), 'workshop');
   try {
-    assert.equal(applied.ok, true);
     bindPotatoClock();
     setPaused(false);
     stores.seed = 2;
@@ -1487,7 +1486,7 @@ test('shallow till after emergence paints only the swept lanes and keeps that co
     assert.equal(vis.base, 'Hi2');
     assert.ok(vis.s > 0 && vis.s < L.LANES, vis.s);
   } finally {
-    revertPotatoStages();
+    installPotatoProfile(shippedPotatoProfile(), 'repo');
     bindPotatoClock();
     resetGame();
   }
@@ -1495,9 +1494,8 @@ test('shallow till after emergence paints only the swept lanes and keeps that co
 
 test('a finished pass keeps its color after progress is cleared, and a narrow tool paints on its own width', () => {
   resetGame();
-  const applied = applyStagePayload({ schema: 'ringsheaf.field-stage/1', cropId: 'potato', crops: { potato: potatoB } });
+  installPotatoProfile(potatoProfileFromRaw(structuredClone(potatoB)), 'workshop');
   try {
-    assert.equal(applied.ok, true, applied.message);
     bindPotatoClock();
     setPaused(false);
     stores.seed = 2;
@@ -1544,7 +1542,7 @@ test('a finished pass keeps its color after progress is cleared, and a narrow to
     assert.equal(cropWatch(f).work, 'sow');
     assert.equal(f.plantedAt, null);
   } finally {
-    revertPotatoStages();
+    installPotatoProfile(shippedPotatoProfile(), 'repo');
     bindPotatoClock();
     resetGame();
   }
@@ -1552,9 +1550,8 @@ test('a finished pass keeps its color after progress is cleared, and a narrow to
 
 test('hill keeps its color until topdress sweeps, and the dock lists that stage', () => {
   resetGame();
-  const applied = applyStagePayload({ schema: 'ringsheaf.field-stage/1', cropId: 'potato', crops: { potato: potatoB } });
+  installPotatoProfile(potatoProfileFromRaw(structuredClone(potatoB)), 'workshop');
   try {
-    assert.equal(applied.ok, true, applied.message);
     bindPotatoClock();
     setPaused(false);
     stores.seed = 2;
@@ -1597,7 +1594,7 @@ test('hill keeps its color until topdress sweeps, and the dock lists that stage'
     rig.job = prev.job;
     rig.mode = prev.mode;
   } finally {
-    revertPotatoStages();
+    installPotatoProfile(shippedPotatoProfile(), 'repo');
     bindPotatoClock();
     resetGame();
   }
@@ -1605,9 +1602,8 @@ test('hill keeps its color until topdress sweeps, and the dock lists that stage'
 
 test('lime is the next planter job after base fertilizer', () => {
   resetGame();
-  const applied = applyStagePayload({ schema: 'ringsheaf.field-stage/1', cropId: 'potato', crops: { potato: potatoB } });
+  installPotatoProfile(potatoProfileFromRaw(structuredClone(potatoB)), 'workshop');
   try {
-    assert.equal(applied.ok, true, applied.message);
     bindPotatoClock();
     setPaused(false);
     stores.seed = 2;
@@ -1636,7 +1632,7 @@ test('lime is the next planter job after base fertilizer', () => {
     f.jobS.lime = 4;
     assert.equal(stageBoard(f).jobs.find(job => job.id === 'lime').pct, 40);
   } finally {
-    revertPotatoStages();
+    installPotatoProfile(shippedPotatoProfile(), 'repo');
     bindPotatoClock();
     resetGame();
   }
@@ -1644,9 +1640,8 @@ test('lime is the next planter job after base fertilizer', () => {
 
 test('harvest and stalk-crush paint on the implement width, not the 12.8 m visual lanes', () => {
   resetGame();
-  const applied = applyStagePayload({ schema: 'ringsheaf.field-stage/1', cropId: 'potato', crops: { potato: potatoB } });
+  installPotatoProfile(potatoProfileFromRaw(structuredClone(potatoB)), 'workshop');
   try {
-    assert.equal(applied.ok, true, applied.message);
     bindPotatoClock();
     setPaused(false);
     stores.seed = 2;
@@ -1677,7 +1672,7 @@ test('harvest and stalk-crush paint on the implement width, not the 12.8 m visua
     vis = fieldVisual(f);
     assert.ok(!(vis.mask > 20), vis.mask);
   } finally {
-    revertPotatoStages();
+    installPotatoProfile(shippedPotatoProfile(), 'repo');
     bindPotatoClock();
     resetGame();
   }
