@@ -453,8 +453,48 @@ test('浮标空闲用短文案，有工单时与名称旁状态相同', () => {
   assert.equal(describeField(farm, 'a').float, '一般田地 · 可以种植拉斯提卡');
 });
 
+test('方案2：播种还在等一体机时犁地照样派拖拉机，一体机腾出来先接播种', () => {
+  const farm = createFarm();
+  addMachine(farm, { ...OMNI, caps: OMNI.caps.slice(), energyLeft: OMNI.energyKwh });
+  addMachine(farm, { ...TRACTOR, caps: [], energyLeft: TRACTOR.energyKwh });
+  addMachine(farm, { ...PLOW, caps: PLOW.caps.slice() });
+  assert.equal(mountHitch(farm, PLOW.id, TRACTOR.id).ok, true);
+  addField(farm, { id: 'a', length: 128, width: 128, ground: 'raw', look: 'raw' });
+  addField(farm, { id: 'b', length: 128, width: 128, ground: 'raw', look: 'raw' });
+  addField(farm, { id: 'c', length: 128, width: 128, ground: 'general', look: 'general' });
+  addField(farm, { id: 'd', length: 128, width: 128, ground: 'raw', look: 'raw' });
+  assert.equal(chooseMachine(farm, ['犁田'], (id) => (id === 'omni' ? 80 : 1)).id, 'omni');
+  requestPrep(farm, 'a');
+  requestPrep(farm, 'b');
+  assert.equal(fieldWork(farm, 'a').machineId, 'omni');
+  assert.equal(fieldWork(farm, 'b').machineId, 'tractor');
+  requestPlant(farm, 'c');
+  requestPrep(farm, 'd');
+  assert.equal(fieldWork(farm, 'c'), null);
+  assert.equal(describeField(farm, 'c').float, '等待播种');
+  assert.equal(fieldWork(farm, 'd'), null);
+  assert.equal(describeField(farm, 'd').float, '等待整地');
+  until(farm, () => fieldWork(farm, 'c')?.machineId === 'omni');
+  assert.equal(fieldWork(farm, 'b').machineId, 'tractor');
+  assert.equal(fieldWork(farm, 'd'), null);
+  assert.equal(describeField(farm, 'c').float, '播种中');
+  assert.equal(describeField(farm, 'd').float, '等待整地');
+  const ties = createFarm();
+  addMachine(ties, {
+    id: 'near', classId: 'self', integral: false, name: '近',
+    caps: ['犁田'], origin: 1, width: 10, workSpeed: 10, cruiseSpeed: 10,
+    powerOutKw: 40, energy: 'electric', energyKwh: 40, energyLeft: 40,
+  });
+  addMachine(ties, {
+    id: 'far', classId: 'self', integral: false, name: '远',
+    caps: ['犁田'], origin: 1, width: 10, workSpeed: 10, cruiseSpeed: 10,
+    powerOutKw: 40, energy: 'electric', energyKwh: 40, energyLeft: 40,
+  });
+  assert.equal(chooseMachine(ties, ['犁田'], (id) => (id === 'far' ? 30 : 4)).id, 'near');
+});
+
 test('拉斯提卡阶段和版本戳来自同一份定义', () => {
-  assert.equal(HUD_VERSION, '环穗 v4.2');
+  assert.equal(HUD_VERSION, '环穗 v5');
   const doc = parseFieldStageDoc(structuredClone(lastikaRaw));
   const windows = jobWindows(doc, alignFieldCalendar(doc)).filter(item => item.op.kind === 'optional');
   assert.deepEqual(windows.map(item => item.op.id), ['topdress', 'hill']);

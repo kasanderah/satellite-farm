@@ -224,6 +224,14 @@ export function tickSlice(dt) {
       const at = worldPose(f, order.pose);
       moveToward(unit, at.x, at.z, at.ang, machine.cruiseSpeed, slice);
     },
+    travel(_farm, fieldId, machineId) {
+      const f = meshOf(fieldId);
+      const unit = rigFor(machineId);
+      const machine = machineOf(machineId);
+      if (!f || !unit || !(machine?.cruiseSpeed > 0)) return 0;
+      const dist = Math.hypot((f.x0 + ctx.length / 2) - unit.x, (f.z0 + ctx.width / 2) - unit.z);
+      return dist / machine.cruiseSpeed;
+    },
   });
   syncFields();
   for (const unit of driveRigs()) {

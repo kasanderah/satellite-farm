@@ -283,60 +283,101 @@ function hitchOf(farm, machine) {
   return farm.machines.find(m => m.id === machine.hitchId) || null;
 }
 
+function coveredBy(farm, machine, caps) {
+  if (!machine || machine.classId === 'hitch' || machine.classId === 'air') return null;
+  const hitch = hitchOf(farm, machine);
+  const have = new Set(machine.caps);
+  if (hitch) for (const cap of hitch.caps) have.add(cap);
+  if (!caps.every(cap => have.has(cap))) return null;
+  const fromHitch = caps.some(cap => !machine.caps.includes(cap));
+  const width = fromHitch ? hitch?.width : machine.width;
+  const origin = fromHitch ? (hitch?.origin || 0) : (machine.origin || 0);
+  if (!(width > 0) || !(machine.workSpeed > 0)) return null;
+  return {
+    hitch,
+    fromHitch,
+    width,
+    origin,
+    // 这一单需要的能力全在车身上，才算一体。不看机型名字。
+    integral: caps.every(cap => machine.caps.includes(cap)),
+  };
+}
+
+// 机队里有几台结构上能做这组能力。忙闲不算，稀缺按这个数排。
+function capableCount(farm, caps) {
+  let count = 0;
+  for (const machine of farm.machines) {
+    if (coveredBy(farm, machine, caps)) count += 1;
+  }
+  return count;
+}
+
 // 自走机身体上的能力，加上已经挂住的拖挂。拖挂和飞行机不能单独出工。
-export function chooseMachine(farm, caps) {
+// travelOf(machineId) 是到田的空跑时间，只在幅宽×速度打平的时候用来拆开。
+export function chooseMachine(farm, caps, travelOf = null) {
   const need = caps || [];
   let best = null;
   for (const machine of farm.machines) {
     if (machine.busy) continue;
-    if (machine.classId === 'hitch' || machine.classId === 'air') continue;
-    const hitch = hitchOf(farm, machine);
-    if (hitch?.busy) continue;
-    const have = new Set(machine.caps);
-    if (hitch) for (const cap of hitch.caps) have.add(cap);
-    if (!need.every(cap => have.has(cap))) continue;
+    const covered = coveredBy(farm, machine, need);
+    if (!covered) continue;
+    if (covered.hitch?.busy) continue;
     if (machine.energyLeft <= 0 && machine.energy) continue;
-    const fromHitch = need.some(cap => !machine.caps.includes(cap));
-    const width = fromHitch ? hitch.width : machine.width;
-    const origin = fromHitch ? (hitch.origin || 0) : (machine.origin || 0);
-    if (!(width > 0) || !(machine.workSpeed > 0)) continue;
-    const integral = !!machine.integral && need.every(cap => machine.caps.includes(cap));
+    const travel = travelOf ? travelOf(machine.id) : 0;
     const offer = {
       id: machine.id,
       machine,
-      hitchId: fromHitch ? hitch.id : null,
-      width,
-      origin,
-      score: width * machine.workSpeed,
-      integral,
+      hitchId: covered.fromHitch ? covered.hitch.id : null,
+      width: covered.width,
+      origin: covered.origin,
+      score: covered.width * machine.workSpeed,
+      integral: covered.integral,
+      travel: Number.isFinite(travel) ? travel : 0,
     };
     if (!best) { best = offer; continue; }
     if (offer.integral !== best.integral) {
       if (offer.integral) best = offer;
       continue;
     }
-    if (offer.score > best.score) best = offer;
+    if (offer.score !== best.score) {
+      if (offer.score > best.score) best = offer;
+      continue;
+    }
+    if (offer.travel < best.travel) best = offer;
   }
   return best;
 }
 
-function dispatch(farm) {
-  // 队头派不出去时不要卡住后面。拖拉机能犁的田，不该等在一台一体机才做得了的播种后面。
-  const deferred = [];
-  const pending = farm.queue.length;
-  for (let i = 0; i < pending && farm.queue.length; i++) {
-    const item = farm.queue[0];
+function dispatch(farm, env = null) {
+  // 队列只放各田的下一刀。每轮按能做的机越少越先配，不再按入队先后挑车。
+  const live = [];
+  for (const item of farm.queue) {
     const field = farm.fields.get(item.fieldId);
-    if (!field || field.lock) {
-      farm.queue.shift();
+    if (!field || field.lock) continue;
+    if (farm.orders.some(order => order.fieldId === item.fieldId)) continue;
+    live.push(item);
+  }
+  live.sort((a, b) => {
+    const diff = capableCount(farm, a.caps) - capableCount(farm, b.caps);
+    if (diff) return diff;
+    return a.id - b.id;
+  });
+  const waiting = [];
+  for (const item of live) {
+    const field = farm.fields.get(item.fieldId);
+    if (farm.orders.some(order => order.fieldId === item.fieldId)) {
+      waiting.push(item);
       continue;
     }
-    const best = chooseMachine(farm, item.caps);
+    const best = chooseMachine(farm, item.caps, (machineId) => {
+      if (!env?.travel) return 0;
+      const value = env.travel(farm, item.fieldId, machineId);
+      return Number.isFinite(value) ? value : 0;
+    });
     if (!best) {
-      deferred.push(farm.queue.shift());
+      waiting.push(item);
       continue;
     }
-    farm.queue.shift();
     const job = JOBS[item.jobId];
     const soft = job?.kind === 'soft';
     const order = {
@@ -363,7 +404,7 @@ function dispatch(farm) {
     farm.orders.push(order);
     pushEvent(farm, { type: 'dispatch', fieldId: field.id, jobId: item.jobId, machineId: best.id, hitchId: best.hitchId, width: order.width, origin: order.origin });
   }
-  if (deferred.length) farm.queue = deferred.concat(farm.queue);
+  farm.queue = waiting;
 }
 
 function passesOf(order, field) {
@@ -690,7 +731,7 @@ export function stepFarm(farm, dt, env = null) {
   for (let guard = 0; guard < 48 && left > 1e-6; guard++) {
     touchSoft(farm);
     queueSoft(farm);
-    dispatch(farm);
+    dispatch(farm, env);
     touchSoft(farm);
     for (const order of farm.orders) {
       if (order.phase === 'work') {
@@ -751,7 +792,7 @@ export function stepFarm(farm, dt, env = null) {
   }
   touchSoft(farm);
   queueSoft(farm);
-  dispatch(farm);
+  dispatch(farm, env);
   return farm;
 }
 
