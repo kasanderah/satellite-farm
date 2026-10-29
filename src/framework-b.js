@@ -2,7 +2,7 @@
 // 整地和种植是两条平行的阶段链。硬作业锁住整块田，做完才改地面样子。
 // 作业进行中可以按幅宽扫过下一道样子；做完蒙版拿掉，整块定稿。
 // 软作业挂在阶段上，只报完成或错过，不写下一阶段。窗口过了记过期，不锁田。
-// 做完不改整块样子。作业进行中跟车蒙版仍刷 sweep 那一档，和硬作业同一条刷色。
+// 作业进行中按幅宽刷 sweep。软作业做完把 sweep 写入田面，蒙版拿掉后整块还是这个样子。
 // 生长和软窗记世界日。stepFarm 仍收真实秒，只在钟的边界换算。
 
 import { DAY_SECONDS } from './world-clock.js';
@@ -30,16 +30,15 @@ export const GROUNDS = {
   general: { id: 'general', name: '一般田地' },
 };
 
-// look 为「不影响」时，做完也不改田面。阶段图负责往下一站走。
+// look 为「不影响」时，这道作业自己不充当阶段样子，也不推进阶段。
+// 玩家看见的刷色在 sweep。做完把 sweep 写入田面，不留趟数常数。
 export const JOBS = {
   plow: { id: 'plow', name: '犁地', kind: 'hard', caps: ['犁田'], look: 'general' },
   sow: { id: 'sow', name: '播种', kind: 'hard', caps: ['播种'], look: 'sown' },
   harvest: { id: 'harvest', name: '收割', kind: 'hard', caps: ['收割'], look: 'harvested' },
   tidy: { id: 'tidy', name: '收拾', kind: 'hard', caps: ['收拾'], look: 'general' },
-  // look 为不影响：做完不改田面，阶段图自己走。sweep 只给跟车蒙版，扫过的一条用这个样子。
-  // passes 是软作业趟数。窗口按世界日。硬作业不写 passes，仍铺满整块。
-  topdress: { id: 'topdress', name: '追肥', kind: 'soft', caps: ['追肥'], look: '不影响', sweep: 'mature', passes: 1 },
-  hill: { id: 'hill', name: '培土', kind: 'soft', caps: ['培土'], look: '不影响', sweep: 'mature', passes: 1 },
+  topdress: { id: 'topdress', name: '追肥', kind: 'soft', caps: ['追肥'], look: '不影响', sweep: 'mature' },
+  hill: { id: 'hill', name: '培土', kind: 'soft', caps: ['培土'], look: '不影响', sweep: 'mature' },
 };
 
 export const PREP_RECIPES = {
@@ -398,7 +397,6 @@ function dispatch(farm, env = null) {
       progress: 0,
       phase: 'cruise',
       pose: null,
-      passCap: soft ? Math.max(1, job.passes || 1) : 0,
     };
     writePose(farm, order);
     if (!soft) field.lock = order.id;
@@ -414,9 +412,8 @@ function dispatch(farm, env = null) {
 }
 
 function passesOf(order, field) {
-  const full = Math.max(1, Math.ceil(field.width / order.width));
-  if (order.passCap > 0) return Math.max(1, Math.min(full, order.passCap));
-  return full;
+  const span = order.width > 0 ? order.width : field.width;
+  return Math.max(1, Math.ceil(field.width / span));
 }
 
 function metersOf(order, field) {
@@ -530,6 +527,14 @@ function applyLook(field, job) {
   return true;
 }
 
+// 跟车时刷的是 sweep。做完写入田面。「不影响」只表示这道作业不是阶段样子。
+function commitSweep(field, job) {
+  const look = job?.sweep;
+  if (!field || !look || look === '不影响' || lookG(look) == null) return null;
+  field.look = look;
+  return look;
+}
+
 function releaseOrder(farm, order) {
   const field = farm.fields.get(order.fieldId);
   const machine = orderMachine(farm, order);
@@ -547,16 +552,18 @@ function finishOrder(farm, order) {
   const job = JOBS[order.jobId];
   if (job?.kind === 'soft') {
     const row = field?.plant?.soft?.[order.jobId];
+    let painted = null;
     if (row && row.status !== '过期') {
       row.progress = 1;
       row.status = '执行完';
+      painted = commitSweep(field, job);
     }
     releaseOrder(farm, order);
     pushEvent(farm, {
       type: 'job-complete',
       fieldId: field?.id,
       jobId: job.id,
-      look: job.look,
+      look: painted || job.look,
       lane: order.lane,
       progress: row ? row.progress : 1,
     });
