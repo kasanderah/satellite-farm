@@ -35,7 +35,7 @@ const HELP = `打开：左侧「田间 / 阶段编辑器」。默认是拉斯提
 
 序列：O、A、B、D、E 必须有。C 和中间段可以加、也可以删。阶段名和 id 都能改。
 
-时长：点一个阶段，改世界日。播放和主游戏同一口钟。1× 时 1 世界日 = 12 现实分钟（720 现实秒）。B 的天数就是主游戏生长的世界日，软窗 from/to 同单位。
+时长：点电池图里的一格，或左侧天数，改世界日。播放和主游戏同一口钟。1× 时 1 世界日 = 12 现实分钟（720 现实秒）。软窗、硬窗的起止是这一阶段内的世界日。烂地和收获后不按天数占格。
 
 作业：色条从上到下就是执行顺序。硬作业锁到做完。软作业带窗口，过了窗口可以失败并挂起。田面可以选色、植株、垄截面，也可以不影响。
 
@@ -68,28 +68,79 @@ function cropVisual(crop) {
   };
 }
 
+function batteryInk(hex) {
+  const n = parseInt(String(hex || '').replace('#', ''), 16);
+  if (!Number.isFinite(n)) return '#f4efe8';
+  const r = (n >> 16) & 255;
+  const g = (n >> 8) & 255;
+  const b = n & 255;
+  const l = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+  return l > 0.62 ? '#1a140f' : '#f4efe8';
+}
+
 function clampNum(value, min, max, fallback) {
   const n = Number(value);
   if (!Number.isFinite(n)) return fallback;
   return Math.max(min, Math.min(max, Math.round(n * 100) / 100));
 }
 
-function timeline(doc) {
-  const items = [];
-  const push = (id, variant, name, days) => items.push({ id, variant, name, days: Math.max(0.25, Number(days) || 0.25) });
+function isRotTail(variant) {
+  if (!variant) return false;
+  return variant.id === 'D2' || /烂/.test(variant.name || '');
+}
+
+function isInfiniteStage(stage) {
+  if (!stage) return false;
+  return stage.group === 'E' || stage.kind === 'post' || stage.kind === 'rot' || stage.role === 'rot' || stage.role === 'tail';
+}
+
+// 生长阶段按天数分格。烂地和收获后是无限尾段，不按天数占电量。
+function batteryCells(doc) {
+  const cells = [];
   const bare = stageByGroup(doc, 'O');
-  if (bare) push(bare.id, '', bare.name, bare.days);
-  for (const id of doc.chain) {
-    const st = stageById(doc, id);
-    if (!st) continue;
-    push(id, '', st.name, st.days);
-    if (st.group === 'D') {
-      for (const v of st.variants.filter(item => item.auto)) push(st.id, v.id, v.name, v.days || 1);
+  if (bare) {
+    cells.push({ id: bare.id, variant: '', name: bare.name, days: Math.max(0.25, Number(bare.days) || 0.25), color: bare.color || '#6f6a61', infinite: false });
+  }
+  for (const id of doc.chain || []) {
+    const stage = stageById(doc, id);
+    if (!stage || cells.some(cell => cell.id === stage.id && !cell.variant)) continue;
+    if (isInfiniteStage(stage)) {
+      cells.push({ id: stage.id, variant: '', name: stage.name, days: 0, color: stage.color || '#6f6a61', infinite: true });
+    } else {
+      cells.push({ id: stage.id, variant: '', name: stage.name, days: Math.max(0.25, Number(stage.days) || 0.25), color: stage.color || '#6f6a61', infinite: false });
+    }
+    if (stage.group === 'D') {
+      for (const variant of (stage.variants || []).filter(item => item.auto)) {
+        if (isRotTail(variant)) {
+          cells.push({ id: stage.id, variant: variant.id, name: variant.name, days: 0, color: variant.color || stage.color || '#6f6a61', infinite: true });
+        } else {
+          cells.push({ id: stage.id, variant: variant.id, name: variant.name, days: Math.max(0.25, Number(variant.days) || 1), color: variant.color || stage.color || '#6f6a61', infinite: false });
+        }
+      }
     }
   }
   const post = stageByGroup(doc, 'E');
-  if (post) push(post.id, '', post.name, post.days);
-  return items;
+  if (post && !cells.some(cell => cell.id === post.id && !cell.variant)) {
+    cells.push({ id: post.id, variant: '', name: post.name, days: 0, color: post.color || '#6f6a61', infinite: true });
+  }
+  return cells;
+}
+
+function cellWindows(doc, cell) {
+  if (cell.variant) return [];
+  const days = cell.infinite ? 1 : Math.max(0.25, cell.days);
+  return (doc.ops || []).filter(op => op && op.stage === cell.id && !op.reserved && !op.extensions?.framework).map(op => {
+    const soft = op.kind === 'optional';
+    let from = 0;
+    let to = 1;
+    if (!cell.infinite && op.window && Number.isFinite(+op.window.from) && Number.isFinite(+op.window.to)) {
+      from = Math.max(0, Math.min(1, Number(op.window.from) / days));
+      to = Math.max(0, Math.min(1, Number(op.window.to) / days));
+    }
+    if (!(to > from)) return null;
+    const span = op.window ? `${op.window.from}–${op.window.to}` : '整段';
+    return { soft, from, to, title: `${op.name} ${span}` };
+  }).filter(Boolean);
 }
 
 function groundMaterial() {
@@ -368,6 +419,7 @@ export function createFieldWorkshop(els) {
 <label>显示名<input id="fs-name" type="text" maxlength="24" placeholder="显示名"></label>
 <p id="fs-now" class="fs-note"></p>
 <div id="fs-gantt" class="fs-gantt"></div>
+<p class="fs-note">电池图按天数分格。点一格编辑该阶段。淡蓝是软窗，红是硬窗。∞ 是烂地或收获后，不按天数占格。</p>
 <div id="fs-stages"></div>
 <div id="fs-edit"></div>
 <div id="fs-jobs"></div>
@@ -642,14 +694,18 @@ export function createFieldWorkshop(els) {
 
   function paintGantt() {
     const doc = current();
-    const items = timeline(doc);
-    const sum = items.reduce((s, it) => s + it.days, 0) || 1;
-    const info = sim ? dominant(sim) : null;
-    const html = items.map(it => {
-      const on = info && !inspect && it.id === info.phase && it.variant === (info.variant || '')
-        || (inspect && inspect.phase === it.id && (inspect.variant || '') === it.variant);
-      return `<button type="button" data-stage="${it.id}" data-variant="${it.variant}" class="${on ? 'on' : ''}" style="flex-grow:${it.days / sum}">${it.variant || it.id} ${it.name}</button>`;
-    }).join('');
+    const cells = batteryCells(doc);
+    const finite = cells.reduce((sum, cell) => sum + (cell.infinite ? 0 : cell.days), 0) || 1;
+    const tail = Math.max(1, finite * 0.12);
+    const picked = inspect?.variant || '';
+    const html = `<div class="fs-battery">${cells.map(cell => {
+      const on = selected === cell.id && picked === (cell.variant || '');
+      const flex = cell.infinite ? tail : cell.days;
+      const ink = batteryInk(cell.color);
+      const wins = cellWindows(doc, cell).map(win => `<i class="fs-win ${win.soft ? 'soft' : 'hard'}" style="left:${(win.from * 100).toFixed(2)}%;width:${((win.to - win.from) * 100).toFixed(2)}%" title="${esc(win.title)}"></i>`).join('');
+      const mark = cell.infinite ? '∞' : `${cell.days} 日`;
+      return `<button type="button" data-stage="${esc(cell.id)}" data-variant="${esc(cell.variant)}" class="${on ? 'on' : ''} ${cell.infinite ? 'inf' : ''}" style="flex:${flex} 1 0;background:${esc(cell.color)};color:${ink}" title="${esc(cell.name)} ${mark}"><span class="fs-wins">${wins}</span><b>${esc(cell.name)}</b><small>${cell.infinite ? '∞ →' : esc(String(cell.days))}</small></button>`;
+    }).join('')}</div>`;
     if (html === ganttHtml) return;
     ganttHtml = html;
     panel.querySelector('#fs-gantt').innerHTML = html;
@@ -861,6 +917,7 @@ ${variants}
       patchStageOp(doc, opId, patch);
       dirty = true;
       persist();
+      paintGantt();
     };
     host.querySelector('#fs-add-job').addEventListener('click', () => {
       addStageOp(doc, selected);
@@ -922,6 +979,7 @@ ${variants}
         patchStageOp(doc, opId, { window: null });
         note = '';
         persist();
+        paintGantt();
         return;
       }
       const from = Number(fromEl.value);
@@ -934,6 +992,7 @@ ${variants}
       patchStageOp(doc, opId, { window: { from, to } });
       note = '';
       persist();
+      paintGantt();
     };
     host.querySelectorAll('[data-job-from],[data-job-to]').forEach(input => {
       const opId = input.dataset.jobFrom || input.dataset.jobTo;

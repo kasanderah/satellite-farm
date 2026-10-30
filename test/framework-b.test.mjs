@@ -805,7 +805,7 @@ test('下一轮计划在收拾后才下播种单，没有计划不自动种', ()
 });
 
 test('拉斯提卡阶段和版本戳来自同一份定义', () => {
-  assert.equal(HUD_VERSION, '环穗 v6.19');
+  assert.equal(HUD_VERSION, '环穗 v6.20');
   const doc = parseFieldStageDoc(structuredClone(lastikaRaw));
   const windows = jobWindows(doc, alignFieldCalendar(doc)).filter(item => item.op.kind === 'optional');
   assert.deepEqual(windows.map(item => item.op.id), ['topdress', 'hill']);

@@ -45,8 +45,17 @@ main.field-on{grid-template-columns:200px 1fr 360px}
 #fieldbar button.on,#field-panel button.on{border-color:var(--sig);color:var(--zone)}
 #field-panel{display:flex;flex-direction:column;gap:8px}
 .fs-row{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
-.fs-gantt{display:flex;height:22px;width:100%;gap:2px}
-.fs-gantt button{flex:1 1 auto;min-width:0;padding:0 3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;letter-spacing:.02em}
+.fs-gantt{display:block;height:auto;width:100%;overflow-x:auto}
+.fs-battery{display:flex;gap:3px;align-items:stretch;min-width:100%;box-sizing:border-box;padding:4px;border:1px solid rgba(188,195,196,.45);background:rgba(10,12,20,.45)}
+.fs-battery button{flex:1 1 0;min-width:0;height:auto;padding:3px 2px 4px;display:flex;flex-direction:column;gap:2px;align-items:stretch;justify-content:flex-end;border:1px solid rgba(10,12,20,.35);cursor:pointer}
+.fs-battery button.on{border-color:#d8693c;box-shadow:inset 0 0 0 1px #d8693c}
+.fs-battery button.inf{min-width:52px;background-image:repeating-linear-gradient(90deg, transparent, transparent 7px, rgba(255,255,255,.22) 7px, rgba(255,255,255,.22) 8px)}
+.fs-wins{position:relative;height:8px}
+.fs-win{position:absolute;top:1px;height:6px}
+.fs-win.soft{background:#7eb6d6}
+.fs-win.hard{background:#c4503a}
+.fs-battery button b{font-size:10px;font-weight:500;letter-spacing:.02em;line-height:1.15;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fs-battery button small{font-size:9px;letter-spacing:.04em;line-height:1.1}
 .fs h3{margin:0;font-size:13px;font-weight:500;letter-spacing:.16em}
 .fs p{margin:0}
 .fs label{display:flex;flex-direction:column;gap:4px;font-size:10px;letter-spacing:.14em;color:var(--mut)}
