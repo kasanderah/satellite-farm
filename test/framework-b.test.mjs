@@ -591,7 +591,8 @@ test('种着的地可以整地清掉', () => {
   assert.equal(field.ground, 'general');
   assert.equal(field.look, 'general');
   const view = describeField(farm, 'a');
-  assert.deepEqual(view.actions.map(act => act.id), ['prep', 'plant', 'next']);
+  assert.deepEqual(view.actions.map(act => act.id), []);
+  assert.equal(view.canPlant, true);
 });
 
 test('农机巡航沿田路折线，不斜穿田块', () => {
@@ -751,7 +752,7 @@ test('没有能干活的机械时整地仍可点，并说明缺机；拖拉机�
   const farm = createFarm();
   addField(farm, { id: 'bare', length: 128, width: 128, ground: 'raw', look: 'raw' });
   assert.equal(describeField(farm, 'bare').canPrep, true);
-  assert.equal(describeField(farm, 'bare').actions.find(act => act.id === 'prep').enabled, true);
+  assert.equal(describeField(farm, 'bare').actions.some(act => act.id === 'next'), false);
   const missing = requestPrep(farm, 'bare');
   assert.equal(missing.ok, false);
   assert.equal(missing.reason, 'machine');
@@ -804,7 +805,7 @@ test('下一轮计划在收拾后才下播种单，没有计划不自动种', ()
 });
 
 test('拉斯提卡阶段和版本戳来自同一份定义', () => {
-  assert.equal(HUD_VERSION, '环穗 v6.18');
+  assert.equal(HUD_VERSION, '环穗 v6.19');
   const doc = parseFieldStageDoc(structuredClone(lastikaRaw));
   const windows = jobWindows(doc, alignFieldCalendar(doc)).filter(item => item.op.kind === 'optional');
   assert.deepEqual(windows.map(item => item.op.id), ['topdress', 'hill']);

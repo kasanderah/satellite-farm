@@ -42,6 +42,12 @@ body.nohud .hud,body.nohud #labels{opacity:0!important}
 #tiers button b{display:block;font-weight:400;font-size:12px;letter-spacing:.2em}
 #tiers button small{display:block;font-size:9px;letter-spacing:.24em;color:var(--mut)}
 #tiers button.on{opacity:1;border-bottom-color:var(--sig)}
+#subbar{bottom:70px;left:50%;transform:translateX(-50%);display:none;max-width:min(92vw,720px);overflow-x:auto;gap:6px;padding:6px 8px;z-index:4}
+#subbar.on{display:flex}
+#subbar button{font-family:inherit;color:var(--fg);background:transparent;border:1px solid var(--line);padding:6px 14px 5px;cursor:pointer;flex:0 0 auto;text-align:center}
+#subbar button b{display:block;font-weight:500;font-size:13px;letter-spacing:.16em;white-space:nowrap}
+#subbar button small{display:block;margin-top:2px;font-size:10px;letter-spacing:.08em;color:var(--mut);white-space:nowrap}
+#subbar button:hover{border-color:var(--sig)}
 #sheet{left:50%;bottom:78px;transform:translateX(-50%);width:380px;max-height:52vh;overflow:auto;display:none;padding:10px 12px 12px}
 #sheet.on{display:block}
 #sheet.wide{width:640px}
@@ -258,6 +264,7 @@ body.underground #dock{display:none}
 <div class="hud panel" id="legend"></div>
 <div class="hud panel hit" id="layers"></div>
 <div class="hud panel hit" id="sheet"></div>
+<div class="hud panel hit" id="subbar"></div>
 <div class="hud panel hit" id="tiers"></div>
 <div class="hud panel hit" id="dock"></div>
 <div class="hud" id="toasts"></div>
@@ -269,6 +276,6 @@ body.underground #dock{display:none}
 <div class="hud panel hit" id="planmenu"></div>
 <div id="viewer"><div class="bar"><div><h2>资产</h2><div class="sub">当前的薯田阶段、机器和田块。每张卡片是名字加上现在的样子。点一张就能指着它改。这是查看，不能上传。</div></div><button type="button" id="viewer-close">关闭</button></div><div class="sec">商品薯阶段</div><div class="grid" id="view-stages"></div><div class="sec">机器</div><div class="grid" id="view-machines"></div><div class="sec">田块</div><div class="grid" id="view-tiles"></div></div>
 <div class="hud" id="scale"><span id="scaletxt"></span><div id="scalebar"></div></div>
-<div class="hud" id="buildrev">环穗 v6.18</div>
+<div class="hud" id="buildrev">环穗 v6.19</div>
 <script>__BUNDLE__</script>
 </body></html>

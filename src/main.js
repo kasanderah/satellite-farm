@@ -24,7 +24,7 @@ import { surfaceKits, hitchOffset } from './surface-kits.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CULT_EMPTY } from './lab-catalog.js';
 import { makeColony } from './colony-art.js';
-import { bootSlice, tickSlice, prepField, plantCrop, planNext, dockOf, dropDrive, adoptBought } from './b-bind.js';
+import { bootSlice, tickSlice, prepField, plantCrop, dockOf, dropDrive, adoptBought } from './b-bind.js';
 import { PLANT_CROPS, PREP_RECIPES, JOBS, stageDisplayStops } from './framework-b.js';
 import { HUD_VERSION } from './version.js';
 import { DAY_SECONDS } from './world-clock.js';
@@ -2296,26 +2296,43 @@ function doPrep(recipeId = 'clear_general') {
   updateDock();
   return r;
 }
-function doPlant() {
+function doPlant(cropId = 'lastika') {
   if (!selected?.owned) { toast('不能播种'); return { ok: false, reason: 'plot' }; }
-  const r = plantCrop(selected);
+  const r = plantCrop(selected, cropId);
   if (!r.ok) { toast(plantWhy(r.reason)); return r; }
   closeToolMenus();
   plantWin = { x: 1e9, z: 1e9, w: 0 };
-  toast('拉斯提卡 · 播种');
+  const name = PLANT_CROPS[cropId]?.name || cropId;
+  toast(`${name} · 播种`);
   updateDock();
   return r;
 }
-function doNext() {
-  if (!selected?.owned) { toast('不能定下一轮'); return { ok: false, reason: 'plot' }; }
-  const current = dockOf(selected)?.nextCrop;
-  const r = planNext(selected, current ? null : 'lastika');
-  if (!r.ok) { toast(plantWhy(r.reason)); return r; }
-  if (r.cleared) toast('已取消下一轮');
-  else if (r.reason === 'machine') toast('缺少可执行任务的机械');
-  else toast(r.queued ? '下一轮 · 拉斯提卡 · 播种' : '下一轮 · 拉斯提卡');
+function orderTargets() {
+  const list = ownedFields();
+  if (!list.length) toast('先选一块田');
+  return list;
+}
+function paintSubbar() {
+  const host = $('subbar');
+  if (!host) return;
+  if (mode !== 'prep' && mode !== 'plant') {
+    host.classList.remove('on');
+    host.innerHTML = '';
+    return;
+  }
+  host.classList.add('on');
+  if (mode === 'prep') {
+    host.innerHTML = Object.values(PREP_RECIPES).map(recipe => `<button type="button" data-recipe="${recipe.id}"><b>${recipe.name}</b><small>${recipe.targetName}</small></button>`).join('');
+    return;
+  }
+  host.innerHTML = Object.values(PLANT_CROPS).map(crop => `<button type="button" data-crop="${crop.id}"><b>${crop.name}</b></button>`).join('');
+}
+function closeSubTool() {
+  if (mode === 'prep' || mode === 'plant') mode = 'look';
+  paintModes();
+  paintSheet();
+  paintSubbar();
   updateDock();
-  return r;
 }
 function closePlanMenu() {
   const menu = $('planmenu');
@@ -2361,9 +2378,8 @@ document.getElementById('planmenu').addEventListener('click', e => {
   const ctx = e.target.closest('[data-ctx]');
   if (!ctx) return;
   closePlanMenu();
-  if (ctx.dataset.ctx === 'prep') { for (const f of ownedFields()) { selected = f; doPrep(); } }
-  else if (ctx.dataset.ctx === 'plant') { for (const f of ownedFields()) { selected = f; doPlant(); } }
-  else if (ctx.dataset.ctx === 'next') { for (const f of ownedFields()) { selected = f; doNext(); } }
+  if (ctx.dataset.ctx === 'prep') setMode('prep');
+  else if (ctx.dataset.ctx === 'plant') setMode('plant');
   else if (ctx.dataset.ctx === 'follow') enterLock();
   else if (ctx.dataset.ctx === 'sell') sellCurrentRig();
   else if (ctx.dataset.ctx === 'clear') exitToDefault();
@@ -2510,6 +2526,7 @@ addEventListener('keydown', e => {
   if (e.key === 'F2' || e.key === '\\') { e.preventDefault(); toggleAdmin(); }
   if (e.key === 'v' || e.key === 'V') toggleViewer();
   if (e.key === 'Escape') {
+    if (mode === 'prep' || mode === 'plant') { closeSubTool(); return; }
     if (prepOpen || plantOpen) { closeToolMenus(); updateDock(); return; }
     $('admin').classList.remove('on');
     $('viewer').classList.remove('on');
@@ -2568,7 +2585,7 @@ legend.innerHTML = [
   ['收割', PALETTE.ochre, PALETTE.straw],
   ['收拾', PALETTE.rego, PALETTE.regoLt],
 ].map(([name, a, b]) => `<div class="lg"><i style="background:linear-gradient(90deg,${a},${b})"></i><span>${name}</span></div>`).join('');
-const MODES = [['machines', '农机', 'FLEET'], ['rigshop', '农机店', 'BUY'], ['plan', '区域', 'PLAN'], ['crops', '作物', 'CROP'], ['scheme', '规划', 'ASSIGN'], ['store', '仓库', 'STORE'], ['build', '建设', 'BUILD'], ['shop', '商店', 'SHOP']];
+const MODES = [['machines', '农机', 'FLEET'], ['rigshop', '农机店', 'BUY'], ['plan', '区域', 'PLAN'], ['prep', '整地', 'TILL'], ['plant', '种植', 'SOW'], ['crops', '作物', 'CROP'], ['scheme', '规划', 'ASSIGN'], ['store', '仓库', 'STORE'], ['build', '建设', 'BUILD'], ['shop', '商店', 'SHOP']];
 $('tiers').innerHTML = MODES.map(([id, zh, en]) => `<button type="button" data-mode="${id}"><b>${zh}</b><small>${en}</small></button>`).join('');
 function gotoTier(n) { camT.d = [4800, 900, 160, 34][n - 1]; camT.pOff = 0; camT.lookUp = 0; camT.fovAdd = 0; }
 function fieldCode(f) { return `F-${String(f.i).padStart(3, '0')}${String(f.j).padStart(2, '0')}`; }
@@ -2722,7 +2739,7 @@ function stackSlots(list, pick, attr) {
 function paintSheet() {
   const el = $('sheet');
   el.classList.toggle('wide', mode === 'crops' || mode === 'store' || mode === 'shop' || mode === 'scheme' || mode === 'rigshop');
-  if (mode === 'plan' || mode === 'look') { el.classList.remove('on'); el.innerHTML = ''; return; }
+  if (mode === 'plan' || mode === 'look' || mode === 'prep' || mode === 'plant') { el.classList.remove('on'); el.innerHTML = ''; return; }
   el.classList.add('on');
   if (mode === 'crops') {
     const rows = CROPS.map(c => ({ key: c.id, name: c.name, sub: c.plantable ? '可种' : '邻区' }));
@@ -2830,6 +2847,7 @@ function returnToLook() {
   selectField(null);
   paintModes();
   paintSheet();
+  paintSubbar();
   paintLock();
 }
 function setMode(id) {
@@ -2842,20 +2860,46 @@ function setMode(id) {
     paintLayers();
   }
   mode = id;
-  if (id === 'plan') { showPlan(); return; }
+  if (id === 'plan') { showPlan(); paintSubbar(); return; }
+  if (id === 'prep' || id === 'plant') {
+    watchRig = null;
+    closePlanMenu();
+    paintModes();
+    paintSheet();
+    paintSubbar();
+    return;
+  }
   if (id !== 'machines') watchRig = null;
   if (id !== 'scheme') closePlanMenu();
   paintModes();
   paintSheet();
+  paintSubbar();
 }
 function toggleMode(id) {
-  if (mode === id) { returnToLook(); return; }
+  if (mode === id) {
+    if (id === 'prep' || id === 'plant') { closeSubTool(); return; }
+    returnToLook();
+    return;
+  }
   setMode(id);
 }
 $('tiers').addEventListener('click', e => {
   const b = e.target.closest('button');
   if (!b) return;
   toggleMode(b.dataset.mode);
+});
+$('subbar').addEventListener('click', e => {
+  const recipe = e.target.closest('[data-recipe]');
+  const crop = e.target.closest('[data-crop]');
+  if (!recipe && !crop) return;
+  const list = orderTargets();
+  if (!list.length) return;
+  for (const field of list) {
+    selected = field;
+    if (recipe) doPrep(recipe.dataset.recipe);
+    else doPlant(crop.dataset.crop);
+  }
+  closeSubTool();
 });
 $('sheet').addEventListener('change', e => { if (e.target.dataset?.flag) readPlanFlags($('sheet')); });
 $('sheet').addEventListener('click', e => {
@@ -3425,11 +3469,10 @@ function updateDock() {
     if (rigOnly) sum.textContent = rigLine(selectedRig);
     else if (many) sum.textContent = '操作取这些田都能做的';
     else if (!f?.owned) sum.textContent = selNote || '邻区快照 · 只读';
-    else if (!desc?.crop) sum.innerHTML = `${desc?.stat || '未整地'}<br><span>${desc?.nextName ? `下一轮 ${desc.nextName}` : '下一轮 未定'}</span>`;
+    else if (!desc?.crop) sum.textContent = desc?.stat || '未整地';
     else {
       const quality = desc.quality == null ? '—' : desc.quality;
-      const next = desc.nextName ? `下一轮 ${desc.nextName}` : '下一轮 未定';
-      sum.innerHTML = `<b>${desc.crop}</b> · ${desc.stageName || '播种'} · ${(desc.age || 0).toFixed(1)} / ${desc.cycle || 0} 世界日<br><span>成熟度 ${Math.round(desc.maturity || 0)}% · 产量值 ${desc.yieldValue ?? '—'} · 品质值 ${quality} · ${next}</span>`;
+      sum.innerHTML = `<b>${desc.crop}</b> · ${desc.stageName || '播种'} · ${(desc.age || 0).toFixed(1)} / ${desc.cycle || 0} 世界日<br><span>成熟度 ${Math.round(desc.maturity || 0)}% · 产量值 ${desc.yieldValue ?? '—'} · 品质值 ${quality}</span>`;
     }
   }
   const jobsHost = $('dock-jobs');
@@ -3551,9 +3594,8 @@ $('dock').addEventListener('pointerdown', (e) => {
   if (!btn || btn.disabled) return;
   e.preventDefault();
   e.stopPropagation();
-  if (btn.dataset.act === 'prep') { for (const field of ownedFields()) { selected = field; doPrep(); } }
-  else if (btn.dataset.act === 'plant') { for (const field of ownedFields()) { selected = field; doPlant(); } }
-  else if (btn.dataset.act === 'next') { for (const field of ownedFields()) { selected = field; doNext(); } }
+  if (btn.dataset.act === 'prep') setMode('prep');
+  else if (btn.dataset.act === 'plant') setMode('plant');
   else if (btn.dataset.act === 'follow') enterLock();
   else if (btn.dataset.act === 'sell') sellCurrentRig();
 });

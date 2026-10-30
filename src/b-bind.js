@@ -376,9 +376,9 @@ export function prepField(f, recipeId = 'clear_general') {
   return requestPrep(farm, fieldKey(f), recipeId);
 }
 
-export function plantCrop(f) {
+export function plantCrop(f, cropId = 'lastika') {
   if (!farm || !f) return { ok: false, reason: 'field' };
-  return requestPlant(farm, fieldKey(f), 'lastika');
+  return requestPlant(farm, fieldKey(f), cropId);
 }
 
 export function planNext(f, cropId) {

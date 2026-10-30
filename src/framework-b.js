@@ -1412,9 +1412,7 @@ export function describeField(farm, fieldId) {
   const quality = crop && field.plant ? qualityNow(crop, field) : null;
   const locked = fieldLocked(farm, field);
   const next = field.nextCrop ? PLANT_CROPS[field.nextCrop] : null;
-  const actions = [{ id: 'prep', name: '整地', enabled: !locked }];
-  if (!field.plant && field.ground === 'general') actions.push({ id: 'plant', name: '种植', enabled: !locked });
-  actions.push({ id: 'next', name: next ? '取消下一轮' : '下一轮', enabled: true });
+  const actions = [];
   const chips = barStages.map(item => ({ name: item.name, on: item.on }));
   const bar = work ? work.progress : (field.plant?.clock && field.plant.need ? field.plant.grow / field.plant.need : 0);
   return {
