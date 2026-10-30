@@ -1,7 +1,7 @@
 // 把框架 B 接到环面上的一块田。旧的垄扫不读这里的工单。
 import {
   OMNI, TRACTOR, PLOW, JOBS, TURN_SECONDS, createFarm, addField, addMachine, mountHitch,
-  requestPrep, requestPlant, stepFarm, describeField, plotAddress, growthAge, PLANT_CROPS,
+  requestPrep, requestPlant, stepFarm, describeField, plotAddress, growthAge, workSweepLook, PLANT_CROPS,
 } from './framework-b.js';
 
 let farm = null;
@@ -193,13 +193,13 @@ function syncFields() {
       ground: unit.ground,
       plot: unit.plot,
     };
-    const brush = order ? JOBS[order.jobId]?.brush : null;
-    if (sweeping && brush?.enabled && brush.look && brush.look !== '不影响') {
+    const sweepLook = order ? workSweepLook(JOBS[order.jobId]) : null;
+    if (sweeping && sweepLook) {
       f.bUnit.sweep = {
         width: order.width,
         pass: order.pose.pass,
         alongFrac: order.pose.alongFrac || 0,
-        look: brush.look,
+        look: sweepLook,
       };
     }
   }

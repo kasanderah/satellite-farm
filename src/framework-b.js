@@ -2,7 +2,8 @@
 // 整地和种植是两条平行的阶段链。硬作业锁住整块田，做完才改地面样子。
 // 作业进行中可以按幅宽扫过下一道样子；做完蒙版拿掉，整块定稿。
 // 软作业挂在阶段上，只报完成或错过，不写下一阶段。窗口过了记过期，不锁田。
-// 刷色是作业上的 brush，默认关。关掉时软作业做完不改田面样子。
+// 硬作业进行中按 look 扫过田面，做完才整块换成这个样子。
+// brush.enabled 只给可选刷色，默认关。软作业关着时，进行中不扫，做完也不改田面。
 // 生长和软窗记世界日。stepFarm 仍收真实秒，只在钟的边界换算。
 
 import { DAY_SECONDS } from './world-clock.js';
@@ -30,8 +31,9 @@ export const GROUNDS = {
   general: { id: 'general', name: '一般田地' },
 };
 
-// look 为「不影响」时，这道作业自己不充当阶段样子，也不推进阶段。
-// brush 是可选跟车刷色。enabled 默认关。关着时，做完也不把 brush.look 写进田面。
+// look 为「不影响」时，这道作业自己不充当阶段样子。
+// 硬作业的进行中扫色用 look，不看 brush.enabled。
+// brush 是另外的可选刷色，默认关。关着时软作业不扫，做完也不写入田面。
 const BRUSH_OFF = { enabled: false };
 export const JOBS = {
   plow: { id: 'plow', name: '犁地', kind: 'hard', caps: ['犁田'], look: 'general', brush: { ...BRUSH_OFF, look: 'general' } },
@@ -542,6 +544,14 @@ function advanceWork(farm, order, slice) {
   order.progress = travel1 / total;
   writePose(farm, order);
   if (machine.powerOutKw > 0) machine.energyLeft = Math.max(0, machine.energyLeft - machine.powerOutKw * slice / 3600);
+}
+
+export function workSweepLook(job) {
+  if (!job) return null;
+  if (job.kind === 'hard' && job.look && job.look !== '不影响') return job.look;
+  const brush = job.brush;
+  if (brush?.enabled && brush.look && brush.look !== '不影响') return brush.look;
+  return null;
 }
 
 function applyLook(field, job) {

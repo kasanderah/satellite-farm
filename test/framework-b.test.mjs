@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   CAPABILITIES, GROUNDS, JOBS, PREP_RECIPES, PLANT_CROPS, OMNI, TRACTOR, PLOW, MACHINE_CLASSES,
-  GROW_DAYS, GROW_SECONDS, HUB_PLOT, plotAddress, lookG, fieldShader, hitchStub,
+  GROW_DAYS, GROW_SECONDS, HUB_PLOT, plotAddress, lookG, fieldShader, hitchStub, workSweepLook,
   createFarm, addField, addMachine, mountHitch, chooseMachine, requestPrep, requestPlant, stepFarm, fieldWork, describeField,
 } from '../src/framework-b.js';
 import { installShippedLastika } from '../src/lastika-stage.js';
@@ -168,6 +168,10 @@ test('追肥在第5到6日，做完加倍产量，不改田面色', () => {
   assert.equal(softOrder.pose.passes, Math.ceil(field.width / softOrder.width));
   assert.equal(JOBS.topdress.brush.enabled, false);
   assert.equal(JOBS.topdress.look, '不影响');
+  assert.equal(workSweepLook(JOBS.sow), 'sown');
+  assert.equal(workSweepLook(JOBS.plow), 'general');
+  assert.equal(workSweepLook(JOBS.topdress), null);
+  assert.equal(workSweepLook(JOBS.hill), null);
   until(farm, () => field.plant.soft.topdress.status === '执行完', 800);
   assert.equal(field.plant.yieldMul, 2);
   assert.equal(field.look, 'sown');
@@ -507,7 +511,7 @@ test('错过成熟窗进腐烂，没有农机开工就不会收', () => {
 });
 
 test('拉斯提卡阶段和版本戳来自同一份定义', () => {
-  assert.equal(HUD_VERSION, '环穗 v6.5');
+  assert.equal(HUD_VERSION, '环穗 v6.6');
   const doc = parseFieldStageDoc(structuredClone(lastikaRaw));
   const windows = jobWindows(doc, alignFieldCalendar(doc)).filter(item => item.op.kind === 'optional');
   assert.deepEqual(windows.map(item => item.op.id), ['topdress', 'hill']);
