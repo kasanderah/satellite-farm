@@ -1840,6 +1840,7 @@ function applyDeckView() {
 // 交互：左键平移 / 右键旋转 / 滚轮缩放 / WASD / QE / N 昼夜 / M 地图模式 / H 隐藏界面
 let drag = null, ptr = null, rightArm = null, selected = null, selectedRig = null, selNote = '', plantOpen = false, prepOpen = false;
 let camLock = false;
+let lockFocus = null;
 let mode = 'look', watchRig = null, pickedLot = null, pickedStack = null, shopPick = 'seed', rigPick = 'planter', cropPick = 'potato', deckTank = 0, deckBlock = null, deckHub = false, buildAct = 'place', buildKind = 'warehouse', buildPick = null, millPlace = false;
 let planCycle = false, planBuy = false;
 const pickedFields = new Set();
@@ -1905,24 +1906,52 @@ function clearSelection() {
 }
 function exitToDefault() {
   camLock = false;
+  lockFocus = null;
   watchRig = null;
   clearSelection();
+}
+function sameLock(focus) {
+  if (!camLock || !lockFocus || !focus || lockFocus.kind !== focus.kind) return false;
+  if (focus.kind === 'rig') return lockFocus.id === focus.rig?.id;
+  return lockFocus.id === focus.field?.idx;
+}
+function beginLock(focus) {
+  if (!focus) return;
+  camLock = true;
+  if (focus.kind === 'rig') {
+    lockFocus = { kind: 'rig', id: focus.rig.id };
+    watchRig = focus.rig;
+  } else {
+    lockFocus = { kind: 'field', id: focus.field.idx };
+    watchRig = null;
+  }
+  camT.x = focus.x;
+  camT.z = focus.z;
+  paintLock();
+}
+function lockPoint() {
+  if (!camLock || !lockFocus) return null;
+  if (lockFocus.kind === 'rig') {
+    const rig = rigs.find(r => r.id === lockFocus.id);
+    if (!rig) return null;
+    watchRig = rig;
+    return { x: rig.x, z: rig.z };
+  }
+  const field = fields[lockFocus.id];
+  if (!field) return null;
+  watchRig = null;
+  return { x: field.x0 + L.FIELD / 2, z: field.z0 + L.FIELD / 2 };
+}
+function lockTraveling() {
+  const point = lockPoint();
+  if (!point) return false;
+  return Math.hypot(camS.x - point.x, camS.z - point.z) > 2;
 }
 function enterLock() {
   const focus = focusOf();
   if (!focus) return;
-  camLock = true;
-  if (focus.kind === 'rig') {
-    watchRig = focus.rig;
-    camT.x = focus.x;
-    camT.z = focus.z;
-    if (camT.d > 320) camT.d = 180;
-  } else {
-    watchRig = null;
-    camT.x = focus.x;
-    camT.z = focus.z;
-  }
-  paintLock();
+  beginLock(focus);
+  if (focus.kind === 'rig' && camT.d > 320) camT.d = 180;
 }
 function selectOnlyField(f) {
   pickedRigs.clear();
@@ -1948,7 +1977,6 @@ function selectOnlyRig(r, lock) {
   pickedRigs.add(r.id);
   selectedRig = r;
   if (lock) enterLock();
-  else { camLock = false; watchRig = null; }
   updateDock();
   if (mode === 'machines') paintSheet();
 }
@@ -2005,9 +2033,25 @@ function onRightClick(cx, cy) {
 }
 function zoomClamp(d) { return Math.max(22, Math.min(8000, d)); }
 function applyZoom(factor) {
-  const selectedNow = selectionKind();
-  if (selectedNow && !camLock && factor < 1) enterLock();
-  const pivot = (camLock || selectedNow) ? focusOf() : null;
+  const zoomIn = factor < 0.999;
+  const zoomOut = factor > 1.001;
+  if (camLock && zoomOut) exitToDefault();
+  const focus = selectionKind() ? focusOf() : null;
+  if (zoomIn && focus && !sameLock(focus)) beginLock(focus);
+  if (camLock && lockTraveling()) {
+    const point = lockPoint();
+    camT.d = zoomClamp(camT.d * factor);
+    if (point) { camT.x = point.x; camT.z = point.z; }
+    return;
+  }
+  if (camLock) {
+    const point = lockPoint();
+    camS.d = camT.d = zoomClamp(camS.d * factor);
+    if (point) { camT.x = point.x; camT.z = point.z; }
+    placeCamera();
+    return;
+  }
+  const pivot = focus;
   const cx = innerWidth / 2;
   const cy = innerHeight / 2;
   let px;
@@ -2027,15 +2071,13 @@ function applyZoom(factor) {
   }
   camS.d = camT.d = zoomClamp(camS.d * factor);
   placeCamera();
-  if (!camLock) {
-    const hit = pickFlat(sx, sy);
-    if (hit) {
-      camS.x += px - hit.x;
-      camS.z += pz - hit.z;
-      camT.x = camS.x;
-      camT.z = camS.z;
-      placeCamera();
-    }
+  const hit = pickFlat(sx, sy);
+  if (hit) {
+    camS.x += px - hit.x;
+    camS.z += pz - hit.z;
+    camT.x = camS.x;
+    camT.z = camS.z;
+    placeCamera();
   }
 }
 function onMapClick(cx, cy) {
@@ -3135,7 +3177,7 @@ function updateDock() {
     : (many ? `已选 ${list.length} 个田块` : (addr ? `C0 · ${addr}` : `F-${String(f.i).padStart(3, '0')}${String(f.j).padStart(2, '0')}`));
   const workEl = $('selwork');
   if (workEl) {
-    const badge = !selNote && f.owned ? (desc?.badge || '') : '';
+    const badge = !selNote && f?.owned ? (desc?.badge || '') : '';
     workEl.hidden = !badge;
     workEl.textContent = badge;
   }
@@ -3630,8 +3672,8 @@ function frame(now) {
   if (keys.a || keys.arrowleft) { camT.x -= c * ks; camT.z += s * ks; } if (keys.d || keys.arrowright) { camT.x += c * ks; camT.z -= s * ks; }
   if (keys.q) camT.yaw += dt; if (keys.e) camT.yaw -= dt;
   if (camLock && !drag) {
-    const focus = focusOf();
-    if (focus) { camT.x = focus.x; camT.z = focus.z; }
+    const point = lockPoint();
+    if (point) { camT.x = point.x; camT.z = point.z; }
   }
   if (followLock && !drag && !Q.has('nofollow')) { camT.x += (followLock.x - camT.x) * 0.5; camT.z += (followLock.z - camT.z) * 0.5; }
   const k = 1 - Math.exp(-dt * 7);
