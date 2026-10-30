@@ -23,12 +23,15 @@ function hexOf(value, fallback) {
   return typeof value === 'string' && /^#[0-9a-fA-F]{6}$/.test(value) ? value : fallback;
 }
 
-function compileGraph(doc, growSource) {
+function compileGraph(doc) {
   const graph = doc.graph;
   if (!graph || !graph.entry || !Array.isArray(graph.stages) || !Array.isArray(graph.edges)) {
     throw new Error('拉斯提卡缺少阶段图');
   }
-  const stages = graph.stages.map(stage => ({ ...stage }));
+  const stages = graph.stages.map(stage => ({
+    ...stage,
+    jobs: (stage.jobs || []).map(job => ({ ...job })),
+  }));
   const edges = graph.edges.map(edge => ({ ...edge }));
   if (edges.some(edge => edge.kind !== 'hard' && edge.kind !== 'natural')) {
     throw new Error('阶段图的边只能是 hard 或 natural');
@@ -36,28 +39,22 @@ function compileGraph(doc, growSource) {
   const heads = stages.filter(stage => stage.role === 'head');
   const tails = stages.filter(stage => stage.role === 'tail');
   const rots = stages.filter(stage => stage.role === 'rot');
-  if (heads.length !== 1 || !tails.length || !rots.length) throw new Error('阶段图要有一个头、一个可再种尾，以及腐烂尽头');
+  if (heads.length !== 1 || tails.length !== 1 || rots.length !== 1) throw new Error('阶段图要有一个头、烂地、以及收获后');
   const head = heads[0];
   if (edges.some(edge => edge.to === head.id)) throw new Error('头阶段不能从作物阶段进来');
-  for (const tail of tails) {
-    if (edges.some(edge => edge.from === tail.id)) throw new Error('可再种尾不能再有后继');
-    if (Number(tail.days) > 0) throw new Error('可再种尾没有时长');
-  }
-  for (const rot of rots) {
-    if (edges.some(edge => edge.from === rot.id)) throw new Error('腐烂尽头不能再有后继');
+  for (const end of [...tails, ...rots]) {
+    if (Number(end.days) > 0) throw new Error('尾阶段没有时长');
+    const out = edges.filter(edge => edge.from === end.id);
+    if (out.some(edge => edge.kind !== 'hard' || edge.to !== 'exit')) throw new Error('尾阶段只留收拾硬边');
   }
   const mature = stages.find(stage => stage.id === 'mature');
   if (!mature || mature.role === 'tail' || mature.role === 'rot') throw new Error('成熟不是尾阶段');
-  if (!edges.some(edge => edge.from === 'mature' && edge.kind === 'natural')) throw new Error('成熟到点要能进腐烂');
-  const days = Number(growSource?.days);
-  if (days > 0) head.days = days;
-  if (growSource?.name) {
-    const named = stages.find(stage => stage.id === 'mature');
-    if (named) named.name = growSource.name;
+  if (!edges.some(edge => edge.from === 'mature' && edge.kind === 'natural' && edge.to === rots[0].id)) {
+    throw new Error('成熟到点要能进烂地');
   }
-  head.soft = softJobsFromDoc(doc, growSource);
   if (graph.entry.job !== 'sow' || graph.entry.to !== head.id) throw new Error('作物图从播种进入头阶段，整地不在图里');
-  return { entry: { ...graph.entry }, edges, stages };
+  const growDays = stages.reduce((sum, stage) => sum + (Number(stage.days) > 0 ? Number(stage.days) : 0), 0);
+  return { entry: { ...graph.entry }, edges, stages, growDays };
 }
 
 export function lastikaSpecFromDoc(doc) {
@@ -68,9 +65,8 @@ export function lastikaSpecFromDoc(doc) {
   const tidy = stageByGroup(doc, 'E');
   if (!sow || !mature || !harvest || !tidy) throw new Error('拉斯提卡缺少播种、成熟、收割或收拾');
   const plant = doc.plant || {};
-  const graph = compileGraph(doc, mature);
-  const head = graph.stages.find(stage => stage.role === 'head');
-  const growDays = Number(head.days) > 0 ? Number(head.days) : PLANT_CROPS.lastika.growDays;
+  const graph = compileGraph(doc);
+  const growDays = graph.growDays > 0 ? graph.growDays : PLANT_CROPS.lastika.growDays;
   return {
     name: doc.cropName || doc.name || '拉斯提卡',
     growDays,
@@ -93,6 +89,9 @@ export function lastikaSpecFromDoc(doc) {
     },
     graph: { entry: graph.entry, edges: graph.edges },
     stages: graph.stages,
+    maturity: doc.maturity || PLANT_CROPS.lastika.maturity,
+    yieldBase: Number(doc.yieldBase) > 0 ? Number(doc.yieldBase) : PLANT_CROPS.lastika.yieldBase,
+    quality: doc.quality == null ? null : doc.quality,
   };
 }
 
@@ -102,6 +101,9 @@ export function applyLastikaSpec(spec, origin = 'repo') {
   crop.growDays = spec.growDays;
   crop.growSeconds = spec.growSeconds;
   crop.graph = spec.graph;
+  crop.maturity = spec.maturity;
+  crop.yieldBase = spec.yieldBase;
+  crop.quality = spec.quality;
   crop.visual = { ...crop.visual, ...spec.visual, tex: 'ridges' };
   crop.stages.splice(0, crop.stages.length, ...spec.stages);
   crop.paints = { ...spec.paints };

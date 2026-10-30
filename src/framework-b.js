@@ -52,8 +52,8 @@ export const PREP_RECIPES = {
   },
 };
 
-export const GROW_DAYS = 36;
-// 1× 下的现实秒。36 世界日 × 720 现实秒/世界日。钟本身记世界日，不把这个数写进 need。
+export const GROW_DAYS = 12;
+// 1× 下的现实秒。12 世界日前段 × 720 现实秒/世界日。烂地和收获后不计入。
 export const GROW_SECONDS = GROW_DAYS * DAY_SECONDS;
 
 export const PLANT_CROPS = {
@@ -63,26 +63,36 @@ export const PLANT_CROPS = {
     grounds: ['general'],
     growDays: GROW_DAYS,
     growSeconds: GROW_SECONDS,
-    // 株高、垄距、株距只属于拉斯提卡。不要借商品薯的 0.55 / 0.90 / 0.40。
+    yieldBase: 100,
+    quality: null,
+    // 第 10 日末 100%。第 11–12 日升到 120%。超过 maxHarvest 不能收获。rotLine 与它同级。
+    maturity: { fullAt: 10, maxHarvest: 120, rotLine: 120 },
     visual: { shape: 'bush', tex: 'ridges', height: 0.7, row: 0.75, along: 0.36 },
     graph: {
-      entry: { job: 'sow', to: 'grow' },
+      entry: { job: 'sow', to: 'seedling' },
       edges: [
-        { from: 'grow', to: 'mature', kind: 'natural' },
-        { from: 'mature', to: 'stubble', kind: 'hard', job: 'harvest' },
+        { from: 'seedling', to: 'develop', kind: 'natural' },
+        { from: 'develop', to: 'mature', kind: 'natural' },
+        { from: 'mature', to: 'after', kind: 'hard', job: 'harvest' },
         { from: 'mature', to: 'rot', kind: 'natural' },
-        { from: 'stubble', to: 'ready', kind: 'hard', job: 'tidy' },
+        { from: 'rot', to: 'exit', kind: 'hard', job: 'tidy' },
+        { from: 'after', to: 'exit', kind: 'hard', job: 'tidy' },
       ],
     },
     stages: [
-      { id: 'grow', name: '生长', role: 'head', kind: 'time', look: 'sown', days: GROW_DAYS, soft: [
-        { job: 'topdress', name: '追肥', from: 4, to: 30 },
-        { job: 'hill', name: '培土', from: 20, to: 26 },
+      { id: 'seedling', name: '青苗', role: 'head', kind: 'time', look: 'sown', days: 2, color: '#51542c', jobs: [] },
+      { id: 'develop', name: '发育', role: 'node', kind: 'time', look: 'sown', days: 6, color: '#6a7340', jobs: [
+        { job: 'topdress', kind: 'soft', name: '追肥', from: 5, to: 6, yieldMul: 2 },
       ] },
-      { id: 'mature', name: '成熟', role: 'node', kind: 'time', look: 'mature', days: 8 },
-      { id: 'stubble', name: '收后', role: 'node', kind: 'wait', look: 'harvested' },
-      { id: 'ready', name: '可再种', role: 'tail', kind: 'tail', look: 'general' },
-      { id: 'rot', name: '腐烂', role: 'rot', kind: 'rot', look: 'rot' },
+      { id: 'mature', name: '成熟', role: 'node', kind: 'time', look: 'mature', days: 4, color: '#787c32', jobs: [
+        { job: 'harvest', kind: 'hard', name: '收获', from: 11, to: 12 },
+      ] },
+      { id: 'rot', name: '烂地', role: 'rot', kind: 'rot', look: 'rot', color: '#5c4636', jobs: [
+        { job: 'tidy', kind: 'hard', name: '收拾', full: true },
+      ] },
+      { id: 'after', name: '收获后', role: 'tail', kind: 'tail', look: 'harvested', color: '#b59a63', jobs: [
+        { job: 'tidy', kind: 'hard', name: '收拾', full: true },
+      ] },
     ],
   },
 };
@@ -287,6 +297,7 @@ export function requestPlant(farm, fieldId, cropId = 'lastika') {
     grow: 0,
     need: 0,
     clock: false,
+    yieldMul: 1,
   };
   const job = JOBS[crop.graph.entry.job];
   farm.queue.push({ id: farm.seq++, fieldId, jobId: job.id, caps: job.caps.slice(), lane: 'plant' });
@@ -560,27 +571,68 @@ function edgesFrom(crop, id) {
   return (crop?.graph?.edges || []).filter(edge => edge.from === id);
 }
 
-function queueHard(farm, field, edge) {
-  if (!edge || edge.kind !== 'hard' || !JOBS[edge.job]) return;
-  if (farm.queue.some(item => item.fieldId === field.id && item.jobId === edge.job)) return;
-  if (farm.orders.some(item => item.fieldId === field.id && item.jobId === edge.job)) return;
-  const job = JOBS[edge.job];
-  farm.queue.push({ id: farm.seq++, fieldId: field.id, jobId: job.id, caps: job.caps.slice(), lane: 'plant' });
+export function cycleDays(crop) {
+  return (crop?.stages || []).reduce((sum, stage) => sum + (Number(stage.days) > 0 ? Number(stage.days) : 0), 0);
+}
+
+function stageOrigin(crop, stageId) {
+  let age = 0;
+  for (const stage of crop?.stages || []) {
+    if (stage.id === stageId) return age;
+    if (Number(stage.days) > 0) age += Number(stage.days);
+  }
+  return age;
+}
+
+export function growthAge(field) {
+  const crop = cropOfPlant(field);
+  const stage = stageOf(crop, field?.plant?.stageId);
+  if (!crop || !stage) return 0;
+  if (!(Number(stage.days) > 0)) return cycleDays(crop);
+  return stageOrigin(crop, stage.id) + (field.plant.grow || 0);
+}
+
+export function maturityPercent(crop, age) {
+  const spec = crop?.maturity || { fullAt: 10, maxHarvest: 120 };
+  const fullAt = spec.fullAt > 0 ? spec.fullAt : 10;
+  const max = spec.maxHarvest > 0 ? spec.maxHarvest : 120;
+  if (age <= fullAt) return (age / fullAt) * 100;
+  const span = Math.max(1e-6, cycleDays(crop) - fullAt);
+  return Math.min(max, 100 + ((age - fullAt) / span) * (max - 100));
+}
+
+function windowOpen(spec, age) {
+  if (spec.full) return true;
+  return age + 1e-6 >= spec.from && age < spec.to - 1e-6;
+}
+
+function windowOver(spec, age) {
+  if (spec.full) return false;
+  return age + 1e-4 >= spec.to;
+}
+
+function queueJob(farm, field, jobId, lane) {
+  const job = JOBS[jobId];
+  if (!job) return;
+  if (farm.queue.some(item => item.fieldId === field.id && item.jobId === jobId)) return;
+  if (farm.orders.some(item => item.fieldId === field.id && item.jobId === jobId)) return;
+  farm.queue.push({ id: farm.seq++, fieldId: field.id, jobId, caps: job.caps.slice(), lane });
 }
 
 function enterStage(farm, field, stageId) {
-  const crop = cropOfPlant(field);
-  const stage = stageOf(crop, stageId);
-  if (!field?.plant || !stage) return;
-  if (stage.role === 'tail') {
+  if (!field?.plant) return;
+  if (stageId === 'exit') {
     field.ground = 'general';
     field.plant = null;
-    field.look = stage.look || 'general';
+    field.look = 'general';
     field.lock = null;
-    pushEvent(farm, { type: 'stage', fieldId: field.id, stageId: stage.id });
+    pushEvent(farm, { type: 'stage', fieldId: field.id, stageId: 'exit' });
     pushEvent(farm, { type: 'ground', fieldId: field.id, ground: 'general' });
     return;
   }
+  const crop = cropOfPlant(field);
+  const stage = stageOf(crop, stageId);
+  if (!stage) return;
   field.plant.stageId = stage.id;
   field.plant.soft = null;
   field.plant.clock = false;
@@ -592,10 +644,10 @@ function enterStage(farm, field, stageId) {
   if (days > 0) {
     field.plant.need = days;
     field.plant.clock = true;
-    bindSoft(field);
     pushEvent(farm, { type: 'clock-start', fieldId: field.id, stageId: stage.id });
   }
-  queueHard(farm, field, edgesFrom(crop, stage.id).find(edge => edge.kind === 'hard'));
+  bindSoft(field);
+  openHard(farm);
 }
 
 function leaveByNatural(farm, field) {
@@ -636,6 +688,7 @@ function finishOrder(farm, order) {
     if (row && row.status !== '过期') {
       row.progress = 1;
       row.status = '执行完';
+      if (row.yieldMul > 1) field.plant.yieldMul = Math.max(field.plant.yieldMul || 1, row.yieldMul);
       painted = commitSweep(field, job);
     }
     releaseOrder(farm, order);
@@ -696,19 +749,19 @@ function stageRow(field) {
 }
 
 function bindSoft(field) {
-  if (!field.plant?.clock) return;
   const stage = stageRow(field);
-  const specs = stage?.soft || [];
+  const specs = (stage?.jobs || []).filter(spec => spec.kind === 'soft' && JOBS[spec.job]?.kind === 'soft');
   if (!specs.length) return;
   if (!field.plant.soft) field.plant.soft = {};
   for (const spec of specs) {
     const job = JOBS[spec.job];
-    if (!job || job.kind !== 'soft') continue;
     if (field.plant.soft[spec.job]) continue;
     field.plant.soft[spec.job] = {
       name: spec.name || job.name,
       from: spec.from,
       to: spec.to,
+      full: !!spec.full,
+      yieldMul: spec.yieldMul || 1,
       progress: 0,
       status: '未执行',
     };
@@ -732,11 +785,10 @@ function touchSoft(farm) {
     bindSoft(field);
     const book = field.plant?.soft;
     if (!book) continue;
-    const grow = field.plant.grow;
-    const clock = !!field.plant.clock;
+    const age = growthAge(field);
     for (const [jobId, row] of Object.entries(book)) {
       if (row.status === '执行完' || row.status === '过期') continue;
-      if (!clock || grow + 1e-4 >= row.to) expireSoft(farm, field, jobId, row);
+      if (windowOver(row, age)) expireSoft(farm, field, jobId, row);
     }
     const order = farm.orders.find(item => item.fieldId === field.id && item.lane === 'soft');
     if (!order) continue;
@@ -753,10 +805,8 @@ function queueSoft(farm) {
     if (!book || !field.plant.clock || field.lock) continue;
     if (farm.orders.some(item => item.fieldId === field.id)) continue;
     if (farm.queue.some(item => item.fieldId === field.id)) continue;
-    const grow = field.plant.grow;
-    const open = Object.entries(book).find(([, row]) => (
-      row.status === '未执行' && grow + 1e-4 >= row.from && grow < row.to - 1e-4
-    ));
+    const age = growthAge(field);
+    const open = Object.entries(book).find(([, row]) => row.status === '未执行' && windowOpen(row, age));
     if (!open) continue;
     const job = JOBS[open[0]];
     if (!job) continue;
@@ -772,13 +822,45 @@ function queueSoft(farm) {
 
 function softHorizon(field) {
   const book = field.plant?.soft;
-  if (!field.plant?.clock || !book) return Infinity;
-  const grow = field.plant.grow;
+  if (!field.plant || !book) return Infinity;
+  const age = growthAge(field);
   let wait = Infinity;
   for (const row of Object.values(book)) {
-    if (row.status === '执行完' || row.status === '过期') continue;
-    if (grow < row.from) wait = Math.min(wait, row.from - grow);
-    if (grow < row.to) wait = Math.min(wait, row.to - grow);
+    if (row.status === '执行完' || row.status === '过期' || row.full) continue;
+    if (age < row.from) wait = Math.min(wait, row.from - age);
+    if (age < row.to) wait = Math.min(wait, row.to - age);
+  }
+  return wait;
+}
+
+function hardSpecs(field) {
+  return (stageRow(field)?.jobs || []).filter(spec => spec.kind === 'hard' && JOBS[spec.job]);
+}
+
+function openHard(farm) {
+  for (const field of farm.fields.values()) {
+    if (!field.plant || field.lock) continue;
+    if (farm.orders.some(item => item.fieldId === field.id && item.lane !== 'soft')) continue;
+    const age = growthAge(field);
+    const crop = cropOfPlant(field);
+    const spec = hardSpecs(field).find(item => {
+      if (item.job === 'harvest' && maturityPercent(crop, age) > crop.maturity.maxHarvest + 1e-6) return false;
+      return windowOpen(item, age);
+    });
+    if (!spec) continue;
+    if (farm.queue.some(item => item.fieldId === field.id)) continue;
+    queueJob(farm, field, spec.job, 'plant');
+  }
+}
+
+function hardHorizon(field) {
+  if (!field.plant) return Infinity;
+  const age = growthAge(field);
+  let wait = Infinity;
+  for (const spec of hardSpecs(field)) {
+    if (spec.full) continue;
+    if (age < spec.from) wait = Math.min(wait, spec.from - age);
+    if (age < spec.to) wait = Math.min(wait, spec.to - age);
   }
   return wait;
 }
@@ -798,6 +880,7 @@ export function stepFarm(farm, dt, env = null) {
   for (let guard = 0; guard < 48 && left > 1e-6; guard++) {
     touchSoft(farm);
     queueSoft(farm);
+    openHard(farm);
     dispatch(farm, env);
     touchSoft(farm);
     for (const order of farm.orders) {
@@ -827,7 +910,7 @@ export function stepFarm(farm, dt, env = null) {
     for (const field of farm.fields.values()) {
       const wait = growthLeft(field);
       if (wait != null) horizon = Math.min(horizon, wait * DAY_SECONDS);
-      horizon = Math.min(horizon, softHorizon(field) * DAY_SECONDS);
+      horizon = Math.min(horizon, softHorizon(field) * DAY_SECONDS, hardHorizon(field) * DAY_SECONDS);
     }
     if (!isFinite(horizon)) {
       applyGrowth(farm, left, null);
@@ -859,6 +942,7 @@ export function stepFarm(farm, dt, env = null) {
   }
   touchSoft(farm);
   queueSoft(farm);
+  openHard(farm);
   dispatch(farm, env);
   return farm;
 }
@@ -934,35 +1018,77 @@ export function describeField(farm, fieldId) {
     const who = machine ? machine.name + ' · ' : '';
     const where = work.phase === 'cruise' ? '正在开来' : work.phase === 'turn' ? '地头转弯' : `${job.name} ${pct}%`;
     stat = `${name}${who}${where}`;
-  } else if (field.plant?.clock) {
-    stat = `${crop.name} · 播种已完成 · 生长 ${field.plant.grow.toFixed(1)} / ${field.plant.need} 世界日`;
+  }
+  const stage = crop && field.plant ? stageOf(crop, field.plant.stageId) : null;
+  const age = crop ? growthAge(field) : 0;
+  const cycle = crop ? cycleDays(crop) : 0;
+  if (field.plant?.clock) {
+    stat = `${crop.name} · ${stage?.name || ''} · ${age.toFixed(1)} / ${cycle} 世界日`;
   } else if (field.plant && !work) {
-    const stage = stageOf(crop, field.plant.stageId);
     const name = stage?.name || (field.plant.stageId === crop.graph?.entry?.job ? '播种' : '');
     stat = `${crop.name} · ${name}`;
   }
-  const jobs = [];
-  if (work && job && job.kind !== 'soft') jobs.push({ id: job.id, name: job.name, status: work.phase === 'cruise' ? '开来' : work.phase === 'turn' ? '转弯' : '执行中', pct });
-  if (field.plant?.soft) {
-    for (const [id, row] of Object.entries(field.plant.soft)) {
-      const active = work && work.jobId === id && row.status !== '过期' && row.status !== '执行完';
-      const status = active
-        ? (work.phase === 'cruise' ? '开来' : work.phase === 'turn' ? '转弯' : '执行中')
-        : row.status;
-      const rowPct = active ? pct : Math.round((row.progress || 0) * 100);
-      jobs.push({ id, name: row.name, status, pct: rowPct });
+  const jobs = (stage?.jobs || []).map(spec => {
+    if (spec.kind === 'soft') {
+      const row = field.plant.soft?.[spec.job];
+      const active = work && work.jobId === spec.job && row && row.status !== '过期' && row.status !== '执行完';
+      return {
+        id: spec.job, name: spec.name, kind: 'soft',
+        from: spec.from, to: spec.to, full: !!spec.full,
+        status: active ? (work.phase === 'cruise' ? '开来' : work.phase === 'turn' ? '转弯' : '执行中') : (row?.status || '未执行'),
+        pct: active ? pct : Math.round((row?.progress || 0) * 100),
+      };
     }
-  }
-  if (!jobs.length && field.plant?.clock) {
-    const growing = stageRow(field);
-    jobs.push({ id: growing?.id || 'clock', name: growing?.name || '生长', status: '生长', pct: Math.round(field.plant.grow / field.plant.need * 100) });
-  }
+    const order = farm.orders.find(item => item.fieldId === field.id && item.jobId === spec.job);
+    const queued = farm.queue.some(item => item.fieldId === field.id && item.jobId === spec.job);
+    let status = '未到';
+    let rowPct = 0;
+    if (order) {
+      status = order.phase === 'cruise' ? '开来' : order.phase === 'turn' ? '转弯' : '执行中';
+      rowPct = Math.round(order.progress * 100);
+    } else if (queued) status = '等待';
+    else if (windowOver(spec, age)) status = '过期';
+    else if (windowOpen(spec, age)) status = '可派';
+    return { id: spec.job, name: spec.name, kind: 'hard', from: spec.from, to: spec.to, full: !!spec.full, status, pct: rowPct };
+  });
   const expired = jobs.find(item => item.status === '过期');
   const suspend = expired ? { title: '工单挂起提示' } : null;
-  const chips = crop
-    ? crop.stages.map(s => ({ name: s.name, on: s.id === field.plant.stageId }))
-    : [{ name: field.ground === 'general' ? '一般田地' : '未整地', on: true }];
-  const bar = work ? work.progress : (field.plant?.clock ? field.plant.grow / field.plant.need : 0);
+  const showingAfter = stage?.role === 'tail';
+  const finite = crop ? crop.stages.filter(item => Number(item.days) > 0) : [];
+  const tail = crop
+    ? (showingAfter ? crop.stages.find(item => item.role === 'tail') : crop.stages.find(item => item.role === 'rot'))
+    : null;
+  const barStages = [...finite, tail].filter(Boolean).map(item => ({
+    id: item.id,
+    name: item.name,
+    color: item.color || '#6f6a61',
+    days: Number(item.days) > 0 ? Number(item.days) : 0,
+    infinite: !(Number(item.days) > 0),
+    on: item.id === field.plant?.stageId,
+    jobs: (item.jobs || []).map(spec => {
+      const live = item.id === field.plant?.stageId ? jobs.find(row => row.id === spec.job) : null;
+      return {
+        id: spec.job,
+        name: spec.name,
+        kind: spec.kind,
+        from: spec.from,
+        to: spec.to,
+        full: !!spec.full,
+        status: live?.status || '窗口',
+        pct: live?.pct || 0,
+      };
+    }),
+  }));
+  const maturity = crop ? maturityPercent(crop, Math.min(age, cycle)) : 0;
+  const yieldValue = crop ? Math.round((crop.yieldBase || 0) * (field.plant?.yieldMul || 1)) : 0;
+  const locked = fieldLocked(farm, field);
+  const actions = !field.plant
+    ? (field.ground === 'general'
+      ? [{ id: 'prep', name: '整地', enabled: !locked }, { id: 'plant', name: '种植', enabled: !locked }]
+      : [{ id: 'prep', name: '整地', enabled: !locked }])
+    : [{ id: 'prep', name: '整地', enabled: false }];
+  const chips = barStages.map(item => ({ name: item.name, on: item.on }));
+  const bar = work ? work.progress : (field.plant?.clock && field.plant.need ? field.plant.grow / field.plant.need : 0);
   return {
     plot: field.plot,
     ground: field.ground,
@@ -975,8 +1101,16 @@ export function describeField(farm, fieldId) {
     suspend,
     chips,
     bar,
-    canPrep: !field.plant && !fieldLocked(farm, field) && field.ground !== 'general',
-    canPlant: !field.plant && !fieldLocked(farm, field) && field.ground === 'general',
+    age,
+    cycle,
+    maturity,
+    yieldValue,
+    quality: crop ? crop.quality : null,
+    stageName: stage?.name || '',
+    barStages,
+    actions,
+    canPrep: !field.plant && !locked && field.ground !== 'general',
+    canPlant: !field.plant && !locked && field.ground === 'general',
     crop: crop ? crop.name : null,
   };
 }

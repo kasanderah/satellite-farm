@@ -38,14 +38,11 @@ test('editor lastika replaces the playable stages, windows, and paints', () => {
     assert.equal(stageBadge(), '工坊覆写');
     const crop = PLANT_CROPS.lastika;
     assert.equal(crop.name, '拉斯提卡工坊');
-    assert.equal(crop.growDays, 36);
-    assert.equal(crop.growSeconds, 36 * DAY_SECONDS);
-    assert.equal(crop.stages.find(s => s.id === 'mature').name, '熟透');
-    assert.equal(crop.stages.find(s => s.id === 'grow').role, 'head');
-    assert.deepEqual(crop.stages.find(s => s.id === 'grow').soft, [
-      { job: 'topdress', name: '追肥', from: 6, to: 12 },
-      { job: 'hill', name: '培土', from: 20, to: 26 },
-    ]);
+    assert.equal(crop.growDays, 12);
+    assert.equal(crop.growSeconds, 12 * DAY_SECONDS);
+    assert.equal(crop.stages.find(s => s.id === 'seedling').name, '青苗');
+    assert.equal(crop.stages.find(s => s.id === 'mature').name, '成熟');
+    assert.deepEqual(crop.stages.find(s => s.id === 'develop').jobs[0], { job: 'topdress', kind: 'soft', name: '追肥', from: 5, to: 6, yieldMul: 2 });
     assert.equal(crop.paints.ripe, doc.plant.ripe);
     assert.equal(crop.paints.raw, doc.stages.find(s => s.group === 'O').color);
     assert.equal(cropDef('potato').profile, potatoProfile);
@@ -55,8 +52,8 @@ test('editor lastika replaces the playable stages, windows, and paints', () => {
   }
   assert.equal(stageBadge(), '仓库默认');
   assert.equal(PLANT_CROPS.lastika.stages.find(s => s.id === 'mature').name, '成熟');
-  assert.equal(PLANT_CROPS.lastika.growDays, 36);
-  assert.equal(PLANT_CROPS.lastika.growSeconds, 36 * DAY_SECONDS);
+  assert.equal(PLANT_CROPS.lastika.growDays, 12);
+  assert.equal(PLANT_CROPS.lastika.growSeconds, 12 * DAY_SECONDS);
 });
 
 test('a potato gantt payload is not the playable stage source', () => {
@@ -85,14 +82,14 @@ test('boot reads crops.lastika and repo ignores the workshop slot', () => {
     const booted = bootFieldStageSource(store, null);
     assert.equal(booted.ok, true);
     assert.equal(booted.origin, 'workshop');
-    assert.equal(PLANT_CROPS.lastika.stages.find(s => s.id === 'mature').name, '熟透');
-    assert.equal(PLANT_CROPS.lastika.stages.find(s => s.id === 'grow').soft[0].from, 6);
+    assert.equal(PLANT_CROPS.lastika.stages.find(s => s.id === 'mature').name, '成熟');
+    assert.equal(PLANT_CROPS.lastika.stages.find(s => s.id === 'develop').jobs[0].from, 5);
     const skipped = bootFieldStageSource(store, 'repo');
     assert.equal(skipped.origin, 'repo');
     assert.equal(skipped.skipped, true);
     assert.equal(PLANT_CROPS.lastika.stages.find(s => s.id === 'mature').name, '成熟');
-    assert.equal(PLANT_CROPS.lastika.growDays, 36);
-    assert.equal(PLANT_CROPS.lastika.growSeconds, 36 * DAY_SECONDS);
+    assert.equal(PLANT_CROPS.lastika.growDays, 12);
+    assert.equal(PLANT_CROPS.lastika.growSeconds, 12 * DAY_SECONDS);
     const again = bootFieldStageSource(store, null);
     assert.equal(again.origin, 'workshop');
     assert.equal(PLANT_CROPS.lastika.name, '拉斯提卡工坊');
@@ -114,7 +111,8 @@ test('repo default keeps the workshop doc for a later reread', () => {
     const booted = bootFieldStageSource(store, null);
     assert.equal(booted.origin, 'workshop');
     assert.equal(stageBadge(), '工坊覆写');
-    assert.equal(PLANT_CROPS.lastika.stages.find(s => s.id === 'mature').name, '熟透');
+    assert.equal(PLANT_CROPS.lastika.name, '拉斯提卡工坊');
+    assert.equal(PLANT_CROPS.lastika.stages.find(s => s.id === 'mature').name, '成熟');
   } finally {
     installShippedLastika();
   }

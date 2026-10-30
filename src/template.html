@@ -158,7 +158,7 @@ body.underground #dock{display:none}
 #viewer canvas{width:100%;height:132px;display:block;background:#12141c}
 #viewer .card.on{border-color:var(--sig)}
 #viewer .bar button{padding:4px 12px}
-#dock{left:20px;bottom:22px;padding:10px 12px 12px;width:min(420px,calc(100vw - 440px));display:none}
+#dock{left:20px;bottom:22px;padding:10px 12px 12px;width:min(560px,calc(100vw - 280px));display:none}
 #dock.on{display:block}
 #dock .legend{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:8px}
 #dock .legend[hidden],#bar[hidden],#dock .jobs[hidden]{display:none}
@@ -171,6 +171,25 @@ body.underground #dock{display:none}
 #dock .jb.miss b,#dock .jb.miss span{color:var(--sig)}
 #suspend{right:22px;top:46%;display:none;padding:6px 10px;background:rgba(10,12,20,.82);border:1px solid var(--sig);color:var(--sig);font-size:12px;letter-spacing:.12em}
 #suspend.on{display:block}
+#dock .dlab{margin-top:9px;font-size:10px;letter-spacing:.18em;color:var(--mut)}
+#dock .drow:first-child .dlab{margin-top:0}
+#dock .sum{font-size:12px;letter-spacing:.06em;line-height:1.55}
+#dock .sum b{font-weight:500}
+#dock .sum span{color:var(--mut)}
+#dock .ops{display:grid;gap:6px;margin-top:4px}
+#stagebar{position:relative;margin-top:14px}
+#stagebar .names{display:flex;font-size:10px;letter-spacing:.06em}
+#stagebar .names b{font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#stagebar .track{position:relative;display:flex;height:16px;margin-top:3px;background:rgba(232,216,208,.08)}
+#stagebar .seg{position:relative;min-width:0;height:100%}
+#stagebar .seg.on{outline:1px solid rgba(232,216,208,.7);outline-offset:-1px}
+#stagebar .win{position:absolute;top:0;bottom:0;opacity:.9}
+#stagebar .win.soft{background:#7eb6d6}
+#stagebar .win.hard{background:#c4503a}
+#stagebar .arrow{position:absolute;right:-7px;top:-2px;border-top:10px solid transparent;border-bottom:10px solid transparent;border-left:8px solid currentColor}
+#stagebar .cursor{position:absolute;top:-5px;bottom:-7px;width:2px;background:#e8d8d0;pointer-events:none}
+#stagebar .mature{position:relative;height:4px;margin-top:3px}
+#stagebar .mature i{position:absolute;top:0;bottom:0}
 #dock .ops{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px}
 #dock #selbtns,#dock #prepbtns{display:none}
 #dock.picking #selbtns,#dock.prepping #prepbtns{display:flex}
@@ -238,6 +257,6 @@ body.underground #dock{display:none}
 <div class="hud panel hit" id="planmenu"></div>
 <div id="viewer"><div class="bar"><div><h2>资产</h2><div class="sub">当前的薯田阶段、机器和田块。每张卡片是名字加上现在的样子。点一张就能指着它改。这是查看，不能上传。</div></div><button type="button" id="viewer-close">关闭</button></div><div class="sec">商品薯阶段</div><div class="grid" id="view-stages"></div><div class="sec">机器</div><div class="grid" id="view-machines"></div><div class="sec">田块</div><div class="grid" id="view-tiles"></div></div>
 <div class="hud" id="scale"><span id="scaletxt"></span><div id="scalebar"></div></div>
-<div class="hud" id="buildrev">环穗 v6.3</div>
+<div class="hud" id="buildrev">环穗 v6.4</div>
 <script>__BUNDLE__</script>
 </body></html>

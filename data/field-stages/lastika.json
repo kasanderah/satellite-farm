@@ -1,14 +1,18 @@
 {
   "schema": "ringsheaf.field-stage/1",
   "profile": "lastika",
-  "readme": "拉斯提卡。主游戏读 graph：播种从整地外进入头阶段生长，到点进成熟，收割走硬边，错过成熟窗进腐烂。收拾后是可再种尾。B 的天数是生长的世界日。1× 下一世界日 = 720 现实秒。软作业不改阶段色。",
+  "readme": "拉斯提卡测试作物。主游戏只读 graph。前段合计 12 世界日：青苗 2、发育 6、成熟 4。烂地和收获后无限，不计入。追肥在第 5–6 日，收获在第 11–12 日。没开工就进烂地。收获做完改画收获后。",
+  "cycle": 38,
+  "yieldBase": 100,
+  "quality": null,
+  "maturity": { "fullAt": 10, "maxHarvest": 120, "rotLine": 120 },
   "cropId": "lastika",
   "logicId": "crop_lastika",
   "cropName": "拉斯提卡",
   "name": "拉斯提卡",
   "timeUnit": "gameDay",
   "secondsPerDayAt1x": 720,
-  "cycle": 38,
+  "cycleNote": "cycle 仍给工坊甘特对齐。可玩周期是 graph 前段 12 世界日。",
   "rows": 8,
   "grid": { "along": 14 },
   "plant": {
@@ -22,19 +26,29 @@
   },
   "chain": ["A", "B", "D"],
   "graph": {
-    "entry": { "job": "sow", "to": "grow" },
+    "entry": { "job": "sow", "to": "seedling" },
     "stages": [
-      { "id": "grow", "name": "生长", "role": "head", "kind": "time", "look": "sown", "days": 36 },
-      { "id": "mature", "name": "成熟", "role": "node", "kind": "time", "look": "mature", "days": 8 },
-      { "id": "stubble", "name": "收后", "role": "node", "kind": "wait", "look": "harvested" },
-      { "id": "ready", "name": "可再种", "role": "tail", "kind": "tail", "look": "general" },
-      { "id": "rot", "name": "腐烂", "role": "rot", "kind": "rot", "look": "rot" }
+      { "id": "seedling", "name": "青苗", "role": "head", "kind": "time", "look": "sown", "days": 2, "color": "#51542c", "jobs": [] },
+      { "id": "develop", "name": "发育", "role": "node", "kind": "time", "look": "sown", "days": 6, "color": "#6a7340", "jobs": [
+        { "job": "topdress", "kind": "soft", "name": "追肥", "from": 5, "to": 6, "yieldMul": 2 }
+      ] },
+      { "id": "mature", "name": "成熟", "role": "node", "kind": "time", "look": "mature", "days": 4, "color": "#787c32", "jobs": [
+        { "job": "harvest", "kind": "hard", "name": "收获", "from": 11, "to": 12 }
+      ] },
+      { "id": "rot", "name": "烂地", "role": "rot", "kind": "rot", "look": "rot", "color": "#5c4636", "jobs": [
+        { "job": "tidy", "kind": "hard", "name": "收拾", "full": true }
+      ] },
+      { "id": "after", "name": "收获后", "role": "tail", "kind": "tail", "look": "harvested", "color": "#b59a63", "jobs": [
+        { "job": "tidy", "kind": "hard", "name": "收拾", "full": true }
+      ] }
     ],
     "edges": [
-      { "from": "grow", "to": "mature", "kind": "natural" },
-      { "from": "mature", "to": "stubble", "kind": "hard", "job": "harvest" },
+      { "from": "seedling", "to": "develop", "kind": "natural" },
+      { "from": "develop", "to": "mature", "kind": "natural" },
+      { "from": "mature", "to": "after", "kind": "hard", "job": "harvest" },
       { "from": "mature", "to": "rot", "kind": "natural" },
-      { "from": "stubble", "to": "ready", "kind": "hard", "job": "tidy" }
+      { "from": "rot", "to": "exit", "kind": "hard", "job": "tidy" },
+      { "from": "after", "to": "exit", "kind": "hard", "job": "tidy" }
     ]
   },
   "stages": [

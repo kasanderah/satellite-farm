@@ -2849,6 +2849,56 @@ function paintWorldClock() {
     clock.textContent = paused ? `第 ${c.day} 日 · ${c.hm}${band} · 暂停` : `第 ${c.day} 日 · ${c.hm}${band}`;
   }
 }
+let dockHover = null;
+let dockBarSig = '';
+function jobRow(job) {
+  const hot = job.status === '执行中' || job.status === '开来' || job.status === '转弯' || job.status === '等待' || job.status === '可派';
+  const miss = job.status === '过期';
+  const kind = job.kind === 'soft' ? '软' : job.kind === 'hard' ? '硬' : '';
+  const span = job.full ? '全阶段' : (job.from != null && job.to != null ? `第 ${job.from}–${job.to} 日` : '');
+  return `<div class="jb${hot ? ' run' : ''}${miss ? ' miss' : ''}"><b>${kind ? kind + ' ' : ''}${job.name}</b><span>${job.status}${job.pct ? ' ' + job.pct + '%' : ''}${span ? ' · ' + span : ''}</span></div>`;
+}
+function paintStageBar(desc) {
+  const host = $('stagebar');
+  if (!host) return;
+  const stages = desc?.barStages || [];
+  if (!stages.length) { host.innerHTML = '<span>还没有作物</span>'; dockBarSig = ''; return; }
+  const cycle = desc.cycle || 1;
+  const tailVis = Math.max(1, cycle * 0.12);
+  const total = cycle + tailVis;
+  const sig = stages.map(s => `${s.id}:${s.days}:${s.infinite}`).join('|');
+  if (sig !== dockBarSig) {
+    dockBarSig = sig;
+    const names = stages.map(s => {
+      const flex = s.infinite ? tailVis : s.days;
+      return `<b class="${s.on ? 'on' : ''}" data-stage="${s.id}" style="flex:${flex} 1 0">${s.name}${s.infinite ? ' →' : ''}</b>`;
+    }).join('');
+    const segs = stages.map(s => {
+      const flex = s.infinite ? tailVis : s.days;
+      const wins = (s.jobs || []).map(job => {
+        if (job.full || s.infinite) {
+          return `<i class="win ${job.kind === 'soft' ? 'soft' : 'hard'}" style="left:0;right:0"></i>`;
+        }
+        if (!(s.days > 0) || job.from == null) return '';
+        const origin = stages.filter(item => item !== s && stages.indexOf(item) < stages.indexOf(s) && !item.infinite).reduce((n, item) => n + item.days, 0);
+        const a = Math.max(0, (job.from - origin) / s.days);
+        const b = Math.min(1, (job.to - origin) / s.days);
+        if (!(b > a)) return '';
+        return `<i class="win ${job.kind === 'soft' ? 'soft' : 'hard'}" style="left:${(a * 100).toFixed(2)}%;width:${((b - a) * 100).toFixed(2)}%"></i>`;
+      }).join('');
+      const arrow = s.infinite ? `<i class="arrow" style="color:${s.color}"></i>` : '';
+      return `<i class="seg${s.on ? ' on' : ''}" data-stage="${s.id}" style="flex:${flex} 1 0;background:${s.color}">${wins}${arrow}</i>`;
+    }).join('');
+    const finitePct = (cycle / total) * 100;
+    const fullPct = (desc && PLANT_CROPS.lastika.maturity ? (PLANT_CROPS.lastika.maturity.fullAt / cycle) : (10 / cycle)) * finitePct;
+    host.innerHTML = `<div class="names">${names}</div><div class="track">${segs}<i class="cursor"></i></div><div class="mature"><i style="left:0;width:${fullPct.toFixed(2)}%;background:linear-gradient(90deg,#51542c,#787c32)"></i><i style="left:${fullPct.toFixed(2)}%;width:${(finitePct - fullPct).toFixed(2)}%;background:#d8c36a"></i></div>`;
+  }
+  const cursor = host.querySelector('.cursor');
+  if (cursor) {
+    const age = Math.max(0, Math.min(desc.age || 0, cycle));
+    cursor.style.left = `${(age / total) * 100}%`;
+  }
+}
 function updateDock() {
   const el = $('dock');
   const desc = selected?.owned ? dockOf(selected) : null;
@@ -2859,11 +2909,9 @@ function updateDock() {
     chip.textContent = title;
   }
   const show = viewLayer === 'surface' && selected && (mode === 'look' || mode === 'plan');
-  if (!show) { el.classList.remove('on'); return; }
+  if (!show) { el.classList.remove('on'); dockHover = null; return; }
   el.classList.add('on');
   const f = selected;
-  let stat = selNote;
-  if (!stat) stat = !f.owned ? '邻区快照 · 只读' : (desc?.stat || '未整地');
   const addr = desc?.plot || '';
   $('selid').textContent = addr ? `C0 · ${addr}` : `F-${String(f.i).padStart(3, '0')}${String(f.j).padStart(2, '0')}`;
   const workEl = $('selwork');
@@ -2872,38 +2920,30 @@ function updateDock() {
     workEl.hidden = !badge;
     workEl.textContent = badge;
   }
-  $('selstat').textContent = stat;
+  const sum = $('crop-sum');
+  if (sum) {
+    if (!f.owned) sum.textContent = selNote || '邻区快照 · 只读';
+    else if (!desc?.crop) sum.textContent = desc?.stat || '未整地';
+    else {
+      const quality = desc.quality == null ? '—' : desc.quality;
+      sum.innerHTML = `<b>${desc.crop}</b> · ${desc.stageName || '播种'} · ${(desc.age || 0).toFixed(1)} / ${desc.cycle || 0} 世界日<br><span>成熟度 ${Math.round(desc.maturity || 0)}% · 产量值 ${desc.yieldValue ?? '—'} · 品质值 ${quality}</span>`;
+    }
+  }
   const jobsHost = $('dock-jobs');
   if (jobsHost) {
-    const rows = desc?.jobs || [];
-    jobsHost.hidden = !rows.length;
-    jobsHost.innerHTML = rows.length
-      ? rows.map(job => {
-        const hot = job.status === '执行中' || job.status === '生长' || job.status === '开来' || job.status === '转弯';
-        const miss = job.status === '过期';
-        return `<div class="jb${hot ? ' run' : ''}${miss ? ' miss' : ''}"><b>${job.name}</b><span>${job.status} ${job.pct}%</span></div>`;
-      }).join('')
-      : '';
+    const hover = dockHover && desc?.barStages?.find(s => s.id === dockHover);
+    const rows = hover ? hover.jobs : (desc?.jobs || []);
+    const label = $('dock-jobs-lab');
+    if (label) label.textContent = hover ? `当前阶段作业监控 · ${hover.name}` : '当前阶段作业监控';
+    jobsHost.innerHTML = rows.length ? rows.map(jobRow).join('') : '<div class="jb"><b>无</b><span>这一阶段没有作业</span></div>';
   }
-  const legendHost = $('dock-legend');
-  if (legendHost) {
-    const chips = desc?.chips || [];
-    legendHost.hidden = !chips.length;
-    legendHost.innerHTML = chips.map(s => `<div class="lg${s.on ? ' on' : ''}"><span>${s.name}</span></div>`).join('');
+  paintStageBar(desc);
+  const ops = $('dock-ops');
+  if (ops) {
+    const actions = desc?.actions || [];
+    ops.style.gridTemplateColumns = `repeat(${Math.max(actions.length, 1)}, minmax(0, 1fr))`;
+    ops.innerHTML = actions.map(act => `<button type="button" data-act="${act.id}"${act.enabled ? '' : ' disabled'}><b>${act.name}</b></button>`).join('');
   }
-  const bar = $('bar');
-  if (bar) {
-    const fill = Math.max(0, Math.min(1, desc?.bar || 0));
-    const pct = (fill * 100).toFixed(1);
-    bar.hidden = !desc || (!desc.jobs.length && fill <= 0);
-    bar.innerHTML = `<i style="flex:1;background:linear-gradient(90deg,#c4b08a ${pct}%,rgba(232,216,208,.16) ${pct}%)"></i>`;
-  }
-  el.classList.toggle('picking', plantOpen && !!f.owned);
-  el.classList.toggle('prepping', prepOpen && !!f.owned);
-  const plantBtn = $('act-plant');
-  const prepBtn = $('act-prep');
-  if (plantBtn) { plantBtn.disabled = !f.owned; plantBtn.classList.toggle('on', plantOpen && !!f.owned); }
-  if (prepBtn) { prepBtn.disabled = !f.owned; prepBtn.classList.toggle('on', prepOpen && !!f.owned); }
 }
 function paintRates() {
   document.querySelectorAll('#rates button').forEach(b => b.classList.toggle('on', Math.abs(+b.dataset.rate - economy.timeScale) < 1e-6));
@@ -2992,34 +3032,24 @@ function bootStagesSync() {
 }
 const bootStageNote = bootStagesSync();
 $('kpi').innerHTML = `<div class="k-rev"><small>营收</small><b class="hv" id="kpi-rev">0</b></div><div class="k-day"><small>世界日</small><b id="kpi-day">0</b></div><div class="k-time"><small>时刻</small><span class="clk"><i class="face" id="kpi-face" aria-hidden="true"><i id="kpi-hh"></i><i id="kpi-mh"></i></i><b id="kpi-hm">00:00</b><b id="kpi-rate">1×</b></span></div><div class="k-act"><small>作业</small><b class="hv" id="kpi-act">0</b><em>/ ${rigs.length}</em></div>`;
-$('dock').innerHTML = `<div class="who"><div class="name"><b id="selid"></b><em id="selwork" hidden></em></div><span id="selstat"></span></div><div id="dock-jobs" class="jobs" hidden></div><div id="dock-legend" class="legend" hidden></div><div id="bar"><i id="selbar"></i></div><div class="strip" id="prepbtns"></div><div class="strip" id="selbtns"></div><div class="ops"><button type="button" id="act-prep"><b>整地</b><small>选择田面</small></button><button type="button" id="act-plant"><b>种植</b><small>拉斯提卡</small></button></div>`;
-{
-  const b = document.createElement('button');
-  b.type = 'button';
-  b.dataset.crop = 'lastika';
-  b.innerHTML = '<b>拉斯提卡</b><small>播种之后开始生长</small>';
-  b.addEventListener('click', () => doPlant());
-  $('selbtns').appendChild(b);
-}
-for (const recipe of Object.values(PREP_RECIPES)) {
-  const b = document.createElement('button');
-  b.type = 'button';
-  b.dataset.prep = recipe.id;
-  const jobName = JOBS[recipe.steps[0]]?.name || '犁地';
-  b.innerHTML = `<b>${recipe.targetName}</b><small>${recipe.name} · ${jobName}</small>`;
-  b.addEventListener('click', () => doPrep(recipe.id));
-  $('prepbtns').appendChild(b);
-}
-$('act-plant').addEventListener('click', () => {
-  if (!selected?.owned) return;
-  plantOpen = !plantOpen;
-  if (plantOpen) prepOpen = false;
+$('dock').innerHTML = `<div class="drow"><div class="dlab">单元信息</div><div class="who"><div class="name"><b id="selid"></b><em id="selwork" hidden></em></div></div></div><div class="drow"><div class="dlab">作物概况</div><div class="sum" id="crop-sum"></div></div><div class="drow"><div class="dlab" id="dock-jobs-lab">当前阶段作业监控</div><div id="dock-jobs" class="jobs"></div></div><div class="drow"><div class="dlab">生长阶段监控</div><div id="stagebar"></div></div><div class="drow"><div class="dlab">操作按钮</div><div class="ops" id="dock-ops"></div></div>`;
+$('dock').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-act]');
+  if (!btn || btn.disabled) return;
+  if (btn.dataset.act === 'prep') doPrep();
+  if (btn.dataset.act === 'plant') doPlant();
+});
+$('dock').addEventListener('pointerover', (e) => {
+  const seg = e.target.closest('[data-stage]');
+  const id = seg?.dataset.stage || null;
+  if (id === dockHover) return;
+  dockHover = id;
   updateDock();
 });
-$('act-prep').addEventListener('click', () => {
-  if (!selected?.owned) return;
-  prepOpen = !prepOpen;
-  if (prepOpen) plantOpen = false;
+$('dock').addEventListener('pointerout', (e) => {
+  if (e.relatedTarget && e.relatedTarget.closest && e.relatedTarget.closest('#stagebar')) return;
+  if (!dockHover) return;
+  dockHover = null;
   updateDock();
 });
 const RATE_STOPS = [1, 4, 12, 120, 1000];
