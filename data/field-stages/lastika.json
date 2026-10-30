@@ -1,7 +1,7 @@
 {
   "schema": "ringsheaf.field-stage/1",
   "profile": "lastika",
-  "readme": "拉斯提卡。框架 B 只读四段：A 播种、B 成熟、D 收割、E 收拾。B 的天数是世界日，不是现实秒。1× 下一世界日 = 720 现实秒。软窗 from/to 同单位。不写半幅蒙版。",
+  "readme": "拉斯提卡。主游戏读 graph：播种从整地外进入头阶段生长，到点进成熟，收割走硬边，错过成熟窗进腐烂。收拾后是可再种尾。B 的天数是生长的世界日。1× 下一世界日 = 720 现实秒。软作业不改阶段色。",
   "cropId": "lastika",
   "logicId": "crop_lastika",
   "cropName": "拉斯提卡",
@@ -21,6 +21,22 @@
     "stub": "#b59a63"
   },
   "chain": ["A", "B", "D"],
+  "graph": {
+    "entry": { "job": "sow", "to": "grow" },
+    "stages": [
+      { "id": "grow", "name": "生长", "role": "head", "kind": "time", "look": "sown", "days": 36 },
+      { "id": "mature", "name": "成熟", "role": "node", "kind": "time", "look": "mature", "days": 8 },
+      { "id": "stubble", "name": "收后", "role": "node", "kind": "wait", "look": "harvested" },
+      { "id": "ready", "name": "可再种", "role": "tail", "kind": "tail", "look": "general" },
+      { "id": "rot", "name": "腐烂", "role": "rot", "kind": "rot", "look": "rot" }
+    ],
+    "edges": [
+      { "from": "grow", "to": "mature", "kind": "natural" },
+      { "from": "mature", "to": "stubble", "kind": "hard", "job": "harvest" },
+      { "from": "mature", "to": "rot", "kind": "natural" },
+      { "from": "stubble", "to": "ready", "kind": "hard", "job": "tidy" }
+    ]
+  },
   "stages": [
     { "id": "O", "group": "O", "name": "未整地", "kind": "idle", "days": 1, "color": "#6f6a61", "canopy": "#4a4844", "roughness": 0.97, "cover": 0, "plantScale": 0, "variants": [] },
     { "id": "A", "group": "A", "name": "播种", "kind": "growth", "days": 1, "color": "#4a4844", "canopy": "#51542c", "roughness": 0.92, "cover": 0.2, "plantScale": 0.25, "variants": [] },

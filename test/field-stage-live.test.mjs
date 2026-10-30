@@ -41,7 +41,8 @@ test('editor lastika replaces the playable stages, windows, and paints', () => {
     assert.equal(crop.growDays, 36);
     assert.equal(crop.growSeconds, 36 * DAY_SECONDS);
     assert.equal(crop.stages.find(s => s.id === 'mature').name, '熟透');
-    assert.deepEqual(crop.stages.find(s => s.id === 'mature').soft, [
+    assert.equal(crop.stages.find(s => s.id === 'grow').role, 'head');
+    assert.deepEqual(crop.stages.find(s => s.id === 'grow').soft, [
       { job: 'topdress', name: '追肥', from: 6, to: 12 },
       { job: 'hill', name: '培土', from: 20, to: 26 },
     ]);
@@ -85,7 +86,7 @@ test('boot reads crops.lastika and repo ignores the workshop slot', () => {
     assert.equal(booted.ok, true);
     assert.equal(booted.origin, 'workshop');
     assert.equal(PLANT_CROPS.lastika.stages.find(s => s.id === 'mature').name, '熟透');
-    assert.equal(PLANT_CROPS.lastika.stages.find(s => s.id === 'mature').soft[0].from, 6);
+    assert.equal(PLANT_CROPS.lastika.stages.find(s => s.id === 'grow').soft[0].from, 6);
     const skipped = bootFieldStageSource(store, 'repo');
     assert.equal(skipped.origin, 'repo');
     assert.equal(skipped.skipped, true);

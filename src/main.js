@@ -3115,10 +3115,10 @@ function paintCropBook() {
   const matureMinutes = Math.round((bCrop.growDays * DAY_SECONDS) / 60);
   const bStages = bCrop.stages.map(s => {
     const soft = (s.soft || []).map(j => `${j.name} 第 ${j.from}–${j.to} 世界日`).join('，');
-    const kind = s.kind === 'time' ? `${bCrop.growDays} 世界日` : '硬作业';
+    const kind = s.days > 0 ? `${s.days} 世界日` : (s.role === 'tail' ? '可再种尾' : s.role === 'rot' ? '腐烂尽头' : '等到硬作业');
     return `<div class="io"><span>${s.name}</span><span>${kind}${soft ? ' · ' + soft : ''}</span></div>`;
   }).join('');
-  host.innerHTML = `<p class="lead">拉斯提卡 · ${stageBadge()}。阶段、软窗、田面色和生长钟只读工坊或仓库 lastika.json。成熟和软窗按世界日，1× 下一世界日约 12 现实分钟。整地不在这条链里。</p><div class="crop"><b>${bCrop.name}</b><div class="meta">生长 ${bCrop.growDays} 世界日 · 1× 约 ${matureMinutes} 现实分钟 · 田面 ${bPaints.raw || ''} / ${bPaints.young || ''} / ${bPaints.ripe || ''}</div>${bStages}</div>` + CROPS.map(c => {
+  host.innerHTML = `<p class="lead">拉斯提卡 · ${stageBadge()}。阶段图只读工坊或仓库 lastika.json。整地不在图里。生长到点进成熟，错过收获窗进腐烂，收拾后才可再种。软作业默认不改田面色。</p><div class="crop"><b>${bCrop.name}</b><div class="meta">生长 ${bCrop.growDays} 世界日 · 1× 约 ${matureMinutes} 现实分钟 · 田面 ${bPaints.raw || ''} / ${bPaints.young || ''} / ${bPaints.ripe || ''}</div>${bStages}</div>` + CROPS.map(c => {
     const d = cropDossier(c.id);
     const stages = d.stages.length
       ? d.stages.map(s => `<div class="io"><span><i style="background:${s.color}"></i>${s.name}</span><span>第 ${s.from}–${s.to} 日 · ${s.days} 日${s.machine ? ' · ' + s.machine : ''}</span></div>`).join('')

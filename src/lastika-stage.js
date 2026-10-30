@@ -23,6 +23,43 @@ function hexOf(value, fallback) {
   return typeof value === 'string' && /^#[0-9a-fA-F]{6}$/.test(value) ? value : fallback;
 }
 
+function compileGraph(doc, growSource) {
+  const graph = doc.graph;
+  if (!graph || !graph.entry || !Array.isArray(graph.stages) || !Array.isArray(graph.edges)) {
+    throw new Error('拉斯提卡缺少阶段图');
+  }
+  const stages = graph.stages.map(stage => ({ ...stage }));
+  const edges = graph.edges.map(edge => ({ ...edge }));
+  if (edges.some(edge => edge.kind !== 'hard' && edge.kind !== 'natural')) {
+    throw new Error('阶段图的边只能是 hard 或 natural');
+  }
+  const heads = stages.filter(stage => stage.role === 'head');
+  const tails = stages.filter(stage => stage.role === 'tail');
+  const rots = stages.filter(stage => stage.role === 'rot');
+  if (heads.length !== 1 || !tails.length || !rots.length) throw new Error('阶段图要有一个头、一个可再种尾，以及腐烂尽头');
+  const head = heads[0];
+  if (edges.some(edge => edge.to === head.id)) throw new Error('头阶段不能从作物阶段进来');
+  for (const tail of tails) {
+    if (edges.some(edge => edge.from === tail.id)) throw new Error('可再种尾不能再有后继');
+    if (Number(tail.days) > 0) throw new Error('可再种尾没有时长');
+  }
+  for (const rot of rots) {
+    if (edges.some(edge => edge.from === rot.id)) throw new Error('腐烂尽头不能再有后继');
+  }
+  const mature = stages.find(stage => stage.id === 'mature');
+  if (!mature || mature.role === 'tail' || mature.role === 'rot') throw new Error('成熟不是尾阶段');
+  if (!edges.some(edge => edge.from === 'mature' && edge.kind === 'natural')) throw new Error('成熟到点要能进腐烂');
+  const days = Number(growSource?.days);
+  if (days > 0) head.days = days;
+  if (growSource?.name) {
+    const named = stages.find(stage => stage.id === 'mature');
+    if (named) named.name = growSource.name;
+  }
+  head.soft = softJobsFromDoc(doc, growSource);
+  if (graph.entry.job !== 'sow' || graph.entry.to !== head.id) throw new Error('作物图从播种进入头阶段，整地不在图里');
+  return { entry: { ...graph.entry }, edges, stages };
+}
+
 export function lastikaSpecFromDoc(doc) {
   const bare = stageByGroup(doc, 'O');
   const sow = stageByGroup(doc, 'A');
@@ -31,8 +68,9 @@ export function lastikaSpecFromDoc(doc) {
   const tidy = stageByGroup(doc, 'E');
   if (!sow || !mature || !harvest || !tidy) throw new Error('拉斯提卡缺少播种、成熟、收割或收拾');
   const plant = doc.plant || {};
-  const days = Number(mature.days);
-  const growDays = days > 0 ? days : PLANT_CROPS.lastika.growDays;
+  const graph = compileGraph(doc, mature);
+  const head = graph.stages.find(stage => stage.role === 'head');
+  const growDays = Number(head.days) > 0 ? Number(head.days) : PLANT_CROPS.lastika.growDays;
   return {
     name: doc.cropName || doc.name || '拉斯提卡',
     growDays,
@@ -53,12 +91,8 @@ export function lastikaSpecFromDoc(doc) {
       mature: hexOf(mature.color, '#51542c'),
       harvest: hexOf(harvest.color, '#b59a63'),
     },
-    stages: [
-      { id: 'sow', name: sow.name || '播种', kind: 'hard', job: 'sow' },
-      { id: 'mature', name: mature.name || '成熟', kind: 'time', soft: softJobsFromDoc(doc, mature) },
-      { id: 'harvest', name: harvest.name || '收割', kind: 'hard', job: 'harvest' },
-      { id: 'tidy', name: tidy.name || '收拾', kind: 'hard', job: 'tidy' },
-    ],
+    graph: { entry: graph.entry, edges: graph.edges },
+    stages: graph.stages,
   };
 }
 
@@ -67,6 +101,7 @@ export function applyLastikaSpec(spec, origin = 'repo') {
   crop.name = spec.name;
   crop.growDays = spec.growDays;
   crop.growSeconds = spec.growSeconds;
+  crop.graph = spec.graph;
   crop.visual = { ...crop.visual, ...spec.visual, tex: 'ridges' };
   crop.stages.splice(0, crop.stages.length, ...spec.stages);
   crop.paints = { ...spec.paints };

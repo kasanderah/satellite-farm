@@ -192,12 +192,13 @@ function syncFields() {
       ground: unit.ground,
       plot: unit.plot,
     };
-    if (sweeping) {
+    const brush = order ? JOBS[order.jobId]?.brush : null;
+    if (sweeping && brush?.enabled && brush.look && brush.look !== '不影响') {
       f.bUnit.sweep = {
         width: order.width,
         pass: order.pose.pass,
         alongFrac: order.pose.alongFrac || 0,
-        look: JOBS[order.jobId].sweep || JOBS[order.jobId].look,
+        look: brush.look,
       };
     }
   }
