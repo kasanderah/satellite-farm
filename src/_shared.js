@@ -390,15 +390,11 @@ export function bindSurfaceClock(id) {
 export const POTATO_STAGES = CROPS.find(c => c.id === 'potato').stages;
 const FIELD_RECIPE = { potato: 'potato-field', soy: 'soy-field', feed_barley: 'barley-field', cabbage: 'cabbage-field' };
 // 农机店。拖拉机进库后按作业回库换挂。联合收割、结球收、移栽是自走平台，侧卸另派有挂车的拖拉机。
+// 农机店只卖这三样。万能农机沿用开局购入价。犁单独计价，卖掉仍是购入价的一半。
 export const MACHINE_SHOP = [
   { id: 'tractor', name: '拖拉机', price: 12000 },
-  { id: 'planter', name: '播种机', price: 9000 },
-  { id: 'hiller', name: '培土机', price: 7000 },
-  { id: 'topper', name: '杀秧机', price: 7000 },
-  { id: 'lifter', name: '收获机', price: 14000 },
-  { id: 'harvester_combine', name: '联合收割机', price: 16000 },
-  { id: 'harvester_cabbage', name: '结球收获机', price: 15000 },
-  { id: 'transplanter', name: '移栽机', price: 11000 },
+  { id: 'plow', name: '犁', price: 8000 },
+  { id: 'omni', name: '万能农机', price: 24000 },
 ];
 // 无人机不进机库。基站在中枢买下之后，侦察和植保从基站起飞。
 export const DRONE_SHOP = [
@@ -654,7 +650,7 @@ export function fieldVisual(f) {
   const shade = f?.bUnit ? fieldShader(f.bUnit) : null;
   if (shade && !shade.keep) {
     const lastika = CROPS.findIndex(c => c.id === 'lastika');
-    return { crop: lastika, g: shade.g, s: 0, dir: f.dir, mask: shade.mask, next: shade.next };
+    return { crop: lastika, g: shade.g, s: 0, dir: f.dir, mask: shade.mask, next: shade.next, fromG: shade.fromG };
   }
   const vis = fieldVisualHeld(f);
   if (!shade?.keep) return vis;
@@ -1870,11 +1866,12 @@ export function rigReadout(r) {
   const stalls = [
     { id: 0, kind: 'omni', machineId: 'omni', label: '万能农机', role: '自走一体', caps: ['犁田', '播种', '收割', '收拾', '追肥', '培土'], width: 16, buyPrice: 24000, z: garageAt.z + 14 },
     { id: 1, kind: 'tractor', machineId: 'tractor', label: '拖拉机', role: '拖拉机+犁', caps: ['犁田'], width: 12, impl: 'impl_subsoiler', buyPrice: 12000, z: garageAt.z + 32 },
+    { id: 2, kind: 'plow', machineId: 'plow', label: '犁', role: '挂在拖拉机上', caps: ['犁田'], width: 12, buyPrice: 8000, z: garageAt.z + 50 },
   ];
   for (const stall of stalls) {
     const rig = {
       id: stall.id, kind: stall.kind, machineId: stall.machineId, label: stall.label, role: stall.role,
-      caps: stall.caps, impl: stall.impl || null, logicId: 'tractor_gen', bDrive: true, bWidth: stall.width,
+      caps: stall.caps, impl: stall.impl || null, logicId: stall.kind === 'plow' ? 'plow' : 'tractor_gen', bDrive: stall.kind !== 'plow', bWidth: stall.width,
       busy: false, f: null, job: null, mode: 'park', intent: null, route: null, ri: 0,
       charge: 1, lane: 0, u: 0, bin: 0, cargo: 0, parkX: garageAt.x, parkZ: stall.z, x: garageAt.x, z: stall.z, ang: -Math.PI / 2,
       buyPrice: stall.buyPrice || 0,
@@ -2306,8 +2303,8 @@ function addRig(kind) {
   return r;
 }
 function restoreFleet(list) {
-  while (rigs.length > 4) rigs.pop();
-  nextRigId = 4;
+  while (rigs.length > 3) rigs.pop();
+  nextRigId = 3;
   if (!Array.isArray(list)) return;
   for (const item of list) {
     if (item && MACHINE_SHOP.some(m => m.id === item.kind)) addRig(item.kind);

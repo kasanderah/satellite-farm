@@ -251,6 +251,10 @@ export function fieldShader(unit) {
     ? 2 + Math.min(0.999, Math.max(0, (unit.age || 0) / (unit.cycle || 1))) * 3
     : lookG(unit.look, unit.growFrac || 0);
   if (g == null && !sweeping) return null;
+  if (!sweeping && unit.stageFade && unit.stageFade.span > 0 && unit.stageFade.left > 0) {
+    const amt = Math.min(1, unit.stageFade.left / unit.stageFade.span);
+    return { g: unit.stageFade.toG, fromG: unit.stageFade.fromG, mask: -5 - amt, next: null };
+  }
   if (!sweeping && unit.brushFade && unit.brushFade.span > 0 && unit.brushFade.left > 0) {
     const amt = Math.min(1, unit.brushFade.left / unit.brushFade.span);
     return { g: g == null ? 2 : g, mask: -2 - amt, next: null };
@@ -345,6 +349,67 @@ export function mountHitch(farm, hitchId, hostId) {
   return { ok: true };
 }
 
+function sparePlow(farm) {
+  return farm.machines.find(m => m.classId === 'hitch' && m.caps.includes('犁田') && !m.hostId) || null;
+}
+
+function freeTractor(farm) {
+  return farm.machines.find(m => m.classId === 'self' && !m.integral && !m.hitchId && (m.powerOutKw || 0) >= (PLOW.powerNeedKw || 0)) || null;
+}
+
+// 商店买进的拖拉机、犁、万能农机。拖拉机自己没有犁田，犁挂上才有。
+export function installPlayerMachine(farm, kind, rigId) {
+  if (!farm || rigId == null) return null;
+  if (kind === 'omni') {
+    const id = farm.machines.some(m => m.id === OMNI.id) ? `omni-${rigId}` : OMNI.id;
+    addMachine(farm, { ...OMNI, id, caps: OMNI.caps.slice(), energyLeft: OMNI.energyKwh });
+    return { id, role: '自走一体', caps: OMNI.caps.slice(), width: OMNI.width, hitchId: null, mounted: false };
+  }
+  if (kind === 'tractor') {
+    const id = farm.machines.some(m => m.id === TRACTOR.id) ? `tractor-${rigId}` : TRACTOR.id;
+    addMachine(farm, { ...TRACTOR, id, caps: TRACTOR.caps.slice(), energyLeft: TRACTOR.energyKwh });
+    const plow = sparePlow(farm);
+    if (plow && mountHitch(farm, plow.id, id).ok) {
+      return { id, role: '拖拉机+犁', caps: PLOW.caps.slice(), width: PLOW.width, hitchId: plow.id, mounted: true };
+    }
+    return { id, role: '拖拉机', caps: [], width: TRACTOR.width, hitchId: null, mounted: false };
+  }
+  if (kind === 'plow') {
+    const id = `plow-${rigId}`;
+    addMachine(farm, { ...PLOW, id, caps: PLOW.caps.slice() });
+    const host = freeTractor(farm);
+    if (host && mountHitch(farm, id, host.id).ok) {
+      return { id, role: '犁', caps: PLOW.caps.slice(), width: PLOW.width, hitchId: id, hostId: host.id, mounted: true };
+    }
+    return { id, role: '犁', caps: PLOW.caps.slice(), width: PLOW.width, hitchId: id, hostId: null, mounted: false };
+  }
+  return null;
+}
+
+export function removePlayerMachine(farm, machineId) {
+  const machine = farm.machines.find(m => m.id === machineId);
+  if (!machine) return { ok: true };
+  if (machine.busy) return { ok: false, reason: 'busy' };
+  if (machine.classId === 'hitch') {
+    const host = farm.machines.find(m => m.hitchId === machine.id);
+    if (host?.busy) return { ok: false, reason: 'busy' };
+    if (host) host.hitchId = null;
+    machine.hostId = null;
+    farm.machines = farm.machines.filter(m => m.id !== machine.id);
+    return { ok: true, hostId: host?.id || null };
+  }
+  if (farm.orders.some(order => order.machineId === machine.id || order.hitchId === machine.hitchId)) {
+    return { ok: false, reason: 'busy' };
+  }
+  if (machine.hitchId) {
+    const hitch = farm.machines.find(m => m.id === machine.hitchId);
+    if (hitch) hitch.hostId = null;
+    machine.hitchId = null;
+  }
+  farm.machines = farm.machines.filter(m => m.id !== machine.id);
+  return { ok: true };
+}
+
 function pushEvent(farm, ev) {
   farm.events.push(ev);
   if (farm.events.length > 40) farm.events.shift();
@@ -383,11 +448,12 @@ export function requestPrep(farm, fieldId, recipeId = 'clear_general') {
   const recipe = PREP_RECIPES[recipeId];
   if (!field || !recipe) return { ok: false, reason: 'field' };
   const clearing = !!field.plant;
+  if (!clearing && field.ground === recipe.target) return { ok: true, skipped: true, ground: field.ground };
+  const job = JOBS[recipe.steps[0]];
+  if (capableCount(farm, job.caps) < 1) return { ok: false, reason: 'machine' };
   if (clearing) clearCrop(farm, field);
   if (fieldLocked(farm, field)) return { ok: false, reason: 'lock' };
-  if (!clearing && field.ground === recipe.target) return { ok: true, skipped: true, ground: field.ground };
   field.prep = { recipeId: recipe.id, step: 0 };
-  const job = JOBS[recipe.steps[0]];
   farm.queue.push({ id: farm.seq++, fieldId, jobId: job.id, caps: job.caps.slice(), lane: 'prep' });
   pushEvent(farm, { type: 'request', lane: 'prep', fieldId, recipeId: recipe.id, jobId: job.id });
   dispatch(farm);
@@ -401,6 +467,8 @@ export function requestPlant(farm, fieldId, cropId = 'lastika') {
   if (field.plant) return { ok: false, reason: 'busy' };
   if (fieldLocked(farm, field)) return { ok: false, reason: 'lock' };
   if (!crop.grounds.includes(field.ground)) return { ok: false, reason: 'ground' };
+  const sowJob = JOBS[crop.graph.entry.job];
+  if (capableCount(farm, sowJob.caps) < 1) return { ok: false, reason: 'machine' };
   field.plant = {
     cropId: crop.id,
     index: 0,
@@ -690,6 +758,17 @@ function fadeBrush(farm, dt) {
   }
 }
 
+// 自然进阶段后的第一世界日。和软刷色不是一条：刷色仍只在 brush.enabled 时写。
+function fadeStage(farm, dt) {
+  const days = dt / DAY_SECONDS;
+  if (!(days > 0)) return;
+  for (const field of farm.fields.values()) {
+    if (!field.stageFade) continue;
+    field.stageFade.left -= days;
+    if (!(field.stageFade.left > 1e-4)) field.stageFade = null;
+  }
+}
+
 function cropOfPlant(field) {
   return field?.plant ? PLANT_CROPS[field.plant.cropId] : null;
 }
@@ -770,13 +849,14 @@ function queueJob(farm, field, jobId, lane) {
   farm.queue.push({ id: farm.seq++, fieldId: field.id, jobId, caps: job.caps.slice(), lane });
 }
 
-function enterStage(farm, field, stageId) {
+function enterStage(farm, field, stageId, how) {
   if (!field?.plant) return;
   if (stageId === 'exit') {
     field.ground = 'general';
     field.plant = null;
     field.look = 'general';
     field.lock = null;
+    field.stageFade = null;
     pushEvent(farm, { type: 'stage', fieldId: field.id, stageId: 'exit' });
     pushEvent(farm, { type: 'ground', fieldId: field.id, ground: 'general' });
     return;
@@ -784,6 +864,7 @@ function enterStage(farm, field, stageId) {
   const crop = cropOfPlant(field);
   const stage = stageOf(crop, stageId);
   if (!stage) return;
+  const fromG = how === 'natural' ? (stageShadeG(field) ?? lookG(field.look, 0)) : null;
   field.plant.stageId = stage.id;
   field.plant.soft = null;
   field.plant.clock = false;
@@ -791,6 +872,14 @@ function enterStage(farm, field, stageId) {
   field.plant.need = 0;
   field.brushFade = null;
   if (stage.look) field.look = stage.look;
+  const toG = how === 'natural'
+    ? (Number(stage.days) > 0 ? stageShadeG(field) : lookG(stage.look, 0))
+    : null;
+  if (how === 'natural' && fromG != null && toG != null && Math.abs(toG - fromG) > 0.35) {
+    field.stageFade = { fromG, toG, left: 1, span: 1 };
+  } else {
+    field.stageFade = null;
+  }
   pushEvent(farm, { type: 'stage', fieldId: field.id, stageId: stage.id });
   const days = Number(stage.days);
   if (days > 0) {
@@ -816,7 +905,7 @@ function leaveByNatural(farm, field) {
     return;
   }
   if (hard) farm.queue = farm.queue.filter(item => !(item.fieldId === field.id && item.jobId === hard.job));
-  enterStage(farm, field, natural.to);
+  enterStage(farm, field, natural.to, 'natural');
 }
 
 // 硬收获做完、田面已是收获后，才入仓一次。升数等于信息框产量值 round(yieldBase × yieldMul)。
@@ -1062,6 +1151,7 @@ function finishGrowth(farm) {
 export function stepFarm(farm, dt, env = null) {
   if (!(dt > 0)) return farm;
   fadeBrush(farm, dt);
+  fadeStage(farm, dt);
   let left = dt;
   for (let guard = 0; guard < 48 && left > 1e-6; guard++) {
     touchSoft(farm);

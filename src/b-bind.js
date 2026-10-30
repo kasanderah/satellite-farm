@@ -2,7 +2,7 @@
 import {
   OMNI, TRACTOR, PLOW, JOBS, TURN_SECONDS, createFarm, addField, addMachine, mountHitch,
   requestPrep, requestPlant, stepFarm, describeField, plotAddress, growthAge, workSweepLook, PLANT_CROPS,
-  cycleDays,
+  cycleDays, installPlayerMachine, removePlayerMachine,
 } from './framework-b.js';
 import { roadRoute } from './_shared.js';
 
@@ -163,26 +163,80 @@ function paintRig(order, unit) {
 
 const SPECS = { omni: OMNI, tractor: TRACTOR };
 
+function paintHitch(rig, hitchId) {
+  if (!rig || rig.kind !== 'tractor') return;
+  if (hitchId) {
+    rig.impl = 'impl_subsoiler';
+    rig.hitchId = hitchId;
+    rig.role = '拖拉机+犁';
+    rig.caps = PLOW.caps.slice();
+    rig.bWidth = PLOW.width;
+    return;
+  }
+  rig.impl = null;
+  rig.hitchId = null;
+  rig.role = '拖拉机';
+  rig.caps = [];
+  rig.bWidth = TRACTOR.width;
+}
+
+function refreshHitches() {
+  if (!farm || !ctx) return;
+  for (const rig of ctx.rigs) {
+    if (rig.kind === 'tractor') {
+      const machine = farm.machines.find(m => m.id === rig.machineId);
+      paintHitch(rig, machine?.hitchId || null);
+    } else if (rig.kind === 'plow') {
+      const hitch = farm.machines.find(m => m.id === rig.machineId);
+      rig.hitched = !!hitch?.hostId;
+      rig.role = rig.hitched ? '挂在拖拉机上' : '还没有拖拉机';
+    }
+  }
+}
+
 export function dropDrive(machineId) {
   if (!farm || !machineId) return { ok: true };
-  const machine = farm.machines.find(m => m.id === machineId);
-  if (!machine) return { ok: true };
-  if (machine.busy || farm.orders.some(order => order.machineId === machineId || order.hitchId === machine.hitchId)) {
-    return { ok: false, reason: 'busy' };
+  const gone = removePlayerMachine(farm, machineId);
+  if (!gone.ok) return gone;
+  refreshHitches();
+  return gone;
+}
+
+export function adoptBought(rig) {
+  if (!farm || !rig) return null;
+  const linked = installPlayerMachine(farm, rig.kind, rig.id);
+  if (!linked) return null;
+  rig.machineId = linked.id;
+  if (rig.kind === 'plow') {
+    rig.bDrive = false;
+    rig.label = '犁';
+    rig.hitched = !!linked.mounted;
+    rig.role = linked.mounted ? '挂在拖拉机上' : '还没有拖拉机';
+    refreshHitches();
+    return linked;
   }
-  const hitchId = machine.hitchId;
-  farm.machines = farm.machines.filter(m => m.id !== machineId && m.id !== hitchId);
-  farm.queue = farm.queue.filter(item => item.machineId !== machineId);
-  return { ok: true };
+  rig.bDrive = true;
+  rig.label = rig.kind === 'tractor' ? '拖拉机' : '万能农机';
+  rig.caps = linked.caps.slice();
+  rig.role = linked.role;
+  rig.bWidth = linked.width;
+  rig.hitchId = linked.hitchId || null;
+  if (rig.kind === 'tractor') paintHitch(rig, linked.hitchId);
+  refreshHitches();
+  return linked;
 }
 
 export function bootSlice(next) {
   ctx = next;
   farm = createFarm();
   byKey.clear();
-  const keep = ctx.rigs.filter(r => r.bDrive);
+  const keep = ctx.rigs.filter(r => r.bDrive || r.kind === 'plow');
   ctx.rigs.length = 0;
   for (const unit of keep) {
+    if (!unit.bDrive) {
+      ctx.rigs.push(unit);
+      continue;
+    }
     const spec = SPECS[unit.machineId] || SPECS[unit.kind] || OMNI;
     unit.machineId = spec.id;
     if (!farm.machines.some(m => m.id === spec.id)) {
@@ -256,6 +310,7 @@ function syncFields() {
       age: timed ? growthAge(unit) : 0,
       cycle: timed ? (cycleDays(crop) || 1) : 1,
       brushFade: unit.brushFade ? { left: unit.brushFade.left, span: unit.brushFade.span, look: unit.brushFade.look } : null,
+      stageFade: unit.stageFade ? { left: unit.stageFade.left, span: unit.stageFade.span, fromG: unit.stageFade.fromG, toG: unit.stageFade.toG } : null,
       text: desc?.stat || '',
       label: desc?.float || '',
       ground: unit.ground,

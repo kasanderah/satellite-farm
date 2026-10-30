@@ -6,12 +6,13 @@ import {
   stageDisplayStops, stageTint, stageShadeG, growthAge, BRUSH_FADE_DAYS,
   maturityPercent, harvestAllowed, qualityNow, harvestWindow,
   createFarm, addField, addMachine, mountHitch, chooseMachine, requestPrep, requestPlant, stepFarm, fieldWork, describeField,
+  installPlayerMachine,
 } from '../src/framework-b.js';
 import { installShippedLastika } from '../src/lastika-stage.js';
 import { alignFieldCalendar, jobWindows, parseFieldStageDoc } from '../src/field-stages.js';
 import lastikaRaw from '../data/field-stages/lastika.json' with { type: 'json' };
 import { HUD_VERSION } from '../src/version.js';
-import { fieldVisual, CROPS, roadRoute, warehouse, warehouseStacks } from '../src/_shared.js';
+import { fieldVisual, CROPS, roadRoute, warehouse, warehouseStacks, MACHINE_SHOP } from '../src/_shared.js';
 import { DAY_SECONDS, WORLD_MIN_PER_REAL_MIN } from '../src/world-clock.js';
 
 function slice() {
@@ -212,6 +213,7 @@ test('阶段起止按成长时间接上，进成熟不跳到满色', () => {
   assert.ok(Math.abs(g - (2 + (age / 12) * 3)) < 0.05);
   assert.ok(g < 4.4);
   assert.equal(field.look, 'mature');
+  assert.equal(field.stageFade, null);
 });
 
 test('软刷色打开时做完留残留并淡出，阶段色不被换掉', () => {
@@ -727,12 +729,51 @@ test('硬收获入仓一次，追肥改数量，培土改品质，烂地不入�
   rotFarm.queue.splice(0, rotFarm.queue.length);
   until(rotFarm, () => rotField.plant.stageId === 'rot', (rotField.plant.need + 2) * DAY_SECONDS, DAY_SECONDS);
   assert.equal(rotField.look, 'rot');
+  assert.ok(rotField.stageFade);
+  assert.ok(rotField.stageFade.fromG < 6.5);
+  assert.ok(rotField.stageFade.toG >= 7.5);
+  assert.ok(rotField.stageFade.left > 0.9);
+  const fade = fieldShader({ look: 'rot', stageFade: rotField.stageFade });
+  assert.ok(fade.mask <= -5 && fade.mask > -6.02);
+  assert.equal(fade.fromG, rotField.stageFade.fromG);
+  stepFarm(rotFarm, DAY_SECONDS);
+  assert.equal(rotField.stageFade, null);
+  assert.equal(rotField.look, 'rot');
   assert.equal(warehouse.filter(lot => lot.fieldId === '8:4').length, 0);
   assert.equal(warehouseStacks().some(s => s.crop === 'lastika'), false);
 });
 
+test('没有能干活的机械时整地仍可点，并说明缺机；拖拉机挂犁后能派', () => {
+  assert.deepEqual(MACHINE_SHOP.map(item => item.id), ['tractor', 'plow', 'omni']);
+  assert.equal(MACHINE_SHOP.find(item => item.id === 'tractor').price, 12000);
+  assert.equal(MACHINE_SHOP.find(item => item.id === 'omni').price, 24000);
+  assert.equal(MACHINE_SHOP.find(item => item.id === 'plow').price, 8000);
+  const farm = createFarm();
+  addField(farm, { id: 'bare', length: 128, width: 128, ground: 'raw', look: 'raw' });
+  assert.equal(describeField(farm, 'bare').canPrep, true);
+  assert.equal(describeField(farm, 'bare').actions.find(act => act.id === 'prep').enabled, true);
+  const missing = requestPrep(farm, 'bare');
+  assert.equal(missing.ok, false);
+  assert.equal(missing.reason, 'machine');
+  assert.equal(farm.queue.length, 0);
+  installPlayerMachine(farm, 'tractor', 1);
+  assert.equal(requestPrep(farm, 'bare').reason, 'machine');
+  const plow = installPlayerMachine(farm, 'plow', 2);
+  assert.equal(plow.mounted, true);
+  assert.equal(plow.hostId, 'tractor');
+  assert.equal(chooseMachine(farm, ['犁田']).id, 'tractor');
+  const queued = requestPrep(farm, 'bare');
+  assert.equal(queued.ok, true);
+  assert.equal(fieldWork(farm, 'bare').machineId, 'tractor');
+  const again = createFarm();
+  installPlayerMachine(again, 'omni', 3);
+  addField(again, { id: 'bare', length: 128, width: 128, ground: 'raw', look: 'raw' });
+  assert.equal(chooseMachine(again, ['犁田']).id, 'omni');
+  assert.equal(requestPrep(again, 'bare').ok, true);
+});
+
 test('拉斯提卡阶段和版本戳来自同一份定义', () => {
-  assert.equal(HUD_VERSION, '环穗 v6.16');
+  assert.equal(HUD_VERSION, '环穗 v6.17');
   const doc = parseFieldStageDoc(structuredClone(lastikaRaw));
   const windows = jobWindows(doc, alignFieldCalendar(doc)).filter(item => item.op.kind === 'optional');
   assert.deepEqual(windows.map(item => item.op.id), ['topdress', 'hill']);
