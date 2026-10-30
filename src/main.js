@@ -234,11 +234,24 @@ function curved(mat, extra) {
 }
 
 // ---------------- 6 种世界材质（IXION 式材质纪律） ----------------
+const emisPx = new THREE.Vector2(innerWidth, innerHeight);
 const MAT = {
   light: curved(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.52, metalness: 0.35 })),
   dark: curved(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.62, metalness: 0.55 })),
   glass: curved(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.06, metalness: 0.6, envMapIntensity: 1.4 })),
-  emis: curved(new THREE.MeshBasicMaterial({ vertexColors: true })),
+  // 灯条往往比一个像素窄。沿法线在屏幕上撑开约 1.4px，覆盖率才不会在镜头移动时从有到无。
+  emis: curved(new THREE.MeshBasicMaterial({ vertexColors: true, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }), (s) => {
+    s.uniforms.uEmisPx = { value: emisPx };
+    s.vertexShader = s.vertexShader
+      .replace('uniform vec3 uCurve;', 'uniform vec3 uCurve;\nuniform vec2 uEmisPx;')
+      .replace('#if defined ( USE_ENVMAP ) || defined ( USE_SKINNING )', '#if 1')
+      .replace('gl_Position = projectionMatrix * mvPosition;', `gl_Position = projectionMatrix * mvPosition;
+vec3 emisN = normalize(transformedNormal);
+vec4 emisClip = projectionMatrix * vec4(mvPosition.xyz + emisN, 1.0);
+vec2 emisDir = emisClip.xy / emisClip.w - gl_Position.xy / gl_Position.w;
+float emisLen = length(emisDir);
+if (emisLen > 1e-5) gl_Position.xy += (emisDir / emisLen) * (1.4 * 2.0 / uEmisPx) * gl_Position.w;`);
+  }),
 };
 // ⑤ 地面（田块 / 路网 / 荒地 / 制图覆盖层全部在一个着色器里）
 MAT.ground = new THREE.MeshStandardMaterial({ roughness: 0.92, metalness: 0, envMapIntensity: 0.3 });
@@ -249,6 +262,7 @@ MAT.crop = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8, 
 // 田间补光来自南极镜组，方向钉在环架上，不跟自旋走。低角度是为了垄沟还有影子。
 const SUN_EL = 21 * DEG, SUN_AZ = -38 * DEG;
 const sunDir = new THREE.Vector3(Math.sin(SUN_AZ) * Math.cos(SUN_EL), Math.sin(SUN_EL), -Math.cos(SUN_AZ) * Math.cos(SUN_EL)).normalize();
+const shRight = new THREE.Vector3(), shUp = new THREE.Vector3(), shAim = new THREE.Vector3();
 U.uSunXZ.value.set(sunDir.x, sunDir.z).normalize(); U.uSunTan.value = Math.tan(SUN_EL);
 // 轮轴大致朝日：太阳离北极约 28°，环一转它绕轴画一小圈。星星走满圈。
 const AXIS_SUN = new THREE.Vector3(-Math.sin(28 * DEG), 0.12, Math.cos(28 * DEG)).normalize();
@@ -1242,12 +1256,21 @@ for (const id of Object.keys(surfaceKits)) {
   rigMesh[id] = instanced(surfaceKits[id], RIG_CAP);
 }
 const boomSet = instanced(surfaceKits.orbit_boom, 1);
-const edgeMat = curved(new THREE.MeshBasicMaterial({ color: C('harvest'), toneMapped: false, fog: false }));
+const edgeMat = curved(new THREE.MeshBasicMaterial({ color: C('zone'), toneMapped: false, fog: false }));
 edgeMat.polygonOffset = true; edgeMat.polygonOffsetFactor = -4; edgeMat.polygonOffsetUnits = -4;
 const edgeMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), edgeMat, 2048);
+edgeMesh.name = 'sel-edge';
 edgeMesh.count = 0; edgeMesh.frustumCulled = false; edgeMesh.castShadow = false; edgeMesh.receiveShadow = false;
 edgeMesh.renderOrder = 3;
 scene.add(edgeMesh);
+const selRingGeo = new THREE.RingGeometry(0.78, 1, 48).rotateX(-Math.PI / 2);
+const selRingMat = curved(new THREE.MeshBasicMaterial({ color: C('zone'), toneMapped: false, fog: false, side: THREE.DoubleSide }));
+selRingMat.polygonOffset = true; selRingMat.polygonOffsetFactor = -3; selRingMat.polygonOffsetUnits = -3;
+const selRing = new THREE.InstancedMesh(selRingGeo, selRingMat, 32);
+selRing.name = 'sel-ring';
+selRing.count = 0; selRing.frustumCulled = false; selRing.castShadow = false; selRing.receiveShadow = false;
+selRing.renderOrder = 3;
+scene.add(selRing);
 const buildingSets = {
   warehouse: instanced(warehouseKit(), 8),
   garage: instanced(garageKit(), 8),
@@ -1825,6 +1848,7 @@ function applyDeckView() {
   setShown(boomSet, !on);
   setShown(workDroneMesh, !on);
   setShown(edgeMesh, !on);
+  setShown(selRing, !on);
   if (netMesh) netMesh.visible = !on;
   icons.visible = !on;
   deckSlabs.visible = !on && !!cut.on;
@@ -1875,14 +1899,31 @@ function selectionKind() {
   if (ownedFields().length) return 'field';
   return null;
 }
+function rigBody(r) {
+  const tractor = r.kind === 'tractor' || !!r.impl;
+  return { along: tractor ? 11 : 6.8, across: tractor ? 5.8 : 5.4, halo: tractor ? 9.5 : 8.2 };
+}
+function screenDistToSeg(px, py, a, b) {
+  const abx = b[0] - a[0], aby = b[1] - a[1];
+  const den = abx * abx + aby * aby || 1;
+  const t = Math.max(0, Math.min(1, ((px - a[0]) * abx + (py - a[1]) * aby) / den));
+  return Math.hypot(px - (a[0] + abx * t), py - (a[1] + aby * t));
+}
 function pickRigScreen(cx, cy) {
   let best = null;
-  let bd = 42;
+  let bd = Infinity;
   for (const r of rigs) {
-    const s = project(r.x, 3, r.z);
-    if (!s) continue;
-    const dist = Math.hypot(s[0] - cx, s[1] - cy);
-    if (dist < bd) { bd = dist; best = r; }
+    const body = rigBody(r);
+    const ang = r.ang || 0;
+    const fx = Math.cos(ang), fz = Math.sin(ang);
+    const mid = project(r.x, 1.6, r.z);
+    if (!mid) continue;
+    const side = project(r.x - fz * body.across, 1.6, r.z + fx * body.across);
+    const nose = project(r.x + fx * body.along, 1.6, r.z + fz * body.along);
+    const tail = project(r.x - fx * body.along, 1.6, r.z - fz * body.along);
+    const rad = side ? Math.max(56, Math.hypot(side[0] - mid[0], side[1] - mid[1])) : 72;
+    const dist = nose && tail ? screenDistToSeg(cx, cy, tail, nose) : Math.hypot(mid[0] - cx, mid[1] - cy);
+    if (dist <= rad && dist < bd) { bd = dist; best = r; }
   }
   return best;
 }
@@ -2034,8 +2075,6 @@ function onRightClick(cx, cy) {
 function zoomClamp(d) { return Math.max(22, Math.min(8000, d)); }
 function applyZoom(factor) {
   const zoomIn = factor < 0.999;
-  const zoomOut = factor > 1.001;
-  if (camLock && zoomOut) exitToDefault();
   const focus = selectionKind() ? focusOf() : null;
   if (zoomIn && focus && !sameLock(focus)) beginLock(focus);
   if (camLock && lockTraveling()) {
@@ -2273,15 +2312,21 @@ addEventListener('pointerup', e => {
     const moved = Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) >= 6;
     $('marquee').classList.remove('on');
     if (!moved) {
-      const p = pickFlat(drag.x0, drag.y0);
-      const f = p ? fieldAtWorld(p.x, p.z) : null;
-      if (f?.owned && drag.shift) {
-        if (pickedFields.has(f.idx)) pickedFields.delete(f.idx);
-        else pickedFields.add(f.idx);
-        selectField(f, '');
-        paintSheet();
-      } else if (f?.owned) applyFieldPick([f], false);
-      else if (!drag.shift) { pickedFields.clear(); selectField(null); paintSheet(); }
+      const rig = mode !== 'scheme' ? pickRigScreen(drag.x0, drag.y0) : null;
+      if (rig && selectionKind() !== 'field') {
+        if (drag.shift) toggleRig(rig);
+        else selectOnlyRig(rig, false);
+      } else if (selectionKind() !== 'rig') {
+        const p = pickFlat(drag.x0, drag.y0);
+        const f = p ? fieldAtWorld(p.x, p.z) : null;
+        if (f?.owned && drag.shift) {
+          if (pickedFields.has(f.idx)) pickedFields.delete(f.idx);
+          else pickedFields.add(f.idx);
+          selectField(f, '');
+          paintSheet();
+        } else if (f?.owned) applyFieldPick([f], false);
+        else if (!drag.shift) { pickedFields.clear(); selectField(null); paintSheet(); }
+      }
     } else {
       const left = Math.min(drag.x0, e.clientX), right = Math.max(drag.x0, e.clientX);
       const top = Math.min(drag.y0, e.clientY), bot = Math.max(drag.y0, e.clientY);
@@ -2398,7 +2443,8 @@ gtao.updateGtaoMaterial({ radius: 6, distanceExponent: 1.5, thickness: 2, scale:
 gtao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 6, rings: 2, samples: 12 });
 gtao.blendIntensity = 1.0;
 composer.addPass(gtao);
-const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth / 2, innerHeight / 2), 0.42, 0.6, 2.2); composer.addPass(bloom);
+const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.42, 0.6, 2.2); composer.addPass(bloom);
+bloom.highPassUniforms.smoothWidth.value = 0.9;
 const tiltH = new ShaderPass(HorizontalTiltShiftShader), tiltV = new ShaderPass(VerticalTiltShiftShader);
 tiltH.uniforms.r.value = tiltV.uniforms.r.value = 0.5; composer.addPass(tiltH); composer.addPass(tiltV);
 composer.addPass(new OutputPass());
@@ -2902,20 +2948,19 @@ function fillDeckLabels(want, d) {
 }
 let pickSig = '';
 function paintPickEdges() {
-  const on = mode === 'scheme' && viewLayer === 'surface' && pickedFields.size > 0;
-  edgeMesh.visible = on;
-  if (!on) {
+  const list = viewLayer === 'surface' ? ownedFields() : [];
+  edgeMesh.visible = list.length > 0;
+  if (!list.length) {
     if (edgeMesh.count) edgeMesh.count = 0;
     pickSig = '';
     return;
   }
-  const sig = [...pickedFields].join(',');
+  const sig = list.map(f => f.idx).join(',');
   if (sig === pickSig) return;
   pickSig = sig;
-  const w = 1.15, y = 0.38, h = 0.28, inset = 2.2;
+  const w = 0.62, y = 0.5, h = 0.16, inset = 1.2;
   let n = 0;
-  for (const idx of pickedFields) {
-    const f = fields[idx];
+  for (const f of list) {
     if (!f || n + 4 > edgeMesh.instanceMatrix.count) continue;
     const x0 = f.x0, z0 = f.z0, x1 = x0 + L.FIELD, z1 = z0 + L.FIELD;
     const mx = (x0 + x1) / 2, mz = (z0 + z1) / 2;
@@ -2932,10 +2977,26 @@ function paintPickEdges() {
   edgeMesh.count = n;
   edgeMesh.instanceMatrix.needsUpdate = true;
 }
+function paintRigMarks() {
+  const show = viewLayer === 'surface' && pickedRigs.size > 0;
+  selRing.visible = show;
+  if (!show) { selRing.count = 0; return; }
+  let n = 0;
+  for (const id of pickedRigs) {
+    const r = rigs.find(item => item.id === id);
+    if (!r || n >= selRing.instanceMatrix.count) continue;
+    const rad = rigBody(r).halo;
+    tmpM.compose(tmpP.set(r.x, 0.55, r.z), tmpQ.identity(), tmpS.set(rad, 1, rad));
+    selRing.setMatrixAt(n++, tmpM);
+  }
+  selRing.count = n;
+  selRing.instanceMatrix.needsUpdate = true;
+}
 function paintPicks() {
   const host = $('picks');
   if (host && host.childElementCount) host.innerHTML = '';
   paintPickEdges();
+  paintRigMarks();
 }
 function updateLabels(d) {
   const want = [];
@@ -3718,7 +3779,17 @@ function frame(now) {
   if (insideDeck) scene.fog.density *= 0.38;
   // 阴影相机跟随视野
   const sz = Math.min(1800, Math.max(70, d * 1.15));
-  sun.target.position.set(camS.x, 0, camS.z); sun.position.copy(sun.target.position).addScaledVector(sunDir, Math.max(800, sz * 2));
+  shRight.crossVectors(sunDir, UP);
+  if (shRight.lengthSq() < 1e-8) shRight.set(1, 0, 0);
+  shRight.normalize();
+  shUp.crossVectors(shRight, sunDir).normalize();
+  const texel = (sz * 2) / sun.shadow.mapSize.x;
+  shAim.set(camS.x, 0, camS.z);
+  const sox = shAim.dot(shRight), soy = shAim.dot(shUp);
+  shAim.addScaledVector(shRight, Math.round(sox / texel) * texel - sox);
+  shAim.addScaledVector(shUp, Math.round(soy / texel) * texel - soy);
+  sun.target.position.copy(shAim);
+  sun.position.copy(shAim).addScaledVector(sunDir, Math.max(800, sz * 2));
   Object.assign(sun.shadow.camera, { left: -sz, right: sz, top: sz, bottom: -sz, near: 1, far: Math.max(1600, sz * 4) }); sun.shadow.camera.updateProjectionMatrix();
   // 细节层级（LOD）：
   // 轨道 (>1800)：田块色块 + 网格 + 图标 + 网络线 + 信号点
@@ -3837,7 +3908,6 @@ function frame(now) {
     deckHover = hp ? cellAt(hp.x, hp.z) : null;
   } else if (!hoverPtr || drag) deckHover = null;
   if (viewLayer !== 'surface' && deckHover) { U.uSelOn.value = 1; U.uSel.value.set(deckHover.x0, deckHover.x1, deckHover.z0, deckHover.z1); }
-  else if (viewLayer === 'surface' && selected && selected.crop >= 0) { U.uSelOn.value = 1; U.uSel.value.set(selected.x0, selected.x0 + L.FIELD, selected.z0, selected.z0 + L.FIELD); }
   else U.uSelOn.value = 0;
   if ((viewLayer === 'grow' || cut.on) && tankPos.length) {
     let reach = 0;
@@ -3922,7 +3992,7 @@ if (SHOWFPS) document.body.classList.add('showfps');
 window.__scene = scene;
 if (Q.has('nohud')) document.body.classList.add('nohud');
 requestAnimationFrame(frame);
-addEventListener('resize', () => { cam.aspect = innerWidth / innerHeight; cam.updateProjectionMatrix(); R.setSize(innerWidth, innerHeight); composer.setSize(innerWidth, innerHeight); gtao.setSize(innerWidth, innerHeight); });
+addEventListener('resize', () => { cam.aspect = innerWidth / innerHeight; cam.updateProjectionMatrix(); emisPx.set(innerWidth, innerHeight); R.setSize(innerWidth, innerHeight); composer.setSize(innerWidth, innerHeight); gtao.setSize(innerWidth, innerHeight); });
 window.__farm = {
   economy, stores, focus, fields, harvesters, rigs, log, CROPS, PLOT, quote, fieldAtWorld, project, pick: pickFlat,
   warehouse, buildings, sellLot, placeBuilding, removeBuilding, buySeed, buyItem, buyMachine, resetGame, shop: SHOP, machines: MACHINE_SHOP,
