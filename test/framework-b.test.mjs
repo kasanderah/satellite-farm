@@ -5,7 +5,7 @@ import {
   GROW_DAYS, GROW_SECONDS, HUB_PLOT, plotAddress, lookG, fieldShader, hitchStub, workSweepLook,
   stageDisplayStops, stageTint, stageShadeG, growthAge, BRUSH_FADE_DAYS,
   maturityPercent, harvestAllowed, qualityNow, harvestWindow,
-  createFarm, addField, addMachine, mountHitch, chooseMachine, requestPrep, requestPlant, stepFarm, fieldWork, describeField,
+  createFarm, addField, addMachine, mountHitch, chooseMachine, requestPrep, requestPlant, setNextCrop, stepFarm, fieldWork, describeField,
   installPlayerMachine,
 } from '../src/framework-b.js';
 import { installShippedLastika } from '../src/lastika-stage.js';
@@ -591,7 +591,7 @@ test('种着的地可以整地清掉', () => {
   assert.equal(field.ground, 'general');
   assert.equal(field.look, 'general');
   const view = describeField(farm, 'a');
-  assert.deepEqual(view.actions.map(act => act.id), ['prep', 'plant']);
+  assert.deepEqual(view.actions.map(act => act.id), ['prep', 'plant', 'next']);
 });
 
 test('农机巡航沿田路折线，不斜穿田块', () => {
@@ -772,8 +772,39 @@ test('没有能干活的机械时整地仍可点，并说明缺机；拖拉机�
   assert.equal(requestPrep(again, 'bare').ok, true);
 });
 
+test('下一轮计划在收拾后才下播种单，没有计划不自动种', () => {
+  const idle = slice();
+  requestPrep(idle, 'a');
+  until(idle, () => idle.fields.get('a').ground === 'general');
+  stepFarm(idle, DAY_SECONDS);
+  assert.equal(idle.fields.get('a').plant, null);
+  assert.equal(idle.queue.some(item => item.jobId === 'sow'), false);
+  assert.equal(fieldWork(idle, 'a'), null);
+  const noted = setNextCrop(idle, 'a', 'lastika');
+  assert.equal(noted.queued, true);
+  assert.equal(idle.fields.get('a').nextCrop, null);
+  assert.equal(idle.fields.get('a').plant.cropId, 'lastika');
+  assert.equal(fieldWork(idle, 'a').jobId, 'sow');
+
+  const farm = slice();
+  requestPrep(farm, 'a');
+  until(farm, () => farm.fields.get('a').ground === 'general');
+  requestPlant(farm, 'a');
+  const field = farm.fields.get('a');
+  until(farm, () => field.plant?.stageId === 'after', GROW_SECONDS + 30000, 30);
+  const planted = field.plant;
+  const plan = setNextCrop(farm, 'a', 'lastika');
+  assert.equal(plan.queued, false);
+  assert.equal(plan.waiting, true);
+  assert.equal(field.nextCrop, 'lastika');
+  assert.equal(field.plant, planted);
+  until(farm, () => field.plant && field.plant !== planted && field.plant.cropId === 'lastika', 20000, 30);
+  assert.equal(field.nextCrop, null);
+  assert.equal(fieldWork(farm, 'a')?.jobId === 'sow' || field.plant.stageId === 'seedling' || field.look === 'sown', true);
+});
+
 test('拉斯提卡阶段和版本戳来自同一份定义', () => {
-  assert.equal(HUD_VERSION, '环穗 v6.17');
+  assert.equal(HUD_VERSION, '环穗 v6.18');
   const doc = parseFieldStageDoc(structuredClone(lastikaRaw));
   const windows = jobWindows(doc, alignFieldCalendar(doc)).filter(item => item.op.kind === 'optional');
   assert.deepEqual(windows.map(item => item.op.id), ['topdress', 'hill']);

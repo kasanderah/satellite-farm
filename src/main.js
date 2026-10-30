@@ -24,7 +24,7 @@ import { surfaceKits, hitchOffset } from './surface-kits.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CULT_EMPTY } from './lab-catalog.js';
 import { makeColony } from './colony-art.js';
-import { bootSlice, tickSlice, prepField, plantCrop, dockOf, dropDrive, adoptBought } from './b-bind.js';
+import { bootSlice, tickSlice, prepField, plantCrop, planNext, dockOf, dropDrive, adoptBought } from './b-bind.js';
 import { PLANT_CROPS, PREP_RECIPES, JOBS, stageDisplayStops } from './framework-b.js';
 import { HUD_VERSION } from './version.js';
 import { DAY_SECONDS } from './world-clock.js';
@@ -2306,6 +2306,17 @@ function doPlant() {
   updateDock();
   return r;
 }
+function doNext() {
+  if (!selected?.owned) { toast('不能定下一轮'); return { ok: false, reason: 'plot' }; }
+  const current = dockOf(selected)?.nextCrop;
+  const r = planNext(selected, current ? null : 'lastika');
+  if (!r.ok) { toast(plantWhy(r.reason)); return r; }
+  if (r.cleared) toast('已取消下一轮');
+  else if (r.reason === 'machine') toast('缺少可执行任务的机械');
+  else toast(r.queued ? '下一轮 · 拉斯提卡 · 播种' : '下一轮 · 拉斯提卡');
+  updateDock();
+  return r;
+}
 function closePlanMenu() {
   const menu = $('planmenu');
   if (!menu) return;
@@ -2352,6 +2363,7 @@ document.getElementById('planmenu').addEventListener('click', e => {
   closePlanMenu();
   if (ctx.dataset.ctx === 'prep') { for (const f of ownedFields()) { selected = f; doPrep(); } }
   else if (ctx.dataset.ctx === 'plant') { for (const f of ownedFields()) { selected = f; doPlant(); } }
+  else if (ctx.dataset.ctx === 'next') { for (const f of ownedFields()) { selected = f; doNext(); } }
   else if (ctx.dataset.ctx === 'follow') enterLock();
   else if (ctx.dataset.ctx === 'sell') sellCurrentRig();
   else if (ctx.dataset.ctx === 'clear') exitToDefault();
@@ -3413,10 +3425,11 @@ function updateDock() {
     if (rigOnly) sum.textContent = rigLine(selectedRig);
     else if (many) sum.textContent = '操作取这些田都能做的';
     else if (!f?.owned) sum.textContent = selNote || '邻区快照 · 只读';
-    else if (!desc?.crop) sum.textContent = desc?.stat || '未整地';
+    else if (!desc?.crop) sum.innerHTML = `${desc?.stat || '未整地'}<br><span>${desc?.nextName ? `下一轮 ${desc.nextName}` : '下一轮 未定'}</span>`;
     else {
       const quality = desc.quality == null ? '—' : desc.quality;
-      sum.innerHTML = `<b>${desc.crop}</b> · ${desc.stageName || '播种'} · ${(desc.age || 0).toFixed(1)} / ${desc.cycle || 0} 世界日<br><span>成熟度 ${Math.round(desc.maturity || 0)}% · 产量值 ${desc.yieldValue ?? '—'} · 品质值 ${quality}</span>`;
+      const next = desc.nextName ? `下一轮 ${desc.nextName}` : '下一轮 未定';
+      sum.innerHTML = `<b>${desc.crop}</b> · ${desc.stageName || '播种'} · ${(desc.age || 0).toFixed(1)} / ${desc.cycle || 0} 世界日<br><span>成熟度 ${Math.round(desc.maturity || 0)}% · 产量值 ${desc.yieldValue ?? '—'} · 品质值 ${quality} · ${next}</span>`;
     }
   }
   const jobsHost = $('dock-jobs');
@@ -3437,7 +3450,7 @@ function updateDock() {
         { id: 'sell', name: rigIsWorking(selectedRig) ? '出售（作业中）' : '出售', enabled: !rigIsWorking(selectedRig) },
       ]
       : (shared || desc?.actions || []);
-    const sig = actions.map(act => `${act.id}:${act.enabled ? 1 : 0}`).join('|');
+    const sig = actions.map(act => `${act.id}:${act.name}:${act.enabled ? 1 : 0}`).join('|');
     ops.style.gridTemplateColumns = `repeat(${Math.max(actions.length, 1)}, minmax(0, 1fr))`;
     if (sig !== dockOpsSig) {
       dockOpsSig = sig;
@@ -3540,6 +3553,7 @@ $('dock').addEventListener('pointerdown', (e) => {
   e.stopPropagation();
   if (btn.dataset.act === 'prep') { for (const field of ownedFields()) { selected = field; doPrep(); } }
   else if (btn.dataset.act === 'plant') { for (const field of ownedFields()) { selected = field; doPlant(); } }
+  else if (btn.dataset.act === 'next') { for (const field of ownedFields()) { selected = field; doNext(); } }
   else if (btn.dataset.act === 'follow') enterLock();
   else if (btn.dataset.act === 'sell') sellCurrentRig();
 });

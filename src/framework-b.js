@@ -460,15 +460,22 @@ export function requestPrep(farm, fieldId, recipeId = 'clear_general') {
   return { ok: true, queued: true, jobId: job.id };
 }
 
-export function requestPlant(farm, fieldId, cropId = 'lastika') {
-  const field = farm.fields.get(fieldId);
-  const crop = PLANT_CROPS[cropId];
+function planReady(farm, field, crop) {
+  if (!field || !crop || field.plant || field.prep || field.lock) return false;
+  if (queued(farm, field.id)) return false;
+  if (farm.orders.some(order => order.fieldId === field.id)) return false;
+  return crop.grounds.includes(field.ground);
+}
+
+// 种植计划层：只在已整好、或尾阶段收拾后的就绪空地上，把下一轮作物写成播种工单。
+function issuePlant(farm, field, crop) {
   if (!field || !crop) return { ok: false, reason: 'crop' };
   if (field.plant) return { ok: false, reason: 'busy' };
   if (fieldLocked(farm, field)) return { ok: false, reason: 'lock' };
   if (!crop.grounds.includes(field.ground)) return { ok: false, reason: 'ground' };
-  const sowJob = JOBS[crop.graph.entry.job];
-  if (capableCount(farm, sowJob.caps) < 1) return { ok: false, reason: 'machine' };
+  const job = JOBS[crop.graph.entry.job];
+  if (!job) return { ok: false, reason: 'crop' };
+  if (capableCount(farm, job.caps) < 1) return { ok: false, reason: 'machine' };
   field.plant = {
     cropId: crop.id,
     index: 0,
@@ -478,11 +485,52 @@ export function requestPlant(farm, fieldId, cropId = 'lastika') {
     clock: false,
     yieldMul: 1,
   };
-  const job = JOBS[crop.graph.entry.job];
-  farm.queue.push({ id: farm.seq++, fieldId, jobId: job.id, caps: job.caps.slice(), lane: 'plant' });
-  pushEvent(farm, { type: 'request', lane: 'plant', fieldId, cropId: crop.id, jobId: job.id });
+  if (field.nextCrop === crop.id) field.nextCrop = null;
+  farm.queue.push({ id: farm.seq++, fieldId: field.id, jobId: job.id, caps: job.caps.slice(), lane: 'plant' });
+  pushEvent(farm, { type: 'request', lane: 'plant', fieldId: field.id, cropId: crop.id, jobId: job.id });
   dispatch(farm);
   return { ok: true, queued: true, jobId: job.id };
+}
+
+function applyPlans(farm) {
+  const issued = [];
+  for (const field of farm.fields.values()) {
+    const crop = PLANT_CROPS[field.nextCrop];
+    if (!crop || !planReady(farm, field, crop)) continue;
+    const result = issuePlant(farm, field, crop);
+    if (result.ok) issued.push(field.id);
+  }
+  return issued;
+}
+
+export function setNextCrop(farm, fieldId, cropId) {
+  const field = farm.fields.get(fieldId);
+  if (!field) return { ok: false, reason: 'field' };
+  if (cropId == null || cropId === '') {
+    field.nextCrop = null;
+    return { ok: true, cleared: true };
+  }
+  const crop = PLANT_CROPS[cropId];
+  if (!crop) return { ok: false, reason: 'crop' };
+  field.nextCrop = crop.id;
+  pushEvent(farm, { type: 'plan', fieldId, cropId: crop.id });
+  const issued = applyPlans(farm);
+  const queued = issued.includes(field.id);
+  const waiting = !queued && !!field.nextCrop;
+  return {
+    ok: true,
+    cropId: crop.id,
+    queued,
+    waiting,
+    reason: waiting && planReady(farm, field, crop) ? 'machine' : null,
+  };
+}
+
+export function requestPlant(farm, fieldId, cropId = 'lastika') {
+  const field = farm.fields.get(fieldId);
+  const crop = PLANT_CROPS[cropId];
+  if (!field || !crop) return { ok: false, reason: 'crop' };
+  return issuePlant(farm, field, crop);
 }
 
 function hitchOf(farm, machine) {
@@ -556,6 +604,7 @@ export function chooseMachine(farm, caps, travelOf = null) {
 }
 
 function dispatch(farm, env = null) {
+  // 调度只派队列里已有的工单，不决定下一种什么。下一轮作物由种植计划写成播种工单后再进这里。
   // 队列只放各田的下一刀。每轮按能做的机越少越先配，不再按入队先后挑车。
   const live = [];
   for (const item of farm.queue) {
@@ -1154,6 +1203,7 @@ export function stepFarm(farm, dt, env = null) {
   fadeStage(farm, dt);
   let left = dt;
   for (let guard = 0; guard < 48 && left > 1e-6; guard++) {
+    applyPlans(farm);
     touchSoft(farm);
     queueSoft(farm);
     openHard(farm);
@@ -1216,6 +1266,7 @@ export function stepFarm(farm, dt, env = null) {
     }
     finishGrowth(farm);
   }
+  applyPlans(farm);
   touchSoft(farm);
   queueSoft(farm);
   openHard(farm);
@@ -1360,8 +1411,10 @@ export function describeField(farm, fieldId) {
   const yieldValue = crop ? Math.round((crop.yieldBase || 0) * (field.plant?.yieldMul || 1)) : 0;
   const quality = crop && field.plant ? qualityNow(crop, field) : null;
   const locked = fieldLocked(farm, field);
+  const next = field.nextCrop ? PLANT_CROPS[field.nextCrop] : null;
   const actions = [{ id: 'prep', name: '整地', enabled: !locked }];
   if (!field.plant && field.ground === 'general') actions.push({ id: 'plant', name: '种植', enabled: !locked });
+  actions.push({ id: 'next', name: next ? '取消下一轮' : '下一轮', enabled: true });
   const chips = barStages.map(item => ({ name: item.name, on: item.on }));
   const bar = work ? work.progress : (field.plant?.clock && field.plant.need ? field.plant.grow / field.plant.need : 0);
   return {
@@ -1388,5 +1441,7 @@ export function describeField(farm, fieldId) {
     canPrep: !locked && (field.ground !== 'general' || !!field.plant),
     canPlant: !field.plant && !locked && field.ground === 'general',
     crop: crop ? crop.name : null,
+    nextCrop: next?.id || null,
+    nextName: next?.name || null,
   };
 }

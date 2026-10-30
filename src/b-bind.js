@@ -1,7 +1,7 @@
 // 把框架 B 接到环面上的一块田。旧的垄扫不读这里的工单。
 import {
   OMNI, TRACTOR, PLOW, JOBS, TURN_SECONDS, createFarm, addField, addMachine, mountHitch,
-  requestPrep, requestPlant, stepFarm, describeField, plotAddress, growthAge, workSweepLook, PLANT_CROPS,
+  requestPrep, requestPlant, setNextCrop, stepFarm, describeField, plotAddress, growthAge, workSweepLook, PLANT_CROPS,
   cycleDays, installPlayerMachine, removePlayerMachine,
 } from './framework-b.js';
 import { roadRoute } from './_shared.js';
@@ -379,6 +379,11 @@ export function prepField(f, recipeId = 'clear_general') {
 export function plantCrop(f) {
   if (!farm || !f) return { ok: false, reason: 'field' };
   return requestPlant(farm, fieldKey(f), 'lastika');
+}
+
+export function planNext(f, cropId) {
+  if (!farm || !f) return { ok: false, reason: 'field' };
+  return setNextCrop(farm, fieldKey(f), cropId);
 }
 
 export function dockOf(f) {
