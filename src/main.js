@@ -1308,11 +1308,6 @@ edgeMesh.name = 'sel-edge';
 edgeMesh.count = 0; edgeMesh.frustumCulled = false; edgeMesh.castShadow = false; edgeMesh.receiveShadow = false;
 edgeMesh.renderOrder = 3;
 scene.add(edgeMesh);
-const selLock = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), edgeMat, 256);
-selLock.name = 'sel-lock';
-selLock.count = 0; selLock.frustumCulled = false; selLock.castShadow = false; selLock.receiveShadow = false;
-selLock.renderOrder = 4;
-scene.add(selLock);
 const buildingSets = {
   warehouse: instanced(warehouseKit(), 8),
   garage: instanced(garageKit(), 8),
@@ -1890,7 +1885,6 @@ function applyDeckView() {
   setShown(boomSet, !on);
   setShown(workDroneMesh, !on);
   setShown(edgeMesh, !on);
-  setShown(selLock, !on);
   if (netMesh) netMesh.visible = !on;
   icons.visible = !on;
   deckSlabs.visible = !on && !!cut.on;
@@ -3019,43 +3013,71 @@ function paintPickEdges() {
   edgeMesh.count = n;
   edgeMesh.instanceMatrix.needsUpdate = true;
 }
-function paintRigMarks() {
-  const show = viewLayer === 'surface' && pickedRigs.size > 0;
-  selLock.visible = show;
-  if (!show) { selLock.count = 0; return; }
-  let n = 0;
-  const y = 0.9;
-  const th = 0.14;
-  const hh = 0.1;
-  for (const id of pickedRigs) {
-    const r = rigs.find(item => item.id === id);
-    if (!r || n + 4 > selLock.instanceMatrix.count) continue;
-    const tractor = r.kind === 'tractor' || !!r.impl;
-    const hx = tractor ? 7.2 : 4.6;
-    const hz = tractor ? 2.6 : 3.4;
-    const ang = r.ang || 0;
-    const c = Math.cos(ang);
-    const s = Math.sin(ang);
-    const q = tmpQ.setFromAxisAngle(UP, ang);
-    const place = (lx, lz, w, d) => {
-      const x = r.x + lx * c - lz * s;
-      const z = r.z + lx * s + lz * c;
-      tmpM.compose(tmpP.set(x, y, z), q, tmpS.set(w, hh, d));
-      selLock.setMatrixAt(n++, tmpM);
-    };
-    place(0, hz, hx * 2, th);
-    place(0, -hz, hx * 2, th);
-    place(hx, 0, th, hz * 2);
-    place(-hx, 0, th, hz * 2);
+function rigScreenBox(r) {
+  const tractor = r.kind === 'tractor' || !!r.impl;
+  const hx = tractor ? 6.4 : 3.6;
+  const hz = tractor ? 2.3 : 3.5;
+  const top = 2.2;
+  const ang = -(r.ang || 0);
+  const c = Math.cos(ang);
+  const s = Math.sin(ang);
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  let any = false;
+  for (const lx of [-hx, hx]) for (const lz of [-hz, hz]) for (const y of [0.4, top]) {
+    const x = r.x + lx * c - lz * s;
+    const z = r.z + lx * s + lz * c;
+    const p = project(x, y, z);
+    if (!p) continue;
+    any = true;
+    minX = Math.min(minX, p[0]);
+    maxX = Math.max(maxX, p[0]);
+    minY = Math.min(minY, p[1]);
+    maxY = Math.max(maxY, p[1]);
   }
-  selLock.count = n;
-  selLock.instanceMatrix.needsUpdate = true;
+  if (!any || maxX < 0 || maxY < 0 || minX > innerWidth || minY > innerHeight) return null;
+  const pad = 3;
+  return {
+    x: minX - pad,
+    y: minY - pad,
+    w: Math.max(12, maxX - minX + pad * 2),
+    h: Math.max(12, maxY - minY + pad * 2),
+  };
+}
+let rigHudSig = '';
+function paintRigHud() {
+  const host = $('machud');
+  if (!host) return;
+  const list = viewLayer === 'surface'
+    ? [...pickedRigs].map(id => rigs.find(r => r.id === id)).filter(Boolean)
+    : [];
+  const sig = list.map(r => r.id).join(',');
+  if (sig !== rigHudSig) {
+    rigHudSig = sig;
+    host.innerHTML = list.map(r => `<div class="lock" data-rig="${r.id}"><b class="tag"></b></div>`).join('');
+  }
+  for (const r of list) {
+    const el = host.querySelector(`[data-rig="${r.id}"]`);
+    if (!el) continue;
+    const name = r.label || '农机';
+    const tag = el.querySelector('.tag');
+    if (tag && tag.textContent !== name) tag.textContent = name;
+    const box = rigScreenBox(r);
+    if (!box) { el.style.display = 'none'; continue; }
+    el.style.display = 'block';
+    el.style.left = box.x.toFixed(1) + 'px';
+    el.style.top = box.y.toFixed(1) + 'px';
+    el.style.width = box.w.toFixed(1) + 'px';
+    el.style.height = box.h.toFixed(1) + 'px';
+  }
 }
 function paintPicks() {
   const host = $('picks');
   if (host && host.childElementCount) host.innerHTML = '';
   paintPickEdges();
-  paintRigMarks();
+  paintRigHud();
 }
 function updateLabels(d) {
   const want = [];
@@ -3265,14 +3287,25 @@ function paintStageBar(desc) {
       const arrow = s.infinite ? `<i class="arrow" style="color:${s.color}"></i>` : '';
       return `<i class="seg${s.on ? ' on' : ''}" data-stage="${s.id}" style="flex:${flex} 1 0;background:${s.color}">${wins}${arrow}</i>`;
     }).join('');
-    const finitePct = (cycle / total) * 100;
-    const fullPct = (desc && PLANT_CROPS.lastika.maturity ? (PLANT_CROPS.lastika.maturity.fullAt / cycle) : (10 / cycle)) * finitePct;
-    host.innerHTML = `<div class="names">${names}</div><div class="track">${segs}<i class="cursor"></i></div><div class="mature"><i style="left:0;width:${fullPct.toFixed(2)}%;background:linear-gradient(90deg,#51542c,#787c32)"></i><i style="left:${fullPct.toFixed(2)}%;width:${(finitePct - fullPct).toFixed(2)}%;background:#d8c36a"></i></div>`;
+    host.innerHTML = `<div class="names">${names}</div><div class="track">${segs}<i class="cursor"></i></div><div class="mature"><i class="zone rose"></i><i class="zone blue"></i><i class="fill rose"></i><i class="fill blue"></i></div>`;
   }
   const cursor = host.querySelector('.cursor');
   if (cursor) {
     const age = Math.max(0, Math.min(desc.age || 0, cycle));
     cursor.style.left = `${(age / total) * 100}%`;
+  }
+  const mature = host.querySelector('.mature');
+  if (mature) {
+    const m = desc?.maturity;
+    mature.hidden = m == null;
+    if (m != null) {
+      const rose = Math.min(Math.max(m, 0), 100) / 120 * 100;
+      const blue = Math.max(0, m - 100) / 120 * 100;
+      const roseFill = mature.querySelector('.fill.rose');
+      const blueFill = mature.querySelector('.fill.blue');
+      if (roseFill) roseFill.style.width = rose.toFixed(2) + '%';
+      if (blueFill) blueFill.style.width = blue.toFixed(2) + '%';
+    }
   }
 }
 function updateDock() {

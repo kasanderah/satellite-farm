@@ -4,6 +4,7 @@ import {
   CAPABILITIES, GROUNDS, JOBS, PREP_RECIPES, PLANT_CROPS, OMNI, TRACTOR, PLOW, MACHINE_CLASSES,
   GROW_DAYS, GROW_SECONDS, HUB_PLOT, plotAddress, lookG, fieldShader, hitchStub, workSweepLook,
   stageDisplayStops, stageTint, stageShadeG, growthAge, BRUSH_FADE_DAYS,
+  maturityPercent, harvestAllowed, qualityAtHarvest,
   createFarm, addField, addMachine, mountHitch, chooseMachine, requestPrep, requestPlant, stepFarm, fieldWork, describeField,
 } from '../src/framework-b.js';
 import { installShippedLastika } from '../src/lastika-stage.js';
@@ -236,6 +237,39 @@ test('软刷色打开时做完留残留并淡出，阶段色不被换掉', () =>
   } finally {
     JOBS.topdress.brush.enabled = false;
   }
+});
+
+test('成熟度随世界日涨，追肥加倍产量，超过 120% 不能收', () => {
+  const crop = PLANT_CROPS.lastika;
+  assert.equal(Math.round(maturityPercent(crop, 0)), 0);
+  assert.equal(Math.round(maturityPercent(crop, 10)), 100);
+  assert.equal(Math.round(maturityPercent(crop, 12)), 120);
+  assert.ok(maturityPercent(crop, 12.5) > 120);
+  assert.equal(harvestAllowed(crop, 12), true);
+  assert.equal(harvestAllowed(crop, 12.5), false);
+  assert.equal(qualityAtHarvest(crop, 11), 3);
+  const farm = slice();
+  requestPrep(farm, 'a');
+  until(farm, () => farm.fields.get('a').ground === 'general');
+  requestPlant(farm, 'a');
+  const field = farm.fields.get('a');
+  until(farm, () => field.plant?.stageId === 'seedling');
+  const young = describeField(farm, 'a');
+  assert.ok(young.maturity < 20);
+  assert.equal(young.yieldValue, 100);
+  assert.equal(young.quality, null);
+  until(farm, () => field.plant?.soft?.topdress?.status === '执行完', GROW_SECONDS, DAY_SECONDS);
+  const fed = describeField(farm, 'a');
+  assert.equal(fed.yieldValue, 200);
+  assert.ok(fed.maturity > young.maturity);
+  until(farm, () => field.plant?.stageId === 'after', 20000, 1);
+  const done = describeField(farm, 'a');
+  assert.equal(done.quality, 3);
+  assert.equal(done.showMaturity, true);
+  field.plant.stageId = 'rot';
+  const rot = describeField(farm, 'a');
+  assert.equal(rot.maturity, null);
+  assert.equal(rot.showMaturity, false);
 });
 
 test('调度优先更快的自走一体机，拖挂单独派不出去', () => {
@@ -599,7 +633,7 @@ test('错过成熟窗进腐烂，没有农机开工就不会收', () => {
 });
 
 test('拉斯提卡阶段和版本戳来自同一份定义', () => {
-  assert.equal(HUD_VERSION, '环穗 v6.13');
+  assert.equal(HUD_VERSION, '环穗 v6.14');
   const doc = parseFieldStageDoc(structuredClone(lastikaRaw));
   const windows = jobWindows(doc, alignFieldCalendar(doc)).filter(item => item.op.kind === 'optional');
   assert.deepEqual(windows.map(item => item.op.id), ['topdress', 'hill']);

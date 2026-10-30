@@ -187,8 +187,16 @@ body.underground #dock{display:none}
 #stagebar .win.hard{background:#c4503a}
 #stagebar .arrow{position:absolute;right:-7px;top:-2px;border-top:10px solid transparent;border-bottom:10px solid transparent;border-left:8px solid currentColor}
 #stagebar .cursor{position:absolute;top:0;bottom:0;width:1px;margin-left:-0.5px;background:var(--fg);opacity:.8;pointer-events:none}
-#stagebar .mature{position:relative;height:4px;margin-top:3px}
+#stagebar .mature{position:relative;height:5px;margin-top:3px;background:rgba(232,216,208,.08)}
+#stagebar .mature[hidden]{display:none}
 #stagebar .mature i{position:absolute;top:0;bottom:0}
+#stagebar .mature .zone.rose{left:0;width:83.333%;background:rgba(196,75,138,.28)}
+#stagebar .mature .zone.blue{left:83.333%;right:0;background:rgba(30,58,138,.35)}
+#stagebar .mature .fill.rose{left:0;width:0;background:#c44b8a}
+#stagebar .mature .fill.blue{left:83.333%;width:0;background:#1e3a8a}
+#machud{position:fixed;inset:0;z-index:4;pointer-events:none}
+#machud .lock{position:absolute;box-sizing:border-box;border:1px solid #e15a4a}
+#machud .tag{position:absolute;left:50%;top:0;transform:translate(-50%, calc(-100% - 4px));background:rgba(10,12,20,.86);color:var(--fg);border:1px solid var(--line);font-weight:500;font-size:11px;letter-spacing:.08em;line-height:1.3;padding:1px 6px 2px;white-space:nowrap}
 #dock .ops{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px}
 #dock #selbtns,#dock #prepbtns{display:none}
 #dock.picking #selbtns,#dock.prepping #prepbtns{display:flex}
@@ -256,10 +264,11 @@ body.underground #dock{display:none}
 <div class="hud" id="suspend"></div>
 <div class="hud" id="hint">点一块田。整地先选田面，种植再选作物。底部工具再点一次，或按 Esc，收起菜单<br>拖动 平移 · 规划时拖框选田、右键指定作物 · 右键 旋转 · 滚轮 缩放 · C 培育层</div>
 <div id="picks"></div>
+<div id="machud"></div>
 <div id="marquee"></div>
 <div class="hud panel hit" id="planmenu"></div>
 <div id="viewer"><div class="bar"><div><h2>资产</h2><div class="sub">当前的薯田阶段、机器和田块。每张卡片是名字加上现在的样子。点一张就能指着它改。这是查看，不能上传。</div></div><button type="button" id="viewer-close">关闭</button></div><div class="sec">商品薯阶段</div><div class="grid" id="view-stages"></div><div class="sec">机器</div><div class="grid" id="view-machines"></div><div class="sec">田块</div><div class="grid" id="view-tiles"></div></div>
 <div class="hud" id="scale"><span id="scaletxt"></span><div id="scalebar"></div></div>
-<div class="hud" id="buildrev">环穗 v6.13</div>
+<div class="hud" id="buildrev">环穗 v6.14</div>
 <script>__BUNDLE__</script>
 </body></html>

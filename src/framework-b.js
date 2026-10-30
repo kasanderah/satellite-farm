@@ -720,9 +720,23 @@ export function maturityPercent(crop, age) {
   const spec = crop?.maturity || { fullAt: 10, maxHarvest: 120 };
   const fullAt = spec.fullAt > 0 ? spec.fullAt : 10;
   const max = spec.maxHarvest > 0 ? spec.maxHarvest : 120;
-  if (age <= fullAt) return (age / fullAt) * 100;
+  const day = Math.max(0, age || 0);
+  if (day <= fullAt) return (day / fullAt) * 100;
   const span = Math.max(1e-6, cycleDays(crop) - fullAt);
-  return Math.min(max, 100 + ((age - fullAt) / span) * (max - 100));
+  return 100 + ((day - fullAt) / span) * (max - 100);
+}
+
+export function harvestAllowed(crop, age) {
+  const max = crop?.maturity?.maxHarvest > 0 ? crop.maturity.maxHarvest : 120;
+  return maturityPercent(crop, age) <= max + 1e-6;
+}
+
+// 收获当时按成熟度落到离散档，之后不再跟着长。
+export function qualityAtHarvest(crop, age) {
+  const m = maturityPercent(crop, age);
+  if (m >= 110) return 3;
+  if (m >= 100) return 2;
+  return 1;
 }
 
 function windowOpen(spec, age) {
@@ -829,6 +843,9 @@ function finishOrder(farm, order) {
   }
   releaseOrder(farm, order);
   pushEvent(farm, { type: 'job-complete', fieldId: field?.id, jobId: job.id, look: job.look, lane: order.lane });
+  if (field?.plant && job?.id === 'harvest') {
+    field.plant.quality = qualityAtHarvest(cropOfPlant(field), growthAge(field));
+  }
   if (field) applyLook(field, job);
   if (field?.prep && order.lane === 'prep') {
     const recipe = PREP_RECIPES[field.prep.recipeId];
@@ -969,7 +986,7 @@ function openHard(farm) {
     const age = growthAge(field);
     const crop = cropOfPlant(field);
     const spec = hardSpecs(field).find(item => {
-      if (item.job === 'harvest' && maturityPercent(crop, age) > crop.maturity.maxHarvest + 1e-6) return false;
+      if (item.job === 'harvest' && !harvestAllowed(crop, age)) return false;
       return windowOpen(item, age);
     });
     if (!spec) continue;
@@ -1205,7 +1222,8 @@ export function describeField(farm, fieldId) {
       };
     }),
   }));
-  const maturity = crop ? maturityPercent(crop, Math.min(age, cycle)) : 0;
+  const rotten = stage?.role === 'rot';
+  const maturity = !crop || rotten ? null : maturityPercent(crop, Math.min(age, cycle || age));
   const yieldValue = crop ? Math.round((crop.yieldBase || 0) * (field.plant?.yieldMul || 1)) : 0;
   const locked = fieldLocked(farm, field);
   const actions = [{ id: 'prep', name: '整地', enabled: !locked }];
@@ -1228,7 +1246,8 @@ export function describeField(farm, fieldId) {
     cycle,
     maturity,
     yieldValue,
-    quality: crop ? crop.quality : null,
+    quality: field.plant?.quality ?? null,
+    showMaturity: maturity != null,
     stageName: stage?.name || '',
     barStages,
     actions,
