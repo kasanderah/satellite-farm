@@ -182,12 +182,11 @@ body.underground #dock{display:none}
 #stagebar .names b{font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #stagebar .track{position:relative;display:flex;height:16px;margin-top:3px;background:rgba(232,216,208,.08)}
 #stagebar .seg{position:relative;min-width:0;height:100%}
-#stagebar .seg.on{outline:1px solid rgba(232,216,208,.7);outline-offset:-1px}
 #stagebar .win{position:absolute;bottom:1px;height:3px;opacity:.95}
 #stagebar .win.soft{background:#7eb6d6}
 #stagebar .win.hard{background:#c4503a}
 #stagebar .arrow{position:absolute;right:-7px;top:-2px;border-top:10px solid transparent;border-bottom:10px solid transparent;border-left:8px solid currentColor}
-#stagebar .cursor{position:absolute;top:-5px;bottom:-7px;width:2px;background:#e8d8d0;pointer-events:none}
+#stagebar .cursor{position:absolute;top:0;bottom:0;width:1px;margin-left:-0.5px;background:var(--fg);opacity:.8;pointer-events:none}
 #stagebar .mature{position:relative;height:4px;margin-top:3px}
 #stagebar .mature i{position:absolute;top:0;bottom:0}
 #dock .ops{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px}
@@ -257,6 +256,6 @@ body.underground #dock{display:none}
 <div class="hud panel hit" id="planmenu"></div>
 <div id="viewer"><div class="bar"><div><h2>资产</h2><div class="sub">当前的薯田阶段、机器和田块。每张卡片是名字加上现在的样子。点一张就能指着它改。这是查看，不能上传。</div></div><button type="button" id="viewer-close">关闭</button></div><div class="sec">商品薯阶段</div><div class="grid" id="view-stages"></div><div class="sec">机器</div><div class="grid" id="view-machines"></div><div class="sec">田块</div><div class="grid" id="view-tiles"></div></div>
 <div class="hud" id="scale"><span id="scaletxt"></span><div id="scalebar"></div></div>
-<div class="hud" id="buildrev">环穗 v6.6</div>
+<div class="hud" id="buildrev">环穗 v6.7</div>
 <script>__BUNDLE__</script>
 </body></html>

@@ -270,13 +270,25 @@ function fieldLocked(farm, field) {
   return !!field.lock || queued(farm, field.id);
 }
 
+function clearCrop(farm, field) {
+  for (const order of [...farm.orders]) {
+    if (order.fieldId === field.id) releaseOrder(farm, order);
+  }
+  farm.queue = farm.queue.filter(item => item.fieldId !== field.id);
+  field.lock = null;
+  field.plant = null;
+  field.prep = null;
+  field.look = 'raw';
+}
+
 export function requestPrep(farm, fieldId, recipeId = 'clear_general') {
   const field = farm.fields.get(fieldId);
   const recipe = PREP_RECIPES[recipeId];
   if (!field || !recipe) return { ok: false, reason: 'field' };
-  if (field.plant) return { ok: false, reason: 'planting' };
+  const clearing = !!field.plant;
+  if (clearing) clearCrop(farm, field);
   if (fieldLocked(farm, field)) return { ok: false, reason: 'lock' };
-  if (field.ground === recipe.target) return { ok: true, skipped: true, ground: field.ground };
+  if (!clearing && field.ground === recipe.target) return { ok: true, skipped: true, ground: field.ground };
   field.prep = { recipeId: recipe.id, step: 0 };
   const job = JOBS[recipe.steps[0]];
   farm.queue.push({ id: farm.seq++, fieldId, jobId: job.id, caps: job.caps.slice(), lane: 'prep' });
@@ -1092,11 +1104,8 @@ export function describeField(farm, fieldId) {
   const maturity = crop ? maturityPercent(crop, Math.min(age, cycle)) : 0;
   const yieldValue = crop ? Math.round((crop.yieldBase || 0) * (field.plant?.yieldMul || 1)) : 0;
   const locked = fieldLocked(farm, field);
-  const actions = !field.plant
-    ? (field.ground === 'general'
-      ? [{ id: 'prep', name: '整地', enabled: !locked }, { id: 'plant', name: '种植', enabled: !locked }]
-      : [{ id: 'prep', name: '整地', enabled: !locked }])
-    : [{ id: 'prep', name: '整地', enabled: false }];
+  const actions = [{ id: 'prep', name: '整地', enabled: !locked }];
+  if (!field.plant && field.ground === 'general') actions.push({ id: 'plant', name: '种植', enabled: !locked });
   const chips = barStages.map(item => ({ name: item.name, on: item.on }));
   const bar = work ? work.progress : (field.plant?.clock && field.plant.need ? field.plant.grow / field.plant.need : 0);
   return {
@@ -1119,7 +1128,7 @@ export function describeField(farm, fieldId) {
     stageName: stage?.name || '',
     barStages,
     actions,
-    canPrep: !field.plant && !locked && field.ground !== 'general',
+    canPrep: !locked && (field.ground !== 'general' || !!field.plant),
     canPlant: !field.plant && !locked && field.ground === 'general',
     crop: crop ? crop.name : null,
   };

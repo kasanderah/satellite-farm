@@ -9,7 +9,7 @@ import { installShippedLastika } from '../src/lastika-stage.js';
 import { alignFieldCalendar, jobWindows, parseFieldStageDoc } from '../src/field-stages.js';
 import lastikaRaw from '../data/field-stages/lastika.json' with { type: 'json' };
 import { HUD_VERSION } from '../src/version.js';
-import { fieldVisual, CROPS } from '../src/_shared.js';
+import { fieldVisual, CROPS, roadRoute } from '../src/_shared.js';
 import { DAY_SECONDS, WORLD_MIN_PER_REAL_MIN } from '../src/world-clock.js';
 
 function slice() {
@@ -468,6 +468,36 @@ test('方案2：播种还在等一体机时犁地照样派拖拉机，一体机�
   assert.equal(chooseMachine(ties, ['犁田'], (id) => (id === 'far' ? 30 : 4)).id, 'near');
 });
 
+test('种着的地可以整地清掉', () => {
+  const farm = slice();
+  requestPrep(farm, 'a');
+  until(farm, () => farm.fields.get('a').ground === 'general');
+  requestPlant(farm, 'a');
+  const field = farm.fields.get('a');
+  until(farm, () => field.plant?.clock);
+  const again = requestPrep(farm, 'a');
+  assert.equal(again.ok, true);
+  assert.equal(again.queued, true);
+  assert.equal(field.plant, null);
+  assert.equal(field.look, 'raw');
+  assert.equal(fieldWork(farm, 'a')?.jobId, 'plow');
+  until(farm, () => fieldWork(farm, 'a') == null);
+  assert.equal(field.ground, 'general');
+  assert.equal(field.look, 'general');
+  const view = describeField(farm, 'a');
+  assert.deepEqual(view.actions.map(act => act.id), ['prep', 'plant']);
+});
+
+test('农机巡航沿田路折线，不斜穿田块', () => {
+  const path = roadRoute(0, 0, 500, 380);
+  assert.ok(path.length >= 2);
+  for (let i = 1; i < path.length; i++) {
+    const dx = Math.abs(path[i][0] - path[i - 1][0]);
+    const dz = Math.abs(path[i][1] - path[i - 1][1]);
+    assert.ok(dx < 1.2 || dz < 1.2);
+  }
+});
+
 test('生长钟按世界日走', () => {
   assert.equal(WORLD_MIN_PER_REAL_MIN, 120);
   assert.equal(DAY_SECONDS, 720);
@@ -511,7 +541,7 @@ test('错过成熟窗进腐烂，没有农机开工就不会收', () => {
 });
 
 test('拉斯提卡阶段和版本戳来自同一份定义', () => {
-  assert.equal(HUD_VERSION, '环穗 v6.6');
+  assert.equal(HUD_VERSION, '环穗 v6.7');
   const doc = parseFieldStageDoc(structuredClone(lastikaRaw));
   const windows = jobWindows(doc, alignFieldCalendar(doc)).filter(item => item.op.kind === 'optional');
   assert.deepEqual(windows.map(item => item.op.id), ['topdress', 'hill']);

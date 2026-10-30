@@ -950,7 +950,7 @@ function beginJob(r, f, job) {
   r.x = pose.x; r.z = pose.z; r.ang = pose.ang;
   r.route = null; r.ri = 0;
 }
-function roadRoute(x, z, ex, ez) {
+export function roadRoute(x, z, ex, ez) {
   const sx = nearestRoad(x), sz = nearestRoad(z);
   const startVert = Math.abs(sx - x) <= Math.abs(sz - z);
   const exr = nearestRoad(ex), ezr = nearestRoad(ez);

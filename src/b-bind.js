@@ -3,6 +3,7 @@ import {
   OMNI, TRACTOR, PLOW, JOBS, TURN_SECONDS, createFarm, addField, addMachine, mountHitch,
   requestPrep, requestPlant, stepFarm, describeField, plotAddress, growthAge, workSweepLook, PLANT_CROPS,
 } from './framework-b.js';
+import { roadRoute } from './_shared.js';
 
 let farm = null;
 let ctx = null;
@@ -53,6 +54,50 @@ function moveToward(unit, x, z, ang, speed, slice) {
   unit.z += dz / dist * step;
   unit.ang = Math.atan2(dz, dx);
   return dist - step;
+}
+
+function ensureRoad(unit, x, z) {
+  const key = `${x.toFixed(1)},${z.toFixed(1)}`;
+  if (unit.routeKey === key && unit.route) return;
+  unit.routeKey = key;
+  unit.route = roadRoute(unit.x, unit.z, x, z);
+  unit.ri = 0;
+}
+
+function followRoad(unit, x, z, ang, speed, slice) {
+  ensureRoad(unit, x, z);
+  const pts = unit.route || [[x, z]];
+  let left = speed * slice;
+  while (unit.ri < pts.length && left > 0) {
+    const [px, pz] = pts[unit.ri];
+    const dist = Math.hypot(px - unit.x, pz - unit.z);
+    if (dist <= left || dist < 0.8) {
+      left -= Math.min(left, dist);
+      unit.x = px;
+      unit.z = pz;
+      unit.ri += 1;
+      continue;
+    }
+    unit.x += (px - unit.x) / dist * left;
+    unit.z += (pz - unit.z) / dist * left;
+    unit.ang = Math.atan2(pz - unit.z, px - unit.x);
+    return;
+  }
+  unit.ang = ang;
+}
+
+function roadLeft(unit, x, z) {
+  ensureRoad(unit, x, z);
+  const pts = unit.route || [[x, z]];
+  let d = 0;
+  let px = unit.x;
+  let pz = unit.z;
+  for (let i = unit.ri || 0; i < pts.length; i++) {
+    d += Math.hypot(pts[i][0] - px, pts[i][1] - pz);
+    px = pts[i][0];
+    pz = pts[i][1];
+  }
+  return d;
 }
 
 function readout(order, unit) {
@@ -214,7 +259,7 @@ export function tickSlice(dt) {
       const machine = machineOf(order.machineId);
       if (!f || !unit || !order.pose || !machine) return 0;
       const at = worldPose(f, order.pose);
-      const dist = Math.hypot(at.x - unit.x, at.z - unit.z);
+      const dist = roadLeft(unit, at.x, at.z);
       if (dist < 1.5) return 0;
       return dist / machine.cruiseSpeed;
     },
@@ -224,7 +269,7 @@ export function tickSlice(dt) {
       const machine = machineOf(order.machineId);
       if (!f || !unit || !order.pose || !machine) return;
       const at = worldPose(f, order.pose);
-      moveToward(unit, at.x, at.z, at.ang, machine.cruiseSpeed, slice);
+      followRoad(unit, at.x, at.z, at.ang, machine.cruiseSpeed, slice);
     },
     travel(_farm, fieldId, machineId) {
       const f = meshOf(fieldId);
@@ -240,7 +285,7 @@ export function tickSlice(dt) {
     const order = farm.orders.find(item => item.machineId === unit.machineId) || null;
     const machine = machineOf(unit.machineId);
     if (!order) {
-      moveToward(unit, unit.parkX, unit.parkZ, -Math.PI / 2, machine?.cruiseSpeed || 20, dt);
+      followRoad(unit, unit.parkX, unit.parkZ, -Math.PI / 2, machine?.cruiseSpeed || 20, dt);
       paintRig(null, unit);
       continue;
     }
