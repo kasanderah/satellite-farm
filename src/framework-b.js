@@ -271,6 +271,10 @@ function fieldLocked(farm, field) {
 }
 
 function clearCrop(farm, field) {
+  const fullAt = PLANT_CROPS[field.plant?.cropId]?.maturity?.fullAt || 10;
+  field.heldFrac = field.plant
+    ? Math.min(0.999, Math.max(0, growthAge(field) / fullAt))
+    : (field.heldFrac || 0);
   for (const order of [...farm.orders]) {
     if (order.fieldId === field.id) releaseOrder(farm, order);
   }
@@ -278,7 +282,6 @@ function clearCrop(farm, field) {
   field.lock = null;
   field.plant = null;
   field.prep = null;
-  field.look = 'raw';
 }
 
 export function requestPrep(farm, fieldId, recipeId = 'clear_general') {
@@ -569,6 +572,7 @@ export function workSweepLook(job) {
 function applyLook(field, job) {
   if (!job || !job.look || job.look === '不影响') return false;
   field.look = job.look;
+  field.heldFrac = 0;
   return true;
 }
 

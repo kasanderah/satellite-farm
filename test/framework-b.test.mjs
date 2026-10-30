@@ -475,11 +475,13 @@ test('种着的地可以整地清掉', () => {
   requestPlant(farm, 'a');
   const field = farm.fields.get('a');
   until(farm, () => field.plant?.clock);
+  const kept = field.look;
   const again = requestPrep(farm, 'a');
   assert.equal(again.ok, true);
   assert.equal(again.queued, true);
   assert.equal(field.plant, null);
-  assert.equal(field.look, 'raw');
+  assert.equal(field.look, kept);
+  assert.notEqual(field.look, 'raw');
   assert.equal(fieldWork(farm, 'a')?.jobId, 'plow');
   until(farm, () => fieldWork(farm, 'a') == null);
   assert.equal(field.ground, 'general');
@@ -541,7 +543,7 @@ test('错过成熟窗进腐烂，没有农机开工就不会收', () => {
 });
 
 test('拉斯提卡阶段和版本戳来自同一份定义', () => {
-  assert.equal(HUD_VERSION, '环穗 v6.7');
+  assert.equal(HUD_VERSION, '环穗 v6.8');
   const doc = parseFieldStageDoc(structuredClone(lastikaRaw));
   const windows = jobWindows(doc, alignFieldCalendar(doc)).filter(item => item.op.kind === 'optional');
   assert.deepEqual(windows.map(item => item.op.id), ['topdress', 'hill']);

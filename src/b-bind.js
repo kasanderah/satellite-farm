@@ -227,7 +227,9 @@ function syncFields() {
     if (!unit) continue;
     const desc = describeField(farm, id);
     const fullAt = PLANT_CROPS[unit.plant?.cropId]?.maturity?.fullAt || 10;
-    const frac = unit.plant ? Math.min(0.999, Math.max(0, growthAge(unit) / fullAt)) : 0;
+    const frac = unit.plant
+      ? Math.min(0.999, Math.max(0, growthAge(unit) / fullAt))
+      : Math.min(0.999, unit.heldFrac || 0);
     const order = farm.orders.find(item => item.fieldId === id);
     const sweeping = order && (order.phase === 'work' || order.phase === 'turn') && order.pose;
     f.bUnit = {
