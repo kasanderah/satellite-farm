@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   CAPABILITIES, GROUNDS, JOBS, PREP_RECIPES, PLANT_CROPS, OMNI, TRACTOR, PLOW, MACHINE_CLASSES,
   GROW_DAYS, GROW_SECONDS, HUB_PLOT, plotAddress, lookG, fieldShader, hitchStub, workSweepLook,
+  stageDisplayStops, stageTint, stageShadeG, growthAge, BRUSH_FADE_DAYS,
   createFarm, addField, addMachine, mountHitch, chooseMachine, requestPrep, requestPlant, stepFarm, fieldWork, describeField,
 } from '../src/framework-b.js';
 import { installShippedLastika } from '../src/lastika-stage.js';
@@ -180,6 +181,61 @@ test('追肥在第5到6日，做完加倍产量，不改田面色', () => {
   assert.equal(view.yieldValue, 200);
   assert.equal(view.jobs.find(job => job.id === 'topdress').status, '执行完');
   assert.equal(view.barStages.at(-1).name, '烂地');
+});
+
+test('阶段起止按成长时间接上，进成熟不跳到满色', () => {
+  const crop = PLANT_CROPS.lastika;
+  const stops = stageDisplayStops(crop);
+  assert.deepEqual(stops.stops, [2, 8, 12]);
+  assert.equal(stops.colors[1].toLowerCase(), '#51542c');
+  assert.equal(stops.colors[2].toLowerCase(), '#6a7340');
+  assert.equal(stops.colors[3].toLowerCase(), '#787c32');
+  assert.equal(stageTint(crop, 0).color.toLowerCase(), '#4a4844');
+  assert.equal(stageTint(crop, 2).color.toLowerCase(), '#51542c');
+  assert.equal(stageTint(crop, 8).color.toLowerCase(), '#6a7340');
+  assert.equal(stageTint(crop, 12).color.toLowerCase(), '#787c32');
+  const mid = stageTint(crop, 5).color.toLowerCase();
+  assert.notEqual(mid, '#51542c');
+  assert.notEqual(mid, '#6a7340');
+  const farm = slice();
+  requestPrep(farm, 'a');
+  until(farm, () => farm.fields.get('a').ground === 'general');
+  requestPlant(farm, 'a');
+  const field = farm.fields.get('a');
+  until(farm, () => field.plant?.stageId === 'seedling');
+  assert.ok(stageShadeG(field) < 2.2);
+  until(farm, () => field.plant?.stageId === 'mature', GROW_SECONDS, DAY_SECONDS);
+  const age = growthAge(field);
+  const g = stageShadeG(field);
+  assert.ok(age < 8.4, age);
+  assert.ok(Math.abs(g - (2 + (age / 12) * 3)) < 0.05);
+  assert.ok(g < 4.4);
+  assert.equal(field.look, 'mature');
+});
+
+test('软刷色打开时做完留残留并淡出，阶段色不被换掉', () => {
+  JOBS.topdress.brush.enabled = true;
+  try {
+    const farm = slice();
+    requestPrep(farm, 'a');
+    until(farm, () => farm.fields.get('a').ground === 'general');
+    requestPlant(farm, 'a');
+    const field = farm.fields.get('a');
+    until(farm, () => field.plant?.soft?.topdress?.status === '执行完', GROW_SECONDS, DAY_SECONDS);
+    assert.equal(field.look, 'sown');
+    assert.equal(field.brushFade.span, BRUSH_FADE_DAYS);
+    assert.ok(field.brushFade.left > BRUSH_FADE_DAYS - 0.05);
+    assert.equal(workSweepLook(JOBS.topdress), 'mature');
+    assert.equal(workSweepLook(JOBS.sow), 'sown');
+    stepFarm(farm, DAY_SECONDS);
+    assert.ok(field.brushFade);
+    assert.ok(field.brushFade.left < BRUSH_FADE_DAYS - 0.5);
+    assert.equal(field.look, 'sown');
+    stepFarm(farm, DAY_SECONDS * 2);
+    assert.equal(field.brushFade, null);
+  } finally {
+    JOBS.topdress.brush.enabled = false;
+  }
 });
 
 test('调度优先更快的自走一体机，拖挂单独派不出去', () => {
@@ -543,7 +599,7 @@ test('错过成熟窗进腐烂，没有农机开工就不会收', () => {
 });
 
 test('拉斯提卡阶段和版本戳来自同一份定义', () => {
-  assert.equal(HUD_VERSION, '环穗 v6.12');
+  assert.equal(HUD_VERSION, '环穗 v6.13');
   const doc = parseFieldStageDoc(structuredClone(lastikaRaw));
   const windows = jobWindows(doc, alignFieldCalendar(doc)).filter(item => item.op.kind === 'optional');
   assert.deepEqual(windows.map(item => item.op.id), ['topdress', 'hill']);

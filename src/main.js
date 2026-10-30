@@ -25,7 +25,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CULT_EMPTY } from './lab-catalog.js';
 import { makeColony } from './colony-art.js';
 import { bootSlice, tickSlice, prepField, plantCrop, dockOf } from './b-bind.js';
-import { PLANT_CROPS, PREP_RECIPES, JOBS } from './framework-b.js';
+import { PLANT_CROPS, PREP_RECIPES, JOBS, stageDisplayStops } from './framework-b.js';
 import { HUD_VERSION } from './version.js';
 import { DAY_SECONDS } from './world-clock.js';
 
@@ -80,6 +80,13 @@ const U = {
   uBYoung: { value: C('#51542c') },
   uBRipe: { value: C('#787c32') },
   uBStraw: { value: C('#b59a63') },
+  uBRot: { value: C('#5c4636') },
+  uBKnot0: { value: C('#4a4844') },
+  uBKnot1: { value: C('#51542c') },
+  uBKnot2: { value: C('#6a7340') },
+  uBKnot3: { value: C('#787c32') },
+  uBStop: { value: new THREE.Vector4(2, 8, 12, 12) },
+  uBCover: { value: new THREE.Vector4(0.16, 0.42, 0.72, 0.95) },
   uBCrop: { value: CROPS.findIndex(c => c.id === 'lastika') },
 };
 const POT_SLOTS = POTATO_PAINT_SLOTS;
@@ -170,13 +177,37 @@ function syncPotatoPaint() {
   potTintTex.needsUpdate = true;
   potRidgeTex.needsUpdate = true;
 }
+const B_STAGE_GLSL = `
+uniform vec3 uBKnot0, uBKnot1, uBKnot2, uBKnot3, uBRot;
+uniform vec4 uBStop, uBCover;
+vec3 bStageColor(float age) {
+  float a = clamp(age, 0.0, max(uBStop.z, 0.001));
+  if (a <= uBStop.x) return mix(uBKnot0, uBKnot1, a / max(uBStop.x, 1e-4));
+  if (a <= uBStop.y) return mix(uBKnot1, uBKnot2, (a - uBStop.x) / max(uBStop.y - uBStop.x, 1e-4));
+  return mix(uBKnot2, uBKnot3, (a - uBStop.y) / max(uBStop.z - uBStop.y, 1e-4));
+}
+float bStageCover(float age) {
+  float a = clamp(age, 0.0, max(uBStop.z, 0.001));
+  if (a <= uBStop.x) return mix(uBCover.x, uBCover.y, a / max(uBStop.x, 1e-4));
+  if (a <= uBStop.y) return mix(uBCover.y, uBCover.z, (a - uBStop.x) / max(uBStop.y - uBStop.x, 1e-4));
+  return mix(uBCover.z, uBCover.w, (a - uBStop.y) / max(uBStop.z - uBStop.y, 1e-4));
+}
+`;
 function syncLastikaPaint() {
   const paints = PLANT_CROPS.lastika.paints;
-  if (!paints) return;
-  if (paints.raw) U.uBRaw.value.set(paints.raw);
-  if (paints.young) U.uBYoung.value.set(paints.young);
-  if (paints.ripe) U.uBRipe.value.set(paints.ripe);
-  if (paints.straw) U.uBStraw.value.set(paints.straw);
+  if (paints) {
+    if (paints.raw) U.uBRaw.value.set(paints.raw);
+    if (paints.young) U.uBYoung.value.set(paints.young);
+    if (paints.ripe) U.uBRipe.value.set(paints.ripe);
+    if (paints.straw) U.uBStraw.value.set(paints.straw);
+  }
+  const rot = PLANT_CROPS.lastika.stages.find(stage => stage.role === 'rot');
+  if (rot?.color) U.uBRot.value.set(rot.color);
+  const stops = stageDisplayStops(PLANT_CROPS.lastika);
+  const knot = [U.uBKnot0, U.uBKnot1, U.uBKnot2, U.uBKnot3];
+  stops.colors.forEach((hex, i) => { if (knot[i] && hex) knot[i].value.set(hex); });
+  U.uBStop.value.set(stops.stops[0], stops.stops[1], stops.stops[2], stops.stops[2]);
+  U.uBCover.value.set(stops.covers[0], stops.covers[1], stops.covers[2], stops.covers[3]);
 }
 // 按期望法线确定三角形绕序（正面朝外，避免被背面剔除 / 双面材质翻转法线）
 function pushQuad(pos, A, B, Cc, D, n) {
@@ -425,6 +456,7 @@ uniform sampler2D uPotTint;
 uniform sampler2D uPotRidge;
 uniform float uPotOn;
 uniform vec3 uBRaw, uBYoung, uBRipe, uBStraw;
+${B_STAGE_GLSL}
 float potRidgeAt(int slot, int i) {
   int pix = i < 4 ? 0 : 1;
   vec4 v = texelFetch(uPotRidge, ivec2(pix, slot), 0);
@@ -633,10 +665,15 @@ vec3 farmAlbedo(vec2 p){
       vec3 soilB = g_soil * (0.86 + 0.08 * profB * rowSeeB) * (1.0 + patchy);
       // 未整地、幼苗、成熟、残茬读拉斯提卡文档。一般田地仍是犁地后的深土，不从种植链里取。
       vec3 rawSoil = uBRaw * (0.98 + 0.04 * profB * rowSeeB) * (1.0 + patchy * 0.35);
-      float growB = clamp((visG - 2.0) / 3.0, 0.0, 1.0);
-      vec3 youngB = uBYoung;
-      vec3 ripeB = uBRipe;
-      vec3 cropB = mix(youngB, ripeB, smoothstep(0.12, 0.9, growB)) * (1.0 + patchy * 0.35);
+      float ageB = clamp((visG - 2.0) / 3.0, 0.0, 1.0) * max(uBStop.z, 0.001);
+      float brushAmt = d.b < -1.5 ? clamp(-d.b - 2.0, 0.0, 1.0) : 0.0;
+      vec3 cropB = bStageColor(ageB);
+      float coverB = bStageCover(ageB);
+      if (brushAmt > 0.0) {
+        cropB = mix(cropB, uBRipe, brushAmt);
+        coverB = mix(coverB, 1.0, brushAmt * 0.45);
+      }
+      cropB *= (1.0 + patchy * 0.35);
       if (visG < 0.5) {
         col = rawSoil;
         gTilt = acrossW * slopeB * 0.18 * rowSeeB;
@@ -648,7 +685,6 @@ vec3 farmAlbedo(vec2 p){
         gRough = 0.94;
         canopyHere = false;
       } else if (visG < 6.5) {
-        float coverB = smoothstep(0.0, 0.28, growB);
         float wB = mix(0.16, 0.62, coverB);
         vec3 gapB = mix(soilB, cropB * 0.55, coverB * 0.35);
         float bandB = smoothstep(1.0 - wB - 0.12, 1.0 - wB + 0.12, profB);
@@ -656,10 +692,15 @@ vec3 farmAlbedo(vec2 p){
         gTilt = acrossW * slopeB * mix(0.28, 0.62, coverB) * rowSeeB;
         gRough = mix(0.92, 0.66, coverB);
         canopyHere = coverB > 0.45;
-      } else {
+      } else if (visG < 7.5) {
         col = mix(soilB, uBStraw, 0.38) * (1.0 + patchy * 0.25);
         gTilt = acrossW * slopeB * 0.1 * rowSeeB;
         gRough = 0.9;
+        canopyHere = false;
+      } else {
+        col = mix(soilB, uBRot, 0.72) * (1.0 + patchy * 0.2);
+        gTilt = acrossW * slopeB * 0.08 * rowSeeB;
+        gRough = 0.96;
         canopyHere = false;
       }
     } else if (pst >= 1.0 && tex == 2) {                    // 商品薯。工坊覆写时垄色、冠层、行距都读阶段表。
@@ -1038,6 +1079,7 @@ ${CURVE_DECL}
 ${NOISE}
 ${FARM}
 uniform float uTime, uCutOn, uPotOn; uniform vec4 uPlantWin, uCut; uniform vec3 uBYoung, uBRipe, uBStraw;
+${B_STAGE_GLSL}
 uniform sampler2D uPotTint;
 varying vec3 vCropCol;`).replace('#include <begin_vertex>', `#include <begin_vertex>
   vec4 io = modelMatrix * instanceMatrix * vec4(0., 0., 0., 1.);
@@ -1089,10 +1131,13 @@ varying vec3 vCropCol;`).replace('#include <begin_vertex>', `#include <begin_ver
   bool bPlant = abs(d.r - uBCrop) < 0.25;
   float visCol = d.g;
   if (bPlant && d.b >= 20.0 && jobSwept(uv, d.b)) visCol = floor(fract(d.a) * 100.0 + 0.5);
-  bool strawCol = bPlant && visCol >= 6.5 && visCol < 8.5;
-  float growB = clamp((visCol - 2.0) / 3.0, 0.0, 1.0);
+  bool strawCol = bPlant && visCol >= 6.5 && visCol < 7.5;
+  float ageB = clamp((visCol - 2.0) / 3.0, 0.0, 1.0) * max(uBStop.z, 0.001);
+  float brushAmt = d.b < -1.5 ? clamp(-d.b - 2.0, 0.0, 1.0) : 0.0;
+  vec3 stageCol = bStageColor(ageB);
+  if (brushAmt > 0.0 && !strawCol) stageCol = mix(stageCol, uBRipe, brushAmt);
   vCropCol = bPlant
-    ? (strawCol ? ${strawTint} : mix(uBYoung, uBRipe, smoothstep(0.12, 0.9, growB)))
+    ? (visCol >= 7.5 ? uBRot : (strawCol ? ${strawTint} : stageCol))
     : mix(uCropYoung[c], uCropRipe[c], smoothstep(0.45, 1.0, gg));
   if (bPlant) {
     // 冠层色已经按拉斯提卡写好。不要再掉进下面的杀秧锈色，也不混商品薯赭黄。
@@ -1263,14 +1308,11 @@ edgeMesh.name = 'sel-edge';
 edgeMesh.count = 0; edgeMesh.frustumCulled = false; edgeMesh.castShadow = false; edgeMesh.receiveShadow = false;
 edgeMesh.renderOrder = 3;
 scene.add(edgeMesh);
-const selRingGeo = new THREE.RingGeometry(0.78, 1, 48).rotateX(-Math.PI / 2);
-const selRingMat = curved(new THREE.MeshBasicMaterial({ color: C('zone'), toneMapped: false, fog: false, side: THREE.DoubleSide }));
-selRingMat.polygonOffset = true; selRingMat.polygonOffsetFactor = -3; selRingMat.polygonOffsetUnits = -3;
-const selRing = new THREE.InstancedMesh(selRingGeo, selRingMat, 32);
-selRing.name = 'sel-ring';
-selRing.count = 0; selRing.frustumCulled = false; selRing.castShadow = false; selRing.receiveShadow = false;
-selRing.renderOrder = 3;
-scene.add(selRing);
+const selLock = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), edgeMat, 256);
+selLock.name = 'sel-lock';
+selLock.count = 0; selLock.frustumCulled = false; selLock.castShadow = false; selLock.receiveShadow = false;
+selLock.renderOrder = 4;
+scene.add(selLock);
 const buildingSets = {
   warehouse: instanced(warehouseKit(), 8),
   garage: instanced(garageKit(), 8),
@@ -1848,7 +1890,7 @@ function applyDeckView() {
   setShown(boomSet, !on);
   setShown(workDroneMesh, !on);
   setShown(edgeMesh, !on);
-  setShown(selRing, !on);
+  setShown(selLock, !on);
   if (netMesh) netMesh.visible = !on;
   icons.visible = !on;
   deckSlabs.visible = !on && !!cut.on;
@@ -1901,7 +1943,7 @@ function selectionKind() {
 }
 function rigBody(r) {
   const tractor = r.kind === 'tractor' || !!r.impl;
-  return { along: tractor ? 11 : 6.8, across: tractor ? 5.8 : 5.4, halo: tractor ? 9.5 : 8.2 };
+  return { along: tractor ? 11 : 6.8, across: tractor ? 5.8 : 5.4 };
 }
 function screenDistToSeg(px, py, a, b) {
   const abx = b[0] - a[0], aby = b[1] - a[1];
@@ -2979,18 +3021,35 @@ function paintPickEdges() {
 }
 function paintRigMarks() {
   const show = viewLayer === 'surface' && pickedRigs.size > 0;
-  selRing.visible = show;
-  if (!show) { selRing.count = 0; return; }
+  selLock.visible = show;
+  if (!show) { selLock.count = 0; return; }
   let n = 0;
+  const y = 0.9;
+  const th = 0.14;
+  const hh = 0.1;
   for (const id of pickedRigs) {
     const r = rigs.find(item => item.id === id);
-    if (!r || n >= selRing.instanceMatrix.count) continue;
-    const rad = rigBody(r).halo;
-    tmpM.compose(tmpP.set(r.x, 0.55, r.z), tmpQ.identity(), tmpS.set(rad, 1, rad));
-    selRing.setMatrixAt(n++, tmpM);
+    if (!r || n + 4 > selLock.instanceMatrix.count) continue;
+    const tractor = r.kind === 'tractor' || !!r.impl;
+    const hx = tractor ? 7.2 : 4.6;
+    const hz = tractor ? 2.6 : 3.4;
+    const ang = r.ang || 0;
+    const c = Math.cos(ang);
+    const s = Math.sin(ang);
+    const q = tmpQ.setFromAxisAngle(UP, ang);
+    const place = (lx, lz, w, d) => {
+      const x = r.x + lx * c - lz * s;
+      const z = r.z + lx * s + lz * c;
+      tmpM.compose(tmpP.set(x, y, z), q, tmpS.set(w, hh, d));
+      selLock.setMatrixAt(n++, tmpM);
+    };
+    place(0, hz, hx * 2, th);
+    place(0, -hz, hx * 2, th);
+    place(hx, 0, th, hz * 2);
+    place(-hx, 0, th, hz * 2);
   }
-  selRing.count = n;
-  selRing.instanceMatrix.needsUpdate = true;
+  selLock.count = n;
+  selLock.instanceMatrix.needsUpdate = true;
 }
 function paintPicks() {
   const host = $('picks');

@@ -3,7 +3,8 @@
 // 作业进行中可以按幅宽扫过下一道样子；做完蒙版拿掉，整块定稿。
 // 软作业挂在阶段上，只报完成或错过，不写下一阶段。窗口过了记过期，不锁田。
 // 硬作业进行中按 look 扫过田面，做完才整块换成这个样子。
-// brush.enabled 只给可选刷色，默认关。软作业关着时，进行中不扫，做完也不改田面。
+// brush.enabled 只给可选刷色，默认关。打开时，软作业做完留下一层刷色，再按世界日淡掉，不改阶段 look。
+// 有时长的阶段用 display 的起止色，按本阶段成长时间插值，跨阶段接得上，不瞬切。
 // 生长和软窗记世界日。stepFarm 仍收真实秒，只在钟的边界换算。
 
 import { DAY_SECONDS } from './world-clock.js';
@@ -82,11 +83,11 @@ export const PLANT_CROPS = {
       ],
     },
     stages: [
-      { id: 'seedling', name: '青苗', role: 'head', kind: 'time', look: 'sown', days: 2, color: '#51542c', jobs: [] },
-      { id: 'develop', name: '发育', role: 'node', kind: 'time', look: 'sown', days: 6, color: '#6a7340', jobs: [
+      { id: 'seedling', name: '青苗', role: 'head', kind: 'time', look: 'sown', days: 2, color: '#51542c', display: { from: { color: '#4a4844', cover: 0.16 }, to: { color: '#51542c', cover: 0.42 } }, jobs: [] },
+      { id: 'develop', name: '发育', role: 'node', kind: 'time', look: 'sown', days: 6, color: '#6a7340', display: { from: { color: '#51542c', cover: 0.42 }, to: { color: '#6a7340', cover: 0.72 } }, jobs: [
         { job: 'topdress', kind: 'soft', name: '追肥', from: 5, to: 6, yieldMul: 2 },
       ] },
-      { id: 'mature', name: '成熟', role: 'node', kind: 'time', look: 'mature', days: 4, color: '#787c32', jobs: [
+      { id: 'mature', name: '成熟', role: 'node', kind: 'time', look: 'mature', days: 4, color: '#787c32', display: { from: { color: '#6a7340', cover: 0.72 }, to: { color: '#787c32', cover: 0.95 } }, jobs: [
         { job: 'harvest', kind: 'hard', name: '收获', from: 11, to: 12 },
       ] },
       { id: 'rot', name: '烂地', role: 'rot', kind: 'rot', look: 'rot', color: '#5c4636', jobs: [
@@ -149,6 +150,86 @@ export function plotAddress(i, j, originI, originJ) {
   return { hub: HUB_PLOT, x, y, code: `P(${x},${y})` };
 }
 
+export const BRUSH_FADE_DAYS = 2;
+
+function hexRgb(hex) {
+  const h = String(hex || '').replace('#', '');
+  if (h.length !== 6) return [81, 84, 44];
+  return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+}
+
+function mixHex(a, b, t) {
+  const u = Math.min(1, Math.max(0, t));
+  const A = hexRgb(a);
+  const B = hexRgb(b);
+  const n = i => Math.round(A[i] + (B[i] - A[i]) * u).toString(16).padStart(2, '0');
+  return `#${n(0)}${n(1)}${n(2)}`;
+}
+
+// 有时长的阶段：起点接到上一段终点，终点是本段 color。返回着色器的三段累计日和四节颜色。
+export function stageDisplayStops(crop) {
+  const timed = (crop?.stages || []).filter(stage => Number(stage.days) > 0);
+  const colors = [];
+  const covers = [];
+  const stops = [];
+  let prevColor = null;
+  let prevCover = null;
+  let acc = 0;
+  for (const stage of timed) {
+    const fromColor = stage.display?.from?.color || prevColor || stage.color || '#51542c';
+    const toColor = stage.display?.to?.color || stage.color || fromColor;
+    const fromCover = stage.display?.from?.cover ?? prevCover ?? 0.16;
+    const toCover = stage.display?.to?.cover ?? fromCover;
+    if (!colors.length) {
+      colors.push(fromColor);
+      covers.push(fromCover);
+    }
+    colors.push(toColor);
+    covers.push(toCover);
+    acc += Number(stage.days);
+    stops.push(acc);
+    prevColor = toColor;
+    prevCover = toCover;
+  }
+  while (stops.length < 3) {
+    stops.push(stops.at(-1) || 1);
+    colors.push(colors.at(-1) || '#51542c');
+    covers.push(covers.at(-1) ?? 0.5);
+  }
+  return { stops: stops.slice(0, 3), colors: colors.slice(0, 4), covers: covers.slice(0, 4) };
+}
+
+export function stageTint(crop, age) {
+  const { stops, colors, covers } = stageDisplayStops(crop);
+  const day = Math.max(0, age || 0);
+  let t = 0;
+  let a = colors[0];
+  let b = colors[1];
+  let ca = covers[0];
+  let cb = covers[1];
+  if (day <= stops[0]) t = day / Math.max(stops[0], 1e-6);
+  else if (day <= stops[1]) {
+    t = (day - stops[0]) / Math.max(stops[1] - stops[0], 1e-6);
+    a = colors[1]; b = colors[2]; ca = covers[1]; cb = covers[2];
+  } else {
+    t = (day - stops[1]) / Math.max(stops[2] - stops[1], 1e-6);
+    a = colors[2]; b = colors[3]; ca = covers[2]; cb = covers[3];
+  }
+  t = Math.min(1, Math.max(0, t));
+  return { color: mixHex(a, b, t), cover: ca + (cb - ca) * t };
+}
+
+export function stageShadeG(field) {
+  const crop = cropOfPlant(field);
+  const stage = stageOf(crop, field?.plant?.stageId);
+  if (crop && stage && Number(stage.days) > 0) {
+    const cycle = cycleDays(crop) || 1;
+    const age = Math.min(cycle, Math.max(0, growthAge(field)));
+    return 2 + Math.min(0.999, age / cycle) * 3;
+  }
+  return lookG(field?.look, field?.heldFrac || 0);
+}
+
 export function lookG(look, growFrac = 0) {
   if (look === 'raw') return 0;
   if (look === 'general') return 1;
@@ -165,8 +246,14 @@ export function fieldShader(unit) {
   if (!unit) return null;
   const sweep = unit.sweep;
   const sweeping = !!(sweep && sweep.width > 0);
-  const g = lookG(unit.look, unit.growFrac || 0);
+  const g = unit.timed
+    ? 2 + Math.min(0.999, Math.max(0, (unit.age || 0) / (unit.cycle || 1))) * 3
+    : lookG(unit.look, unit.growFrac || 0);
   if (g == null && !sweeping) return null;
+  if (!sweeping && unit.brushFade && unit.brushFade.span > 0 && unit.brushFade.left > 0) {
+    const amt = Math.min(1, unit.brushFade.left / unit.brushFade.span);
+    return { g: g == null ? 2 : g, mask: -2 - amt, next: null };
+  }
   if (sweeping) {
     const widthDm = Math.max(1, Math.round(sweep.width * 10));
     const along = Math.max(0, Math.min(1, sweep.alongFrac || 0));
@@ -573,16 +660,27 @@ function applyLook(field, job) {
   if (!job || !job.look || job.look === '不影响') return false;
   field.look = job.look;
   field.heldFrac = 0;
+  field.brushFade = null;
   return true;
 }
 
-// 只有 brush.enabled 时，软作业做完才把刷色写入田面。默认关，所以不落成熟色。
+// 只有 brush.enabled 时才留下软刷色。不改阶段 look，残留按世界日淡出。
 function commitSweep(field, job) {
   const brush = job?.brush;
   if (!field || !brush?.enabled || !brush.look || brush.look === '不影响') return null;
   if (lookG(brush.look) == null) return null;
-  field.look = brush.look;
+  field.brushFade = { look: brush.look, left: BRUSH_FADE_DAYS, span: BRUSH_FADE_DAYS };
   return brush.look;
+}
+
+function fadeBrush(farm, dt) {
+  const days = dt / DAY_SECONDS;
+  if (!(days > 0)) return;
+  for (const field of farm.fields.values()) {
+    if (!field.brushFade) continue;
+    field.brushFade.left -= days;
+    if (!(field.brushFade.left > 1e-4)) field.brushFade = null;
+  }
 }
 
 function cropOfPlant(field) {
@@ -664,6 +762,7 @@ function enterStage(farm, field, stageId) {
   field.plant.clock = false;
   field.plant.grow = 0;
   field.plant.need = 0;
+  field.brushFade = null;
   if (stage.look) field.look = stage.look;
   pushEvent(farm, { type: 'stage', fieldId: field.id, stageId: stage.id });
   const days = Number(stage.days);
@@ -902,6 +1001,7 @@ function finishGrowth(farm) {
 
 export function stepFarm(farm, dt, env = null) {
   if (!(dt > 0)) return farm;
+  fadeBrush(farm, dt);
   let left = dt;
   for (let guard = 0; guard < 48 && left > 1e-6; guard++) {
     touchSoft(farm);

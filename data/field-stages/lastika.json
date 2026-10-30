@@ -28,11 +28,11 @@
   "graph": {
     "entry": { "job": "sow", "to": "seedling" },
     "stages": [
-      { "id": "seedling", "name": "青苗", "role": "head", "kind": "time", "look": "sown", "days": 2, "color": "#51542c", "jobs": [] },
-      { "id": "develop", "name": "发育", "role": "node", "kind": "time", "look": "sown", "days": 6, "color": "#6a7340", "jobs": [
+      { "id": "seedling", "name": "青苗", "role": "head", "kind": "time", "look": "sown", "days": 2, "color": "#51542c", "display": { "from": { "color": "#4a4844", "cover": 0.16 }, "to": { "color": "#51542c", "cover": 0.42 } }, "jobs": [] },
+      { "id": "develop", "name": "发育", "role": "node", "kind": "time", "look": "sown", "days": 6, "color": "#6a7340", "display": { "from": { "color": "#51542c", "cover": 0.42 }, "to": { "color": "#6a7340", "cover": 0.72 } }, "jobs": [
         { "job": "topdress", "kind": "soft", "name": "追肥", "from": 5, "to": 6, "yieldMul": 2 }
       ] },
-      { "id": "mature", "name": "成熟", "role": "node", "kind": "time", "look": "mature", "days": 4, "color": "#787c32", "jobs": [
+      { "id": "mature", "name": "成熟", "role": "node", "kind": "time", "look": "mature", "days": 4, "color": "#787c32", "display": { "from": { "color": "#6a7340", "cover": 0.72 }, "to": { "color": "#787c32", "cover": 0.95 } }, "jobs": [
         { "job": "harvest", "kind": "hard", "name": "收获", "from": 11, "to": 12 }
       ] },
       { "id": "rot", "name": "烂地", "role": "rot", "kind": "rot", "look": "rot", "color": "#5c4636", "jobs": [

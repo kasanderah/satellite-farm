@@ -2,6 +2,7 @@
 import {
   OMNI, TRACTOR, PLOW, JOBS, TURN_SECONDS, createFarm, addField, addMachine, mountHitch,
   requestPrep, requestPlant, stepFarm, describeField, plotAddress, growthAge, workSweepLook, PLANT_CROPS,
+  cycleDays,
 } from './framework-b.js';
 import { roadRoute } from './_shared.js';
 
@@ -226,7 +227,10 @@ function syncFields() {
     const unit = farm.fields.get(id);
     if (!unit) continue;
     const desc = describeField(farm, id);
-    const fullAt = PLANT_CROPS[unit.plant?.cropId]?.maturity?.fullAt || 10;
+    const crop = PLANT_CROPS[unit.plant?.cropId];
+    const stage = crop?.stages.find(item => item.id === unit.plant?.stageId);
+    const timed = !!(stage && Number(stage.days) > 0);
+    const fullAt = crop?.maturity?.fullAt || 10;
     const frac = unit.plant
       ? Math.min(0.999, Math.max(0, growthAge(unit) / fullAt))
       : Math.min(0.999, unit.heldFrac || 0);
@@ -235,6 +239,10 @@ function syncFields() {
     f.bUnit = {
       look: unit.look,
       growFrac: unit.look === 'sown' ? frac : 0,
+      timed,
+      age: timed ? growthAge(unit) : 0,
+      cycle: timed ? (cycleDays(crop) || 1) : 1,
+      brushFade: unit.brushFade ? { left: unit.brushFade.left, span: unit.brushFade.span, look: unit.brushFade.look } : null,
       text: desc?.stat || '',
       label: desc?.float || '',
       ground: unit.ground,
