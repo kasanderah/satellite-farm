@@ -143,7 +143,7 @@ body.underground #dock{display:none}
 #rates input{width:72px;font-family:inherit;font-size:12px;color:var(--fg);background:transparent;border:1px solid var(--line);padding:3px 6px;letter-spacing:.06em}
 #stores{display:none}
 #rates span{font-size:11px;letter-spacing:.06em;color:var(--mut)}
-#rates button,#dock button,#admin .arow button,#viewer .bar button,#viewer .card,#sheet .rowbtn,#sheet .sell{font-family:inherit;color:var(--fg);background:transparent;border:1px solid var(--line);cursor:pointer;letter-spacing:.08em}
+#rates button,#dock button,#admin .arow button,#viewer .bar button,#viewer .card,#sheet .rowbtn,#sheet .sell,#planmenu button{font-family:inherit;color:var(--fg);background:transparent;border:1px solid var(--line);border-radius:0;cursor:pointer;letter-spacing:.08em;appearance:none}
 #rates button,#admin .arow button{padding:3px 8px;font-size:12px}
 #admin .arow{display:flex;gap:6px}
 #viewer{position:fixed;inset:0;z-index:8;display:none;overflow:auto;padding:28px 32px 64px;background:rgba(10,12,20,.9);color:var(--fg)}
@@ -203,7 +203,7 @@ body.underground #dock{display:none}
 #dock button{padding:6px 8px 5px}
 #dock button b{display:block;font-weight:500;font-size:13px;letter-spacing:.12em}
 #dock button small{display:block;color:var(--mut);font-size:10px;letter-spacing:.04em;margin-top:2px}
-#dock button:hover,#rates button:hover,#admin .arow button:hover,#sheet .rowbtn:hover,#sheet .sell:hover{border-color:var(--sig)}
+#dock button:hover,#rates button:hover,#admin .arow button:hover,#sheet .rowbtn:hover,#sheet .sell:hover,#planmenu button:hover{border-color:var(--sig)}
 #dock button.on,#rates button.on,#admin .arow button.on,#sheet .rowbtn.on,#sheet .sell.on{border-color:var(--sig);color:var(--sig)}
 #sheet .sell{margin-top:8px;padding:6px 10px;width:100%}
 #sheet .buyline{display:flex;gap:6px;margin-top:8px}
@@ -222,8 +222,12 @@ body.underground #dock{display:none}
 #bar i{display:block;height:100%;min-width:0}
 #marquee{position:fixed;border:1px solid #d8693c;background:rgba(216,105,60,.16);z-index:6;display:none;pointer-events:none}
 #marquee.on{display:block}
-#planmenu{position:fixed;z-index:7;display:none;padding:8px 10px;min-width:196px}
-#planmenu.on{display:block}
+#planmenu{position:fixed;z-index:7;display:none;padding:10px 12px;min-width:168px;box-sizing:border-box}
+#planmenu.on{display:flex;flex-direction:column;gap:6px}
+#planmenu .who{display:flex;flex-direction:column;gap:3px;font-size:12px;letter-spacing:.1em}
+#planmenu .who b{font-weight:500}
+#planmenu .who span{color:var(--mut);letter-spacing:.06em;font-size:11px}
+#planmenu button{display:block;width:100%;margin:0;padding:6px 8px 5px;font-weight:500;font-size:13px;letter-spacing:.12em;text-align:left}
 #picks{position:fixed;inset:0;pointer-events:none;z-index:2}
 #picks i{position:absolute;border:1px solid #d8693c;background:rgba(216,105,60,.12)}
 #toasts{position:fixed;top:78px;right:24px;z-index:5;display:flex;flex-direction:column;gap:6px;align-items:flex-end;pointer-events:none}
@@ -256,6 +260,6 @@ body.underground #dock{display:none}
 <div class="hud panel hit" id="planmenu"></div>
 <div id="viewer"><div class="bar"><div><h2>资产</h2><div class="sub">当前的薯田阶段、机器和田块。每张卡片是名字加上现在的样子。点一张就能指着它改。这是查看，不能上传。</div></div><button type="button" id="viewer-close">关闭</button></div><div class="sec">商品薯阶段</div><div class="grid" id="view-stages"></div><div class="sec">机器</div><div class="grid" id="view-machines"></div><div class="sec">田块</div><div class="grid" id="view-tiles"></div></div>
 <div class="hud" id="scale"><span id="scaletxt"></span><div id="scalebar"></div></div>
-<div class="hud" id="buildrev">环穗 v6.11</div>
+<div class="hud" id="buildrev">环穗 v6.12</div>
 <script>__BUNDLE__</script>
 </body></html>
