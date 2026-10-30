@@ -1794,7 +1794,8 @@ function placeCamera() {
     return;
   }
   const baseY = layerFloor();
-  const p = pitchOf(camS.d) + camS.pOff;
+  let p = pitchOf(camS.d) + camS.pOff;
+  p = Math.min(89 * DEG, Math.max(8 * DEG, p));
   cam.position.set(camS.x + Math.sin(camS.yaw) * Math.cos(p) * camS.d, baseY + Math.sin(p) * camS.d, camS.z + Math.cos(camS.yaw) * Math.cos(p) * camS.d);
   cam.lookAt(camS.x, baseY, camS.z);
   const far01 = THREE.MathUtils.smoothstep(camS.d, 1500, 5200);
@@ -1837,10 +1838,12 @@ function applyDeckView() {
   document.body.classList.toggle('underground', on);
 }
 // 交互：左键平移 / 右键旋转 / 滚轮缩放 / WASD / QE / N 昼夜 / M 地图模式 / H 隐藏界面
-let drag = null, ptr = null, selected = null, selNote = '', plantOpen = false, prepOpen = false;
+let drag = null, ptr = null, rightArm = null, selected = null, selectedRig = null, selNote = '', plantOpen = false, prepOpen = false;
+let camLock = false;
 let mode = 'look', watchRig = null, pickedLot = null, pickedStack = null, shopPick = 'seed', rigPick = 'planter', cropPick = 'potato', deckTank = 0, deckBlock = null, deckHub = false, buildAct = 'place', buildKind = 'warehouse', buildPick = null, millPlace = false;
 let planCycle = false, planBuy = false;
 const pickedFields = new Set();
+const pickedRigs = new Set();
 const raycaster = new THREE.Raycaster();
 function pickFlat(cx, cy) {
   const ndc = new THREE.Vector2((cx / innerWidth) * 2 - 1, -(cy / innerHeight) * 2 + 1);
@@ -1860,6 +1863,181 @@ function pickFlat(cx, cy) {
   return { x: ax + th * R0, z: pz };
 }
 function selectField(f, why) { selected = f || null; selNote = why || ''; plantOpen = false; prepOpen = false; }
+function ownedFields() {
+  const list = [];
+  for (const idx of pickedFields) if (fields[idx]?.owned) list.push(fields[idx]);
+  if (!list.length && selected?.owned) list.push(selected);
+  return list;
+}
+function selectionKind() {
+  if (pickedRigs.size) return 'rig';
+  if (ownedFields().length) return 'field';
+  return null;
+}
+function pickRigScreen(cx, cy) {
+  let best = null;
+  let bd = 42;
+  for (const r of rigs) {
+    const s = project(r.x, 3, r.z);
+    if (!s) continue;
+    const dist = Math.hypot(s[0] - cx, s[1] - cy);
+    if (dist < bd) { bd = dist; best = r; }
+  }
+  return best;
+}
+function focusOf() {
+  if (pickedRigs.size) {
+    const rig = rigs.find(r => r.id === pickedRigs.values().next().value);
+    if (rig) return { kind: 'rig', x: rig.x, z: rig.z, rig };
+  }
+  const list = ownedFields();
+  if (!list.length) return null;
+  const f = list[0];
+  return { kind: 'field', x: f.x0 + L.FIELD / 2, z: f.z0 + L.FIELD / 2, field: f };
+}
+function clearSelection() {
+  pickedFields.clear();
+  pickedRigs.clear();
+  selectedRig = null;
+  selectField(null, '');
+  closePlanMenu();
+  updateDock();
+}
+function exitToDefault() {
+  camLock = false;
+  watchRig = null;
+  clearSelection();
+}
+function enterLock() {
+  const focus = focusOf();
+  if (!focus) return;
+  camLock = true;
+  if (focus.kind === 'rig') {
+    watchRig = focus.rig;
+    camT.x = focus.x;
+    camT.z = focus.z;
+    if (camT.d > 320) camT.d = 180;
+  } else {
+    watchRig = null;
+    camT.x = focus.x;
+    camT.z = focus.z;
+  }
+  paintLock();
+}
+function selectOnlyField(f) {
+  pickedRigs.clear();
+  selectedRig = null;
+  if (!camLock) watchRig = null;
+  pickedFields.clear();
+  if (f?.owned) pickedFields.add(f.idx);
+  const why = !f ? '' : !f.owned ? (f.crop === -3 ? '蓄水池' : f.inPlot ? '设施用地' : '邻区快照 · 只读') : '';
+  selectField(f, why);
+  updateDock();
+}
+function toggleField(f) {
+  if (!f?.owned || selectionKind() === 'rig') return;
+  if (pickedFields.has(f.idx)) pickedFields.delete(f.idx);
+  else pickedFields.add(f.idx);
+  selectField(fields[[...pickedFields][0]] || null, '');
+  updateDock();
+}
+function selectOnlyRig(r, lock) {
+  pickedFields.clear();
+  selectField(null, '');
+  pickedRigs.clear();
+  pickedRigs.add(r.id);
+  selectedRig = r;
+  if (lock) enterLock();
+  else { camLock = false; watchRig = null; }
+  updateDock();
+  if (mode === 'machines') paintSheet();
+}
+function toggleRig(r) {
+  if (selectionKind() === 'field') return;
+  if (pickedRigs.has(r.id)) pickedRigs.delete(r.id);
+  else pickedRigs.add(r.id);
+  selectedRig = rigs.find(item => item.id === [...pickedRigs][0]) || null;
+  if (!pickedRigs.size) selectedRig = null;
+  updateDock();
+}
+function hitSelected(cx, cy) {
+  const rig = pickRigScreen(cx, cy);
+  if (rig && pickedRigs.has(rig.id)) return true;
+  const p = pickFlat(cx, cy);
+  const f = p ? fieldAtWorld(p.x, p.z) : null;
+  return !!(f && pickedFields.has(f.idx));
+}
+function onLeftClick(cx, cy, shift) {
+  closePlanMenu();
+  if (viewLayer !== 'surface' || mode === 'build') { onMapClick(cx, cy); return; }
+  const rig = pickRigScreen(cx, cy);
+  if (rig) {
+    if (shift) toggleRig(rig);
+    else selectOnlyRig(rig, false);
+    return;
+  }
+  const p = pickFlat(cx, cy);
+  const f = p ? fieldAtWorld(p.x, p.z) : null;
+  if (!f) { if (!shift) exitToDefault(); return; }
+  if (shift && f.owned) { toggleField(f); return; }
+  selectOnlyField(f);
+}
+function contextItems() {
+  if (selectionKind() === 'rig') return [{ id: 'follow', name: '跟随' }, { id: 'clear', name: '取消选择' }];
+  const list = ownedFields();
+  if (!list.length) return [];
+  const sets = list.map(f => dockOf(f)?.actions || []);
+  if (!sets[0]) return [];
+  return sets[0].filter(act => sets.every(rows => rows.some(item => item.id === act.id && item.enabled)));
+}
+function openContext(x, y) {
+  const items = contextItems();
+  const menu = $('planmenu');
+  if (!menu || !items.length) { closePlanMenu(); return; }
+  menu.classList.add('on');
+  menu.style.left = Math.min(x, innerWidth - 180) + 'px';
+  menu.style.top = Math.min(y, innerHeight - 48 - items.length * 34) + 'px';
+  menu.innerHTML = items.map(it => `<button type="button" class="sell" data-ctx="${it.id}">${it.name}</button>`).join('');
+}
+function onRightClick(cx, cy) {
+  if (hitSelected(cx, cy)) { openContext(cx, cy); return; }
+  exitToDefault();
+}
+function zoomClamp(d) { return Math.max(22, Math.min(8000, d)); }
+function applyZoom(factor) {
+  const selectedNow = selectionKind();
+  if (selectedNow && !camLock && factor < 1) enterLock();
+  const pivot = (camLock || selectedNow) ? focusOf() : null;
+  const cx = innerWidth / 2;
+  const cy = innerHeight / 2;
+  let px;
+  let pz;
+  let sx = cx;
+  let sy = cy;
+  if (pivot) {
+    px = pivot.x;
+    pz = pivot.z;
+    const s = project(px, 0, pz);
+    if (s) { sx = s[0]; sy = s[1]; }
+  } else {
+    const g = pickFlat(cx, cy);
+    if (!g) { camT.d = zoomClamp(camS.d * factor); return; }
+    px = g.x;
+    pz = g.z;
+  }
+  camS.d = camT.d = zoomClamp(camS.d * factor);
+  placeCamera();
+  if (!camLock) {
+    const hit = pickFlat(sx, sy);
+    if (hit) {
+      camS.x += px - hit.x;
+      camS.z += pz - hit.z;
+      camT.x = camS.x;
+      camT.z = camS.z;
+      placeCamera();
+    }
+  }
+}
 function onMapClick(cx, cy) {
   const p = pickFlat(cx, cy);
   if (viewLayer !== 'surface' && mode !== 'build') {
@@ -1901,12 +2079,7 @@ function onMapClick(cx, cy) {
     else { toast(r.cost ? `<b>−${fmt(r.cost)}</b>${r.building.name}` : `${r.building.name}已放下`); saveSoon(); paintSheet(); }
     return;
   }
-  if (!p) { selectField(null); return; }
-  const f = fieldAtWorld(p.x, p.z);
-  if (!f) { selectField(null); return; }
-  if (!f.inPlot) { selectField(f, '邻区快照 · 只读'); return; }
-  if (!f.owned) { selectField(f, f.crop === -3 ? '蓄水池' : '设施用地'); return; }
-  selectField(f, '');
+  onLeftClick(cx, cy, false);
 }
 function toast(html) {
   const d = document.createElement('div');
@@ -2017,6 +2190,13 @@ document.getElementById('planmenu').addEventListener('change', e => { if (e.targ
 document.getElementById('planmenu').addEventListener('click', e => {
   const plan = e.target.closest('[data-plan]');
   if (plan) planSelected(plan.dataset.plan);
+  const ctx = e.target.closest('[data-ctx]');
+  if (!ctx) return;
+  closePlanMenu();
+  if (ctx.dataset.ctx === 'prep') { for (const f of ownedFields()) { selected = f; doPrep(); } }
+  else if (ctx.dataset.ctx === 'plant') { for (const f of ownedFields()) { selected = f; doPlant(); } }
+  else if (ctx.dataset.ctx === 'follow') enterLock();
+  else if (ctx.dataset.ctx === 'clear') exitToDefault();
 });
 R.domElement.addEventListener('contextmenu', e => e.preventDefault());
 document.addEventListener('contextmenu', e => e.preventDefault(), true);
@@ -2033,7 +2213,17 @@ R.domElement.addEventListener('pointerdown', e => {
     R.domElement.setPointerCapture(e.pointerId);
     return;
   }
-  drag = { b: e.button === 2 || e.shiftKey ? 'rot' : 'pan', x: e.clientX, y: e.clientY };
+  if (e.button === 2 && viewLayer === 'surface' && mode !== 'build') {
+    rightArm = { x: e.clientX, y: e.clientY, t: performance.now() };
+    return;
+  }
+  if (e.button === 0 && e.shiftKey && viewLayer === 'surface' && (mode === 'look' || mode === 'plan')) {
+    drag = { b: 'box', x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, shift: true };
+    closePlanMenu();
+    R.domElement.setPointerCapture(e.pointerId);
+    return;
+  }
+  drag = { b: 'pan', x: e.clientX, y: e.clientY, fromLock: !!(camLock && e.button === 0) };
   R.domElement.setPointerCapture(e.pointerId);
 });
 addEventListener('pointerup', e => {
@@ -2060,7 +2250,16 @@ addEventListener('pointerup', e => {
         if (!s || s[0] < left || s[0] > right || s[1] < top || s[1] > bot) continue;
         hit.push(f);
       }
-      applyFieldPick(hit, drag.shift);
+      if (mode !== 'scheme' && selectionKind() === 'rig') {
+        if (!drag.shift) pickedRigs.clear();
+        for (const r of rigs) {
+          const s = project(r.x, 3, r.z);
+          if (!s || s[0] < left || s[0] > right || s[1] < top || s[1] > bot) continue;
+          pickedRigs.add(r.id);
+        }
+        selectedRig = rigs.find(item => item.id === pickedRigs.values().next().value) || null;
+        updateDock();
+      } else applyFieldPick(hit, drag.shift || mode !== 'scheme');
     }
     drag = null; ptr = null;
     return;
@@ -2077,12 +2276,24 @@ addEventListener('pointerup', e => {
     drag = null; ptr = null;
     return;
   }
-  if (ptr && ptr.b === 0 && Math.hypot(e.clientX - ptr.x, e.clientY - ptr.y) < 6) onMapClick(ptr.x, ptr.y);
+  if (rightArm && !drag) {
+    onRightClick(rightArm.x, rightArm.y);
+    rightArm = null;
+  }
+  if (ptr && ptr.b === 0 && Math.hypot(e.clientX - ptr.x, e.clientY - ptr.y) < 6 && !(drag && drag.moved)) onLeftClick(ptr.x, ptr.y, ptr.shift);
   drag = null; ptr = null;
 });
 let hoverPtr = null, deckHover = null;
 addEventListener('pointermove', e => {
   hoverPtr = { x: e.clientX, y: e.clientY };
+  if (rightArm && !drag) {
+    const held = performance.now() - rightArm.t;
+    const moved = Math.hypot(e.clientX - rightArm.x, e.clientY - rightArm.y);
+    if (held > 280 || moved > 6) {
+      drag = { b: 'rot', x: e.clientX, y: e.clientY };
+      rightArm = null;
+    }
+  }
   if (!drag) return;
   if (drag.b === 'box') {
     const m = $('marquee');
@@ -2096,11 +2307,16 @@ addEventListener('pointermove', e => {
   if (drag.b === 'rmb') return;
   const dx = e.clientX - drag.x, dy = e.clientY - drag.y; drag.x = e.clientX; drag.y = e.clientY;
   if (drag.b === 'pan') {
+    drag.moved = true;
+    if (drag.fromLock) { drag.fromLock = false; exitToDefault(); }
     const k = camT.d * 2 * Math.tan(15 * DEG) / innerHeight, s = Math.sin(camT.yaw), c = Math.cos(camT.yaw);
     camT.x -= (dx * c + dy * s / Math.sin(pitchOf(camT.d))) * k; camT.z -= (-dx * s + dy * c / Math.sin(pitchOf(camT.d))) * k;
   } else { camT.yaw -= dx * 0.005; camT.pOff = Math.max(-18 * DEG, Math.min(50 * DEG, camT.pOff + dy * 0.003)); }
 });
-R.domElement.addEventListener('wheel', e => { e.preventDefault(); camT.d = Math.max(22, Math.min(8000, camT.d * Math.exp(e.deltaY * 0.0012))); }, { passive: false });
+R.domElement.addEventListener('wheel', e => {
+  e.preventDefault();
+  applyZoom(Math.exp(e.deltaY * 0.0012));
+}, { passive: false });
 const keys = {};
 addEventListener('keydown', e => {
   if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) {
@@ -2289,10 +2505,8 @@ function showPlan() {
 function lockRig(id) {
   const r = rigs.find(x => x.id === id);
   if (!r) return;
-  watchRig = r;
-  camT.d = camS.d = 110;
-  camT.x = camS.x = r.x;
-  camT.z = camS.z = r.z;
+  selectOnlyRig(r, false);
+  enterLock();
   document.querySelectorAll('#sheet [data-rig]').forEach(b => b.classList.toggle('on', +b.dataset.rig === id));
 }
 function paintModes() {
@@ -2821,7 +3035,6 @@ function paintKpi() {
   paintWorldClock();
   const fleetN = $('kpi').querySelector('em');
   if (fleetN) fleetN.textContent = `/ ${rigs.length}`;
-  $('stores').textContent = `种薯 ${stores.seed} · 豆种 ${stores.seed_soy || 0} · 麦种 ${stores.seed_barley || 0} · 甘蓝苗 ${stores.seedling_cabbage || 0} · 肥料 ${stockText(stores.fertilizer)} · 干燥剂 ${stores.spray}`;
 }
 function worldClockParts() {
   const day = Math.floor(worldDay);
@@ -2902,19 +3115,24 @@ function paintStageBar(desc) {
 }
 function updateDock() {
   const el = $('dock');
-  const desc = selected?.owned ? dockOf(selected) : null;
+  const list = ownedFields();
+  const many = list.length > 1;
+  const rigOnly = !list.length && selectedRig;
+  const desc = !many && selected?.owned ? dockOf(selected) : (list.length === 1 ? dockOf(list[0]) : null);
   const chip = $('suspend');
   if (chip) {
     const title = desc?.suspend?.title || '';
     chip.classList.toggle('on', !!title);
     chip.textContent = title;
   }
-  const show = viewLayer === 'surface' && selected && (mode === 'look' || mode === 'plan');
+  const show = viewLayer === 'surface' && (list.length || rigOnly) && (mode === 'look' || mode === 'plan' || mode === 'machines');
   if (!show) { el.classList.remove('on'); dockHover = null; return; }
   el.classList.add('on');
-  const f = selected;
+  const f = list[0] || selected;
   const addr = desc?.plot || '';
-  $('selid').textContent = addr ? `C0 · ${addr}` : `F-${String(f.i).padStart(3, '0')}${String(f.j).padStart(2, '0')}`;
+  $('selid').textContent = rigOnly
+    ? (pickedRigs.size > 1 ? `已选 ${pickedRigs.size} 台农机` : rigTitle(selectedRig))
+    : (many ? `已选 ${list.length} 个田块` : (addr ? `C0 · ${addr}` : `F-${String(f.i).padStart(3, '0')}${String(f.j).padStart(2, '0')}`));
   const workEl = $('selwork');
   if (workEl) {
     const badge = !selNote && f.owned ? (desc?.badge || '') : '';
@@ -2923,7 +3141,9 @@ function updateDock() {
   }
   const sum = $('crop-sum');
   if (sum) {
-    if (!f.owned) sum.textContent = selNote || '邻区快照 · 只读';
+    if (rigOnly) sum.textContent = rigLine(selectedRig);
+    else if (many) sum.textContent = '操作取这些田都能做的';
+    else if (!f?.owned) sum.textContent = selNote || '邻区快照 · 只读';
     else if (!desc?.crop) sum.textContent = desc?.stat || '未整地';
     else {
       const quality = desc.quality == null ? '—' : desc.quality;
@@ -2941,7 +3161,10 @@ function updateDock() {
   paintStageBar(desc);
   const ops = $('dock-ops');
   if (ops) {
-    const actions = desc?.actions || [];
+    const shared = many ? contextItems() : null;
+    const actions = rigOnly
+      ? [{ id: 'follow', name: '跟随', enabled: true }]
+      : (shared || desc?.actions || []);
     const sig = actions.map(act => `${act.id}:${act.enabled ? 1 : 0}`).join('|');
     ops.style.gridTemplateColumns = `repeat(${Math.max(actions.length, 1)}, minmax(0, 1fr))`;
     if (sig !== dockOpsSig) {
@@ -3043,8 +3266,9 @@ $('dock').addEventListener('pointerdown', (e) => {
   if (!btn || btn.disabled) return;
   e.preventDefault();
   e.stopPropagation();
-  if (btn.dataset.act === 'prep') doPrep();
-  if (btn.dataset.act === 'plant') doPlant();
+  if (btn.dataset.act === 'prep') { for (const field of ownedFields()) { selected = field; doPrep(); } }
+  else if (btn.dataset.act === 'plant') { for (const field of ownedFields()) { selected = field; doPlant(); } }
+  else if (btn.dataset.act === 'follow') enterLock();
 });
 $('dock').addEventListener('pointerover', (e) => {
   const seg = e.target.closest('[data-stage]');
@@ -3400,10 +3624,15 @@ function frame(now) {
   step(dt, t, economy.timeScale); writeFields();
   // 镜头
   const ks = camT.d * 0.6 * dt; const s = Math.sin(camT.yaw), c = Math.cos(camT.yaw);
+  const pad = keys.w || keys.a || keys.s || keys.d || keys.arrowup || keys.arrowdown || keys.arrowleft || keys.arrowright;
+  if (camLock && pad) exitToDefault();
   if (keys.w || keys.arrowup) { camT.x -= s * ks; camT.z -= c * ks; } if (keys.s || keys.arrowdown) { camT.x += s * ks; camT.z += c * ks; }
   if (keys.a || keys.arrowleft) { camT.x -= c * ks; camT.z += s * ks; } if (keys.d || keys.arrowright) { camT.x += c * ks; camT.z -= s * ks; }
   if (keys.q) camT.yaw += dt; if (keys.e) camT.yaw -= dt;
-  if (watchRig && !drag) { camT.x = camS.x = watchRig.x; camT.z = camS.z = watchRig.z; }
+  if (camLock && !drag) {
+    const focus = focusOf();
+    if (focus) { camT.x = focus.x; camT.z = focus.z; }
+  }
   if (followLock && !drag && !Q.has('nofollow')) { camT.x += (followLock.x - camT.x) * 0.5; camT.z += (followLock.z - camT.z) * 0.5; }
   const k = 1 - Math.exp(-dt * 7);
   for (const key of ['x', 'z', 'yaw', 'pOff', 'lookUp', 'fovAdd']) camS[key] += (camT[key] - camS[key]) * k;
