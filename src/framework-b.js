@@ -350,6 +350,12 @@ function pushEvent(farm, ev) {
   if (farm.events.length > 40) farm.events.shift();
 }
 
+// 入仓由外层接到现有 warehouse。框架 B 不直接持有仓库数组。
+let harvestSink = null;
+export function setHarvestSink(fn) {
+  harvestSink = typeof fn === 'function' ? fn : null;
+}
+
 function queued(farm, fieldId) {
   return farm.queue.some(item => item.fieldId === fieldId);
 }
@@ -813,6 +819,31 @@ function leaveByNatural(farm, field) {
   enterStage(farm, field, natural.to);
 }
 
+// 硬收获做完、田面已是收获后，才入仓一次。升数等于信息框产量值 round(yieldBase × yieldMul)。
+// 旧薯田是 FIELD_HA × yieldL × yieldFactor，因为 yieldL 按公顷计。这里的 yieldBase 已是一整块田的产量，不再乘面积。
+// 品质用解耦后的田块品质，不写成熟度。烂地走自然边，不经过这里。
+function storePlantHarvest(farm, field, crop) {
+  const plant = field?.plant;
+  if (!plant || plant.stored || !crop) return;
+  const stage = stageOf(crop, plant.stageId);
+  if (stage?.role !== 'tail' || field.look !== 'harvested') return;
+  const yieldMul = plant.yieldMul || 1;
+  const liters = Math.round((crop.yieldBase || 0) * yieldMul);
+  if (!(liters > 0)) return;
+  const quality = qualityNow(crop, field);
+  plant.stored = true;
+  const spec = {
+    crop: crop.id,
+    name: crop.name,
+    liters,
+    yieldBase: crop.yieldBase || liters,
+    quality,
+    fieldId: field.id,
+  };
+  pushEvent(farm, { type: 'harvest-store', fieldId: field.id, crop: crop.id, liters, quality });
+  if (harvestSink) harvestSink(spec);
+}
+
 function releaseOrder(farm, order) {
   const field = farm.fields.get(order.fieldId);
   const machine = orderMachine(farm, order);
@@ -875,7 +906,10 @@ function finishOrder(farm, order) {
       enterStage(farm, field, entry.to);
     } else {
       const edge = edgesFrom(crop, field.plant.stageId).find(item => item.kind === 'hard' && item.job === job.id);
-      if (edge) enterStage(farm, field, edge.to);
+      if (edge) {
+        enterStage(farm, field, edge.to);
+        if (job.kind === 'hard' && job.look === 'harvested') storePlantHarvest(farm, field, crop);
+      }
     }
   }
 }

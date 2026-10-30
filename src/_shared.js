@@ -4,7 +4,7 @@
 // =====================================================================
 import { productById, recipeById, deviceById, shopRows, utilityCost, LOOP_OFFSETS } from './products.js';
 import { SAVE_VERSION } from './save-contract.js';
-import { fieldShader, PLANT_CROPS } from './framework-b.js';
+import { fieldShader, PLANT_CROPS, setHarvestSink } from './framework-b.js';
 import { WORLD_MIN_PER_REAL_MIN, DAY_SECONDS } from './world-clock.js';
 export { WORLD_MIN_PER_REAL_MIN, DAY_SECONDS };
 import { cropDef, rigProfile, rigCan, rigHas, hitchPlan, hitchHasModes, droneCan, JOB_PENALTY, UNLOAD_WHILE_MOVING, BIN_LANES, UNLOAD_SECONDS, TRAILER_CARGO_CAP, HITCH_SWAP_S, RELOAD_S, MODE_SWITCH_S, SURFACE_CROPS, workWidthOf, lanesForWidth, binCapOf } from './surface-crops.js';
@@ -1702,6 +1702,35 @@ function storeHarvest(f) {
   f.stored = true;
   f.harvested = true;
 }
+// 框架 B 硬收获。批次和 storeHarvest 同一形：crop / name / liters / listPrice / quality，外加 grade 供仓库格显示品质。
+// 牌价沿用 quote：拉斯提卡不可种、目录无卖价，quote 为 0，牌价就是 0。追肥把升数（以及将来的牌价）按产量倍数放大，培土只进 quality。
+function storeFrameworkHarvest(spec) {
+  const liters = Math.max(0, Math.round(+spec?.liters || 0));
+  if (!(liters > 0) || !spec?.crop) return null;
+  const parts = typeof spec.fieldId === 'string' ? spec.fieldId.split(':') : [];
+  const indexed = parts.length === 2 && parts.every(part => /^\d+$/.test(part));
+  const i = indexed ? +parts[0] : null;
+  const j = indexed ? +parts[1] : null;
+  const idx = CROPS.findIndex(c => c.id === spec.crop);
+  const listed = idx >= 0 ? quote(idx) : 0;
+  const base = +spec.yieldBase > 0 ? +spec.yieldBase : liters;
+  const lot = {
+    id: nextLot++,
+    crop: spec.crop,
+    name: spec.name || CROPS[idx]?.name || spec.crop,
+    liters,
+    listPrice: Math.max(0, Math.round(listed * (liters / base))),
+    quality: spec.quality,
+    grade: true,
+    unit: 'L',
+    fieldId: spec.fieldId || null,
+    i, j, t: worldDay,
+  };
+  warehouse.push(lot);
+  log.push({ type: 'store', pay: 0, listPrice: lot.listPrice, crop: lot.crop, name: lot.name, i, j, t: worldDay });
+  return lot;
+}
+setHarvestSink(storeFrameworkHarvest);
 function markRot(f) {
   f.paid = false;
   f.live = false;
@@ -2346,13 +2375,18 @@ export function warehouseStacks() {
     const key = lot.crop + '|' + unit;
     let s = map.get(key);
     if (!s) {
-      s = { key, crop: lot.crop, name: lot.name, unit, liters: 0, listPrice: 0, n: 0 };
+      s = { key, crop: lot.crop, name: lot.name, unit, liters: 0, listPrice: 0, n: 0, grade: undefined };
       map.set(key, s);
     }
     s.liters += +lot.liters || 0;
     s.listPrice += +lot.listPrice || 0;
     s.n += 1;
+    if (lot.grade) {
+      if (s.grade === undefined) s.grade = lot.quality;
+      else if (s.grade !== lot.quality) s.grade = null;
+    }
   }
+  for (const s of map.values()) if (s.grade === undefined) s.grade = null;
   return [...map.values()];
 }
 export function warehouseCapacity() {

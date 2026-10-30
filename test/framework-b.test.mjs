@@ -11,7 +11,7 @@ import { installShippedLastika } from '../src/lastika-stage.js';
 import { alignFieldCalendar, jobWindows, parseFieldStageDoc } from '../src/field-stages.js';
 import lastikaRaw from '../data/field-stages/lastika.json' with { type: 'json' };
 import { HUD_VERSION } from '../src/version.js';
-import { fieldVisual, CROPS, roadRoute } from '../src/_shared.js';
+import { fieldVisual, CROPS, roadRoute, warehouse, warehouseStacks } from '../src/_shared.js';
 import { DAY_SECONDS, WORLD_MIN_PER_REAL_MIN } from '../src/world-clock.js';
 
 function slice() {
@@ -644,8 +644,95 @@ test('错过成熟窗进腐烂，没有农机开工就不会收', () => {
   assert.equal(field.ground, 'general');
 });
 
+function fieldFarm(id, caps) {
+  const farm = createFarm();
+  addMachine(farm, { ...OMNI, id: 'm-' + id, caps: caps.slice(), energyLeft: OMNI.energyKwh });
+  addField(farm, { id, length: 128, width: 128, ground: 'raw', look: 'raw', plot: 'P(3,-1)' });
+  return farm;
+}
+
+function dropCrop(crop) {
+  for (let i = warehouse.length - 1; i >= 0; i--) if (warehouse[i].crop === crop) warehouse.splice(i, 1);
+}
+
+function reap(id, caps) {
+  dropCrop('lastika');
+  const farm = fieldFarm(id, caps);
+  requestPrep(farm, id);
+  until(farm, () => farm.fields.get(id).ground === 'general', 8000, 30);
+  requestPlant(farm, id);
+  const field = farm.fields.get(id);
+  until(farm, () => field.plant?.stored || field.look === 'harvested', GROW_SECONDS + 30000, 30);
+  return { farm, field };
+}
+
+test('硬收获入仓一次，追肥改数量，培土改品质，烂地不入仓', () => {
+  const hard = ['犁田', '播种', '收割', '收拾'];
+  const plain = reap('8:1', hard);
+  assert.equal(plain.field.plant.stageId, 'after');
+  assert.equal(plain.field.look, 'harvested');
+  assert.equal(plain.field.plant.stored, true);
+  assert.equal(describeField(plain.farm, '8:1').yieldValue, 100);
+  assert.equal(describeField(plain.farm, '8:1').quality, 1);
+  assert.equal(warehouse.filter(lot => lot.fieldId === '8:1').length, 1);
+  const plainLot = warehouse.find(lot => lot.fieldId === '8:1');
+  assert.equal(plainLot.crop, 'lastika');
+  assert.equal(plainLot.name, '拉斯提卡');
+  assert.equal(plainLot.liters, 100);
+  assert.equal(plainLot.quality, 1);
+  assert.equal(plainLot.grade, true);
+  assert.equal(plainLot.unit, 'L');
+  assert.equal(plainLot.listPrice, 0);
+  assert.equal(plainLot.i, 8);
+  assert.equal(plainLot.j, 1);
+  let stack = warehouseStacks().find(s => s.key === 'lastika|L');
+  assert.ok(stack);
+  assert.equal(stack.liters, 100);
+  assert.equal(stack.grade, 1);
+  assert.equal(stack.n, 1);
+  stepFarm(plain.farm, 400);
+  assert.equal(warehouse.filter(lot => lot.fieldId === '8:1').length, 1);
+
+  const fed = reap('8:2', [...hard, '追肥']);
+  assert.equal(describeField(fed.farm, '8:2').yieldValue, 200);
+  assert.equal(describeField(fed.farm, '8:2').quality, 1);
+  const fedLot = warehouse.find(lot => lot.fieldId === '8:2');
+  assert.equal(fedLot.liters, 200);
+  assert.equal(fedLot.quality, 1);
+  stack = warehouseStacks().find(s => s.key === 'lastika|L');
+  assert.equal(stack.liters, 200);
+  assert.equal(stack.grade, 1);
+
+  const both = reap('8:3', [...hard, '追肥', '培土']);
+  assert.equal(describeField(both.farm, '8:3').yieldValue, 200);
+  assert.equal(describeField(both.farm, '8:3').quality, 2);
+  const bothLot = warehouse.find(lot => lot.fieldId === '8:3');
+  assert.equal(bothLot.liters, 200);
+  assert.equal(bothLot.quality, 2);
+  stack = warehouseStacks().find(s => s.key === 'lastika|L');
+  assert.equal(stack.name, '拉斯提卡');
+  assert.equal(stack.liters, 200);
+  assert.equal(stack.grade, 2);
+  assert.equal(stack.n, 1);
+
+  dropCrop('lastika');
+  const rotFarm = fieldFarm('8:4', hard);
+  requestPrep(rotFarm, '8:4');
+  until(rotFarm, () => rotFarm.fields.get('8:4').ground === 'general', 8000, 30);
+  requestPlant(rotFarm, '8:4');
+  const rotField = rotFarm.fields.get('8:4');
+  until(rotFarm, () => rotField.plant?.stageId === 'mature' && growthAge(rotField) >= 10.2, GROW_SECONDS + DAY_SECONDS * 2, DAY_SECONDS);
+  rotFarm.machines.splice(0, rotFarm.machines.length);
+  rotFarm.orders.splice(0, rotFarm.orders.length);
+  rotFarm.queue.splice(0, rotFarm.queue.length);
+  until(rotFarm, () => rotField.plant.stageId === 'rot', (rotField.plant.need + 2) * DAY_SECONDS, DAY_SECONDS);
+  assert.equal(rotField.look, 'rot');
+  assert.equal(warehouse.filter(lot => lot.fieldId === '8:4').length, 0);
+  assert.equal(warehouseStacks().some(s => s.crop === 'lastika'), false);
+});
+
 test('拉斯提卡阶段和版本戳来自同一份定义', () => {
-  assert.equal(HUD_VERSION, '环穗 v6.15');
+  assert.equal(HUD_VERSION, '环穗 v6.16');
   const doc = parseFieldStageDoc(structuredClone(lastikaRaw));
   const windows = jobWindows(doc, alignFieldCalendar(doc)).filter(item => item.op.kind === 'optional');
   assert.deepEqual(windows.map(item => item.op.id), ['topdress', 'hill']);

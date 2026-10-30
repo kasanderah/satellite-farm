@@ -2724,11 +2724,12 @@ function paintSheet() {
     const stacks = warehouseStacks();
     if (pickedStack && !stacks.some(s => s.key === pickedStack)) pickedStack = stacks[0]?.key || null;
     if (!pickedStack && stacks[0]) pickedStack = stacks[0].key;
-    const slots = stacks.map(s => ({ key: s.key, name: s.name, sub: `${fmt(s.liters)} ${s.unit}` }));
+    const gradeText = s => (s.grade != null ? ` · 品质 ${s.grade}` : '');
+    const slots = stacks.map(s => ({ key: s.key, name: s.name, sub: `${fmt(s.liters)} ${s.unit}${gradeText(s)}` }));
     const cur = stacks.find(s => s.key === pickedStack);
     const capLine = cap.soft ? `已用 ${cap.usedSlots} 格 · ${fmt(cap.usedLiters)} L · 容量未封顶` : `已用 ${cap.usedSlots}/${cap.maxSlots ?? '—'} 格`;
     const right = cur
-      ? `<div class="who"><b>${cur.name}</b><span>${fmt(cur.liters)} ${cur.unit} · 牌价 ${fmt(cur.listPrice)}</span></div><p class="note">${cur.n} 批叠在这一格。拖百分比，按这个比例出售。</p><input id="sell-pct" type="range" min="1" max="100" value="100" aria-label="出售比例"><div class="who"><span id="sell-pct-lab">100%</span></div><button type="button" class="sell" id="sell">出售</button>`
+      ? `<div class="who"><b>${cur.name}</b><span>${fmt(cur.liters)} ${cur.unit}${gradeText(cur)} · 牌价 ${fmt(cur.listPrice)}</span></div><p class="note">${cur.n} 批叠在这一格。拖百分比，按这个比例出售。</p><input id="sell-pct" type="range" min="1" max="100" value="100" aria-label="出售比例"><div class="who"><span id="sell-pct-lab">100%</span></div><button type="button" class="sell" id="sell">出售</button>`
       : `<p class="note">仓里还是空的。收获的薯和蛋白会叠到左边。</p>`;
     el.innerHTML = `<div class="split"><div><div class="who"><b>仓库</b><span>${capLine}</span></div>${stackSlots(slots, pickedStack, 'data-stack')}</div><div>${right}</div></div>`;
     const pct = $('sell-pct');
