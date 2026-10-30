@@ -1412,7 +1412,10 @@ export function describeField(farm, fieldId) {
   const quality = crop && field.plant ? qualityNow(crop, field) : null;
   const locked = fieldLocked(farm, field);
   const next = field.nextCrop ? PLANT_CROPS[field.nextCrop] : null;
-  const actions = [];
+  const actions = [
+    { id: 'prep', name: '整地', enabled: !locked },
+    { id: 'plant', name: '种植', enabled: !locked && !field.plant && field.ground === 'general' },
+  ];
   const chips = barStages.map(item => ({ name: item.name, on: item.on }));
   const bar = work ? work.progress : (field.plant?.clock && field.plant.need ? field.plant.grow / field.plant.need : 0);
   return {

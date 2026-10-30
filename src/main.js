@@ -1931,7 +1931,7 @@ function applyDeckView() {
 let drag = null, ptr = null, rightArm = null, selected = null, selectedRig = null, selNote = '', plantOpen = false, prepOpen = false;
 let camLock = false;
 let lockFocus = null;
-let mode = 'look', watchRig = null, pickedLot = null, pickedStack = null, shopPick = 'seed', rigPick = 'tractor', cropPick = 'potato', deckTank = 0, deckBlock = null, deckHub = false, buildAct = 'place', buildKind = 'warehouse', buildPick = null, millPlace = false;
+let mode = 'look', subTool = null, watchRig = null, pickedLot = null, pickedStack = null, shopPick = 'seed', rigPick = 'tractor', cropPick = 'potato', deckTank = 0, deckBlock = null, deckHub = false, buildAct = 'place', buildKind = 'warehouse', buildPick = null, millPlace = false;
 let planCycle = false, planBuy = false;
 const pickedFields = new Set();
 const pickedRigs = new Set();
@@ -2315,22 +2315,25 @@ function orderTargets() {
 function paintSubbar() {
   const host = $('subbar');
   if (!host) return;
-  if (mode !== 'prep' && mode !== 'plant') {
+  if (subTool !== 'prep' && subTool !== 'plant') {
     host.classList.remove('on');
     host.innerHTML = '';
     return;
   }
   host.classList.add('on');
-  if (mode === 'prep') {
+  if (subTool === 'prep') {
     host.innerHTML = Object.values(PREP_RECIPES).map(recipe => `<button type="button" data-recipe="${recipe.id}"><b>${recipe.name}</b><small>${recipe.targetName}</small></button>`).join('');
     return;
   }
   host.innerHTML = Object.values(PLANT_CROPS).map(crop => `<button type="button" data-crop="${crop.id}"><b>${crop.name}</b></button>`).join('');
 }
 function closeSubTool() {
-  if (mode === 'prep' || mode === 'plant') mode = 'look';
-  paintModes();
-  paintSheet();
+  subTool = null;
+  paintSubbar();
+  updateDock();
+}
+function toggleSub(kind) {
+  subTool = subTool === kind ? null : kind;
   paintSubbar();
   updateDock();
 }
@@ -2378,8 +2381,8 @@ document.getElementById('planmenu').addEventListener('click', e => {
   const ctx = e.target.closest('[data-ctx]');
   if (!ctx) return;
   closePlanMenu();
-  if (ctx.dataset.ctx === 'prep') setMode('prep');
-  else if (ctx.dataset.ctx === 'plant') setMode('plant');
+  if (ctx.dataset.ctx === 'prep') toggleSub('prep');
+  else if (ctx.dataset.ctx === 'plant') toggleSub('plant');
   else if (ctx.dataset.ctx === 'follow') enterLock();
   else if (ctx.dataset.ctx === 'sell') sellCurrentRig();
   else if (ctx.dataset.ctx === 'clear') exitToDefault();
@@ -2526,7 +2529,7 @@ addEventListener('keydown', e => {
   if (e.key === 'F2' || e.key === '\\') { e.preventDefault(); toggleAdmin(); }
   if (e.key === 'v' || e.key === 'V') toggleViewer();
   if (e.key === 'Escape') {
-    if (mode === 'prep' || mode === 'plant') { closeSubTool(); return; }
+    if (subTool) { closeSubTool(); return; }
     if (prepOpen || plantOpen) { closeToolMenus(); updateDock(); return; }
     $('admin').classList.remove('on');
     $('viewer').classList.remove('on');
@@ -2585,7 +2588,7 @@ legend.innerHTML = [
   ['收割', PALETTE.ochre, PALETTE.straw],
   ['收拾', PALETTE.rego, PALETTE.regoLt],
 ].map(([name, a, b]) => `<div class="lg"><i style="background:linear-gradient(90deg,${a},${b})"></i><span>${name}</span></div>`).join('');
-const MODES = [['machines', '农机', 'FLEET'], ['rigshop', '农机店', 'BUY'], ['plan', '区域', 'PLAN'], ['prep', '整地', 'TILL'], ['plant', '种植', 'SOW'], ['crops', '作物', 'CROP'], ['scheme', '规划', 'ASSIGN'], ['store', '仓库', 'STORE'], ['build', '建设', 'BUILD'], ['shop', '商店', 'SHOP']];
+const MODES = [['machines', '农机', 'FLEET'], ['rigshop', '农机店', 'BUY'], ['plan', '区域', 'PLAN'], ['crops', '作物', 'CROP'], ['scheme', '规划', 'ASSIGN'], ['store', '仓库', 'STORE'], ['build', '建设', 'BUILD'], ['shop', '商店', 'SHOP']];
 $('tiers').innerHTML = MODES.map(([id, zh, en]) => `<button type="button" data-mode="${id}"><b>${zh}</b><small>${en}</small></button>`).join('');
 function gotoTier(n) { camT.d = [4800, 900, 160, 34][n - 1]; camT.pOff = 0; camT.lookUp = 0; camT.fovAdd = 0; }
 function fieldCode(f) { return `F-${String(f.i).padStart(3, '0')}${String(f.j).padStart(2, '0')}`; }
@@ -2739,7 +2742,7 @@ function stackSlots(list, pick, attr) {
 function paintSheet() {
   const el = $('sheet');
   el.classList.toggle('wide', mode === 'crops' || mode === 'store' || mode === 'shop' || mode === 'scheme' || mode === 'rigshop');
-  if (mode === 'plan' || mode === 'look' || mode === 'prep' || mode === 'plant') { el.classList.remove('on'); el.innerHTML = ''; return; }
+  if (mode === 'plan' || mode === 'look') { el.classList.remove('on'); el.innerHTML = ''; return; }
   el.classList.add('on');
   if (mode === 'crops') {
     const rows = CROPS.map(c => ({ key: c.id, name: c.name, sub: c.plantable ? '可种' : '邻区' }));
@@ -2845,6 +2848,7 @@ function returnToLook() {
   closePlanMenu();
   pickedFields.clear();
   selectField(null);
+  subTool = null;
   paintModes();
   paintSheet();
   paintSubbar();
@@ -2860,15 +2864,8 @@ function setMode(id) {
     paintLayers();
   }
   mode = id;
+  subTool = null;
   if (id === 'plan') { showPlan(); paintSubbar(); return; }
-  if (id === 'prep' || id === 'plant') {
-    watchRig = null;
-    closePlanMenu();
-    paintModes();
-    paintSheet();
-    paintSubbar();
-    return;
-  }
   if (id !== 'machines') watchRig = null;
   if (id !== 'scheme') closePlanMenu();
   paintModes();
@@ -2876,11 +2873,7 @@ function setMode(id) {
   paintSubbar();
 }
 function toggleMode(id) {
-  if (mode === id) {
-    if (id === 'prep' || id === 'plant') { closeSubTool(); return; }
-    returnToLook();
-    return;
-  }
+  if (mode === id) { returnToLook(); return; }
   setMode(id);
 }
 $('tiers').addEventListener('click', e => {
@@ -3499,6 +3492,7 @@ function updateDock() {
       dockOpsSig = sig;
       ops.innerHTML = actions.map(act => `<button type="button" data-act="${act.id}"${act.enabled ? '' : ' disabled'}><b>${act.name}</b></button>`).join('');
     }
+    ops.querySelectorAll('[data-act]').forEach(btn => btn.classList.toggle('on', btn.dataset.act === subTool));
   }
 }
 function paintRates() {
@@ -3594,8 +3588,8 @@ $('dock').addEventListener('pointerdown', (e) => {
   if (!btn || btn.disabled) return;
   e.preventDefault();
   e.stopPropagation();
-  if (btn.dataset.act === 'prep') setMode('prep');
-  else if (btn.dataset.act === 'plant') setMode('plant');
+  if (btn.dataset.act === 'prep') toggleSub('prep');
+  else if (btn.dataset.act === 'plant') toggleSub('plant');
   else if (btn.dataset.act === 'follow') enterLock();
   else if (btn.dataset.act === 'sell') sellCurrentRig();
 });
