@@ -2851,6 +2851,7 @@ function paintWorldClock() {
 }
 let dockHover = null;
 let dockBarSig = '';
+let dockOpsSig = '';
 function jobRow(job) {
   const hot = job.status === '执行中' || job.status === '开来' || job.status === '转弯' || job.status === '等待' || job.status === '可派';
   const miss = job.status === '过期';
@@ -2941,8 +2942,12 @@ function updateDock() {
   const ops = $('dock-ops');
   if (ops) {
     const actions = desc?.actions || [];
+    const sig = actions.map(act => `${act.id}:${act.enabled ? 1 : 0}`).join('|');
     ops.style.gridTemplateColumns = `repeat(${Math.max(actions.length, 1)}, minmax(0, 1fr))`;
-    ops.innerHTML = actions.map(act => `<button type="button" data-act="${act.id}"${act.enabled ? '' : ' disabled'}><b>${act.name}</b></button>`).join('');
+    if (sig !== dockOpsSig) {
+      dockOpsSig = sig;
+      ops.innerHTML = actions.map(act => `<button type="button" data-act="${act.id}"${act.enabled ? '' : ' disabled'}><b>${act.name}</b></button>`).join('');
+    }
   }
 }
 function paintRates() {
@@ -3033,9 +3038,11 @@ function bootStagesSync() {
 const bootStageNote = bootStagesSync();
 $('kpi').innerHTML = `<div class="k-rev"><small>营收</small><b class="hv" id="kpi-rev">0</b></div><div class="k-day"><small>世界日</small><b id="kpi-day">0</b></div><div class="k-time"><small>时刻</small><span class="clk"><i class="face" id="kpi-face" aria-hidden="true"><i id="kpi-hh"></i><i id="kpi-mh"></i></i><b id="kpi-hm">00:00</b><b id="kpi-rate">1×</b></span></div><div class="k-act"><small>作业</small><b class="hv" id="kpi-act">0</b><em>/ ${rigs.length}</em></div>`;
 $('dock').innerHTML = `<div class="drow"><div class="dlab">单元信息</div><div class="who"><div class="name"><b id="selid"></b><em id="selwork" hidden></em></div></div></div><div class="drow"><div class="dlab">作物概况</div><div class="sum" id="crop-sum"></div></div><div class="drow"><div class="dlab" id="dock-jobs-lab">当前阶段作业监控</div><div id="dock-jobs" class="jobs"></div></div><div class="drow"><div class="dlab">生长阶段监控</div><div id="stagebar"></div></div><div class="drow"><div class="dlab">操作按钮</div><div class="ops" id="dock-ops"></div></div>`;
-$('dock').addEventListener('click', (e) => {
+$('dock').addEventListener('pointerdown', (e) => {
   const btn = e.target.closest('[data-act]');
   if (!btn || btn.disabled) return;
+  e.preventDefault();
+  e.stopPropagation();
   if (btn.dataset.act === 'prep') doPrep();
   if (btn.dataset.act === 'plant') doPlant();
 });
