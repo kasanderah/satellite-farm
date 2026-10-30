@@ -4,6 +4,7 @@
   "readme": "拉斯提卡测试作物。主游戏只读 graph。前段合计 12 世界日：青苗 2、发育 6、成熟 4。烂地和收获后无限，不计入。追肥在第 5–6 日，收获在第 11–12 日。没开工就进烂地。收获做完改画收获后。",
   "cycle": 38,
   "yieldBase": 100,
+  "qualityBase": 1,
   "quality": null,
   "maturity": { "fullAt": 10, "maxHarvest": 120, "rotLine": 120 },
   "cropId": "lastika",
@@ -33,6 +34,7 @@
         { "job": "topdress", "kind": "soft", "name": "追肥", "from": 5, "to": 6, "yieldMul": 2 }
       ] },
       { "id": "mature", "name": "成熟", "role": "node", "kind": "time", "look": "mature", "days": 4, "color": "#787c32", "display": { "from": { "color": "#6a7340", "cover": 0.72 }, "to": { "color": "#787c32", "cover": 0.95 } }, "jobs": [
+        { "job": "hill", "kind": "soft", "name": "培土", "from": 8, "to": 10, "qualityAdd": 1 },
         { "job": "harvest", "kind": "hard", "name": "收获", "from": 11, "to": 12 }
       ] },
       { "id": "rot", "name": "烂地", "role": "rot", "kind": "rot", "look": "rot", "color": "#5c4636", "jobs": [

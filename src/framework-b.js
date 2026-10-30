@@ -67,9 +67,9 @@ export const PLANT_CROPS = {
     growDays: GROW_DAYS,
     growSeconds: GROW_SECONDS,
     yieldBase: 100,
-    quality: null,
-    // 第 10 日末 100%。第 11–12 日升到 120%。超过 maxHarvest 不能收获。rotLine 与它同级。
-    maturity: { fullAt: 10, maxHarvest: 120, rotLine: 120 },
+    qualityBase: 1,
+    // 100% 跟收获硬窗起点走，不另记一条日数。超过 maxHarvest 不能开工收获。
+    maturity: { maxHarvest: 120, rotLine: 120 },
     visual: { shape: 'bush', tex: 'ridges', height: 0.7, row: 0.75, along: 0.36 },
     graph: {
       entry: { job: 'sow', to: 'seedling' },
@@ -88,6 +88,7 @@ export const PLANT_CROPS = {
         { job: 'topdress', kind: 'soft', name: '追肥', from: 5, to: 6, yieldMul: 2 },
       ] },
       { id: 'mature', name: '成熟', role: 'node', kind: 'time', look: 'mature', days: 4, color: '#787c32', display: { from: { color: '#6a7340', cover: 0.72 }, to: { color: '#787c32', cover: 0.95 } }, jobs: [
+        { job: 'hill', kind: 'soft', name: '培土', from: 8, to: 10, qualityAdd: 1 },
         { job: 'harvest', kind: 'hard', name: '收获', from: 11, to: 12 },
       ] },
       { id: 'rot', name: '烂地', role: 'rot', kind: 'rot', look: 'rot', color: '#5c4636', jobs: [
@@ -716,14 +717,22 @@ export function growthAge(field) {
   return stageOrigin(crop, stage.id) + (field.plant.grow || 0);
 }
 
+export function harvestWindow(crop) {
+  for (const stage of crop?.stages || []) {
+    const job = (stage.jobs || []).find(item => item.kind === 'hard' && item.job === 'harvest' && item.from != null && item.to != null);
+    if (job) return { from: Number(job.from), to: Number(job.to) };
+  }
+  return null;
+}
+
 export function maturityPercent(crop, age) {
-  const spec = crop?.maturity || { fullAt: 10, maxHarvest: 120 };
-  const fullAt = spec.fullAt > 0 ? spec.fullAt : 10;
-  const max = spec.maxHarvest > 0 ? spec.maxHarvest : 120;
+  const win = harvestWindow(crop);
+  const start = win && win.from > 0 ? win.from : 1;
+  const end = win && win.to > start ? win.to : start + 1;
+  const max = crop?.maturity?.maxHarvest > 0 ? crop.maturity.maxHarvest : 120;
   const day = Math.max(0, age || 0);
-  if (day <= fullAt) return (day / fullAt) * 100;
-  const span = Math.max(1e-6, cycleDays(crop) - fullAt);
-  return 100 + ((day - fullAt) / span) * (max - 100);
+  if (day <= start) return (day / start) * 100;
+  return 100 + ((day - start) / (end - start)) * (max - 100);
 }
 
 export function harvestAllowed(crop, age) {
@@ -731,12 +740,10 @@ export function harvestAllowed(crop, age) {
   return maturityPercent(crop, age) <= max + 1e-6;
 }
 
-// 收获当时按成熟度落到离散档，之后不再跟着长。
-export function qualityAtHarvest(crop, age) {
-  const m = maturityPercent(crop, age);
-  if (m >= 110) return 3;
-  if (m >= 100) return 2;
-  return 1;
+export function qualityNow(crop, field) {
+  const base = crop?.qualityBase ?? crop?.quality ?? 1;
+  if (field?.plant && field.plant.quality != null) return field.plant.quality;
+  return base;
 }
 
 function windowOpen(spec, age) {
@@ -828,6 +835,10 @@ function finishOrder(farm, order) {
       row.progress = 1;
       row.status = '执行完';
       if (row.yieldMul > 1) field.plant.yieldMul = Math.max(field.plant.yieldMul || 1, row.yieldMul);
+      if (row.qualityAdd) {
+        const base = field.plant.quality ?? cropOfPlant(field)?.qualityBase ?? 1;
+        field.plant.quality = base + row.qualityAdd;
+      }
       painted = commitSweep(field, job);
     }
     releaseOrder(farm, order);
@@ -843,9 +854,6 @@ function finishOrder(farm, order) {
   }
   releaseOrder(farm, order);
   pushEvent(farm, { type: 'job-complete', fieldId: field?.id, jobId: job.id, look: job.look, lane: order.lane });
-  if (field?.plant && job?.id === 'harvest') {
-    field.plant.quality = qualityAtHarvest(cropOfPlant(field), growthAge(field));
-  }
   if (field) applyLook(field, job);
   if (field?.prep && order.lane === 'prep') {
     const recipe = PREP_RECIPES[field.prep.recipeId];
@@ -904,6 +912,7 @@ function bindSoft(field) {
       to: spec.to,
       full: !!spec.full,
       yieldMul: spec.yieldMul || 1,
+      qualityAdd: spec.qualityAdd || 0,
       progress: 0,
       status: '未执行',
     };
@@ -1225,6 +1234,7 @@ export function describeField(farm, fieldId) {
   const rotten = stage?.role === 'rot';
   const maturity = !crop || rotten ? null : maturityPercent(crop, Math.min(age, cycle || age));
   const yieldValue = crop ? Math.round((crop.yieldBase || 0) * (field.plant?.yieldMul || 1)) : 0;
+  const quality = crop && field.plant ? qualityNow(crop, field) : null;
   const locked = fieldLocked(farm, field);
   const actions = [{ id: 'prep', name: '整地', enabled: !locked }];
   if (!field.plant && field.ground === 'general') actions.push({ id: 'plant', name: '种植', enabled: !locked });
@@ -1246,7 +1256,7 @@ export function describeField(farm, fieldId) {
     cycle,
     maturity,
     yieldValue,
-    quality: field.plant?.quality ?? null,
+    quality,
     showMaturity: maturity != null,
     stageName: stage?.name || '',
     barStages,

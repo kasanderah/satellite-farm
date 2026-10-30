@@ -163,6 +163,19 @@ function paintRig(order, unit) {
 
 const SPECS = { omni: OMNI, tractor: TRACTOR };
 
+export function dropDrive(machineId) {
+  if (!farm || !machineId) return { ok: true };
+  const machine = farm.machines.find(m => m.id === machineId);
+  if (!machine) return { ok: true };
+  if (machine.busy || farm.orders.some(order => order.machineId === machineId || order.hitchId === machine.hitchId)) {
+    return { ok: false, reason: 'busy' };
+  }
+  const hitchId = machine.hitchId;
+  farm.machines = farm.machines.filter(m => m.id !== machineId && m.id !== hitchId);
+  farm.queue = farm.queue.filter(item => item.machineId !== machineId);
+  return { ok: true };
+}
+
 export function bootSlice(next) {
   ctx = next;
   farm = createFarm();

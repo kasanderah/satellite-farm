@@ -11,7 +11,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { HorizontalTiltShiftShader } from 'three/addons/shaders/HorizontalTiltShiftShader.js';
 import { VerticalTiltShiftShader } from 'three/addons/shaders/VerticalTiltShiftShader.js';
-import { PALETTE, CROPS, TEX_ID, L, fields, harvesters, haulers, drones, step, TRUNKS_X, TRUNKS_Z, depots, inCrater, ROADS, RING, LAYERS, CUT, wrapX, PLOT, economy, focus, signals, log, plantField, abandonField, quote, setTimeScale, setPaused, paused, exportSnapshot, applySnapshot, fieldAtWorld, fieldAt, toWorld, onAfterStep, fieldOrigin, simTime, worldDay, stores, rigs, fieldVisual, cropWatch, stageBoard, POTATO_DAYS, POTATO_STAGES, warehouse, buildings, sellLot, sellStack, warehouseStacks, warehouseCapacity, placeBuilding, removeBuilding, rigReadout, SHOP, buySeed, buyItem, SEED_PER_FIELD, FERT_PER_FIELD, resetGame, CULTURES, DECK_CLIMATE, tanks, cultureWatch, startCulture, tendCulture, harvestCulture, BUILDING_KINDS, CULTURE_CELLS, tankSite, devices, potatoStock, fertPlan, cultureFeedPlan, millWatch, startMill, removeMill, orderProcess, HUB_SITES, cropDossier, MACHINE_SHOP, buyMachine, cropDef, boomWatch, rigProfile, DRONE_SHOP, workDrones, buyDrone, sectorLight, sectorWord, dayCenter, setWorldDay, RING_OMEGA, bindPotatoClock, bindSurfaceClock, formatTimeScale } from './_shared.js';
+import { PALETTE, CROPS, TEX_ID, L, fields, harvesters, haulers, drones, step, TRUNKS_X, TRUNKS_Z, depots, inCrater, ROADS, RING, LAYERS, CUT, wrapX, PLOT, economy, focus, signals, log, plantField, abandonField, quote, setTimeScale, setPaused, paused, exportSnapshot, applySnapshot, fieldAtWorld, fieldAt, toWorld, onAfterStep, fieldOrigin, simTime, worldDay, stores, rigs, fieldVisual, cropWatch, stageBoard, POTATO_DAYS, POTATO_STAGES, warehouse, buildings, sellLot, sellStack, warehouseStacks, warehouseCapacity, placeBuilding, removeBuilding, rigReadout, SHOP, buySeed, buyItem, SEED_PER_FIELD, FERT_PER_FIELD, resetGame, CULTURES, DECK_CLIMATE, tanks, cultureWatch, startCulture, tendCulture, harvestCulture, BUILDING_KINDS, CULTURE_CELLS, tankSite, devices, potatoStock, fertPlan, cultureFeedPlan, millWatch, startMill, removeMill, orderProcess, HUB_SITES, cropDossier, MACHINE_SHOP, buyMachine, cropDef, boomWatch, rigProfile, DRONE_SHOP, workDrones, buyDrone, sectorLight, sectorWord, dayCenter, setWorldDay, RING_OMEGA, bindPotatoClock, bindSurfaceClock, formatTimeScale, sellRig, machineSellPrice, rigIsWorking } from './_shared.js';
 import { applyStagePayload, bootFieldStageSource, writeStageStore, suspendLastikaStage, resumeLastikaStage, stageBadge } from './field-stage-live.js';
 import { bootWorkshopMachines } from './machine-live.js';
 import { potatoDrawLooks, POTATO_PAINT_SLOTS, workWidthOf } from './surface-crops.js';
@@ -24,7 +24,7 @@ import { surfaceKits, hitchOffset } from './surface-kits.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CULT_EMPTY } from './lab-catalog.js';
 import { makeColony } from './colony-art.js';
-import { bootSlice, tickSlice, prepField, plantCrop, dockOf } from './b-bind.js';
+import { bootSlice, tickSlice, prepField, plantCrop, dockOf, dropDrive } from './b-bind.js';
 import { PLANT_CROPS, PREP_RECIPES, JOBS, stageDisplayStops } from './framework-b.js';
 import { HUD_VERSION } from './version.js';
 import { DAY_SECONDS } from './world-clock.js';
@@ -2088,7 +2088,14 @@ function onLeftClick(cx, cy, shift) {
   selectOnlyField(f);
 }
 function contextItems() {
-  if (selectionKind() === 'rig') return [{ id: 'follow', name: '跟随' }, { id: 'clear', name: '取消选择' }];
+  if (selectionKind() === 'rig') {
+    const busy = rigIsWorking(selectedRig);
+    return [
+      { id: 'follow', name: '跟随' },
+      { id: 'sell', name: busy ? '出售（作业中）' : `出售 · +${fmt(machineSellPrice(selectedRig))}` },
+      { id: 'clear', name: '取消选择' },
+    ];
+  }
   const list = ownedFields();
   if (!list.length) return [];
   const sets = list.map(f => dockOf(f)?.actions || []);
@@ -2313,6 +2320,7 @@ document.getElementById('planmenu').addEventListener('click', e => {
   if (ctx.dataset.ctx === 'prep') { for (const f of ownedFields()) { selected = f; doPrep(); } }
   else if (ctx.dataset.ctx === 'plant') { for (const f of ownedFields()) { selected = f; doPlant(); } }
   else if (ctx.dataset.ctx === 'follow') enterLock();
+  else if (ctx.dataset.ctx === 'sell') sellCurrentRig();
   else if (ctx.dataset.ctx === 'clear') exitToDefault();
 });
 R.domElement.addEventListener('contextmenu', e => e.preventDefault());
@@ -2626,6 +2634,27 @@ function showPlan() {
   paintModes();
   paintSheet();
 }
+function sellCurrentRig() {
+  const r = selectedRig && rigs.includes(selectedRig) ? selectedRig : null;
+  if (!r) return;
+  if (rigIsWorking(r)) { toast('这台正在作业，要等它停'); return; }
+  if (r.bDrive && !dropDrive(r.machineId || r.kind).ok) { toast('这台正在作业，要等它停'); return; }
+  const sold = sellRig(r.id);
+  if (!sold.ok) { toast(sold.reason === 'busy' ? '这台正在作业，要等它停' : '卖不了'); return; }
+  pickedRigs.delete(r.id);
+  if (selectedRig === r) selectedRig = rigs.find(item => pickedRigs.has(item.id)) || null;
+  if (watchRig === r) watchRig = null;
+  if (camLock && lockFocus?.kind === 'rig' && lockFocus.id === r.id) {
+    camLock = false;
+    lockFocus = null;
+    watchRig = null;
+  }
+  rigHudSig = '';
+  paintKpi();
+  if (mode === 'machines') paintSheet();
+  updateDock();
+  saveSoon();
+}
 function lockRig(id) {
   const r = rigs.find(x => x.id === id);
   if (!r) return;
@@ -2661,7 +2690,13 @@ function paintSheet() {
   } else if (mode === 'machines') {
     const fleetRows = rigs.map(r => `<button type="button" class="rowbtn${watchRig === r ? ' on' : ''}" data-rig="${r.id}"><b>${rigTitle(r)}</b><small>${rigLine(r)}</small></button>`).join('')
       + workDrones.map(d => `<button type="button" class="rowbtn${watchRig === d ? ' on' : ''}" data-drone="${d.id}"><b>${d.label}</b><small>${rigLine(d)}</small></button>`).join('');
-    el.innerHTML = `<div class="who"><b>农机</b><span>点一台，镜头跟着它</span></div>` + (fleetRows || '<p class="note">机库是空的。</p>');
+    const held = selectedRig && rigs.includes(selectedRig) ? selectedRig : null;
+    const sellNote = !held
+      ? '<p class="note">点一台再出售。售价是购入价的一半。作业中的不卖。</p>'
+      : rigIsWorking(held)
+        ? `<p class="note">${rigTitle(held)}正在作业，要等它停。</p><button type="button" class="sell" id="sell-rig" disabled>出售</button>`
+        : `<p class="note">售价是购入价的一半。</p><button type="button" class="sell" id="sell-rig">出售 ${rigTitle(held)} · +${fmt(machineSellPrice(held))}</button>`;
+    el.innerHTML = `<div class="who"><b>农机</b><span>点一台，镜头跟着它</span></div>` + (fleetRows || '<p class="note">机库是空的。</p>') + sellNote;
   } else if (mode === 'rigshop') {
     const rows = MACHINE_SHOP.map(item => {
       const n = rigs.filter(r => r.kind === item.id).length;
@@ -2784,6 +2819,7 @@ $('sheet').addEventListener('change', e => { if (e.target.dataset?.flag) readPla
 $('sheet').addEventListener('click', e => {
   const rig = e.target.closest('[data-rig]');
   if (rig) { lockRig(+rig.dataset.rig); return; }
+  if (e.target.id === 'sell-rig') { sellCurrentRig(); return; }
   const droneBtn = e.target.closest('[data-drone]');
   if (droneBtn) {
     const d = workDrones.find(x => x.id === +droneBtn.dataset.drone);
@@ -3358,7 +3394,10 @@ function updateDock() {
   if (ops) {
     const shared = many ? contextItems() : null;
     const actions = rigOnly
-      ? [{ id: 'follow', name: '跟随', enabled: true }]
+      ? [
+        { id: 'follow', name: '跟随', enabled: true },
+        { id: 'sell', name: rigIsWorking(selectedRig) ? '出售（作业中）' : '出售', enabled: !rigIsWorking(selectedRig) },
+      ]
       : (shared || desc?.actions || []);
     const sig = actions.map(act => `${act.id}:${act.enabled ? 1 : 0}`).join('|');
     ops.style.gridTemplateColumns = `repeat(${Math.max(actions.length, 1)}, minmax(0, 1fr))`;
@@ -3464,6 +3503,7 @@ $('dock').addEventListener('pointerdown', (e) => {
   if (btn.dataset.act === 'prep') { for (const field of ownedFields()) { selected = field; doPrep(); } }
   else if (btn.dataset.act === 'plant') { for (const field of ownedFields()) { selected = field; doPlant(); } }
   else if (btn.dataset.act === 'follow') enterLock();
+  else if (btn.dataset.act === 'sell') sellCurrentRig();
 });
 $('dock').addEventListener('pointerover', (e) => {
   const seg = e.target.closest('[data-stage]');

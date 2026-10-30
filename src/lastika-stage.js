@@ -92,6 +92,7 @@ export function lastikaSpecFromDoc(doc) {
     maturity: doc.maturity || PLANT_CROPS.lastika.maturity,
     yieldBase: Number(doc.yieldBase) > 0 ? Number(doc.yieldBase) : PLANT_CROPS.lastika.yieldBase,
     quality: doc.quality == null ? null : doc.quality,
+    qualityBase: Number(doc.qualityBase) > 0 ? Number(doc.qualityBase) : 1,
   };
 }
 
@@ -104,6 +105,7 @@ export function applyLastikaSpec(spec, origin = 'repo') {
   crop.maturity = spec.maturity;
   crop.yieldBase = spec.yieldBase;
   crop.quality = spec.quality;
+  crop.qualityBase = spec.qualityBase;
   crop.visual = { ...crop.visual, ...spec.visual, tex: 'ridges' };
   crop.stages.splice(0, crop.stages.length, ...spec.stages);
   crop.paints = { ...spec.paints };

@@ -1839,8 +1839,8 @@ export function rigReadout(r) {
   const garageAt = hubPad(3, 2);
   garageOrigin = { x: garageAt.x, z: garageAt.z };
   const stalls = [
-    { id: 0, kind: 'omni', machineId: 'omni', label: '万能农机', role: '自走一体', caps: ['犁田', '播种', '收割', '收拾', '追肥', '培土'], width: 16, z: garageAt.z + 14 },
-    { id: 1, kind: 'tractor', machineId: 'tractor', label: '拖拉机', role: '拖拉机+犁', caps: ['犁田'], width: 12, impl: 'impl_subsoiler', z: garageAt.z + 32 },
+    { id: 0, kind: 'omni', machineId: 'omni', label: '万能农机', role: '自走一体', caps: ['犁田', '播种', '收割', '收拾', '追肥', '培土'], width: 16, buyPrice: 24000, z: garageAt.z + 14 },
+    { id: 1, kind: 'tractor', machineId: 'tractor', label: '拖拉机', role: '拖拉机+犁', caps: ['犁田'], width: 12, impl: 'impl_subsoiler', buyPrice: 12000, z: garageAt.z + 32 },
   ];
   for (const stall of stalls) {
     const rig = {
@@ -1848,6 +1848,7 @@ export function rigReadout(r) {
       caps: stall.caps, impl: stall.impl || null, logicId: 'tractor_gen', bDrive: true, bWidth: stall.width,
       busy: false, f: null, job: null, mode: 'park', intent: null, route: null, ri: 0,
       charge: 1, lane: 0, u: 0, bin: 0, cargo: 0, parkX: garageAt.x, parkZ: stall.z, x: garageAt.x, z: stall.z, ang: -Math.PI / 2,
+      buyPrice: stall.buyPrice || 0,
     };
     bootRig(rig);
     rigs.push(rig);
@@ -2269,6 +2270,7 @@ function addRig(kind) {
     id: nextRigId++, kind, label: rigProfile(kind)?.label || spec.name, logicId: rigProfile(kind)?.logicId || kind,
     busy: false, f: null, job: null, mode: 'park', intent: null, route: null, ri: 0,
     charge: 1, lane: 0, u: 0, bin: 0, cargo: 0, parkX: spot.x, parkZ: spot.z, x: spot.x, z: spot.z, ang: -Math.PI / 2,
+    buyPrice: spec.price,
   };
   bootRig(r);
   rigs.push(r);
@@ -2282,6 +2284,36 @@ function restoreFleet(list) {
     if (item && MACHINE_SHOP.some(m => m.id === item.kind)) addRig(item.kind);
   }
 }
+export const MACHINE_SELL_RATIO = 0.5;
+
+export function machineListPrice(rig) {
+  if (rig?.buyPrice > 0) return rig.buyPrice;
+  const shop = MACHINE_SHOP.find(m => m.id === rig?.kind);
+  if (shop?.price > 0) return shop.price;
+  return 8000;
+}
+
+export function machineSellPrice(rig) {
+  return Math.round(machineListPrice(rig) * MACHINE_SELL_RATIO);
+}
+
+export function rigIsWorking(rig) {
+  return !!(rig && (rig.busy || rig.mode === 'work' || rig.mode === 'travel' || rig.mode === 'turn'));
+}
+
+export function sellRig(id) {
+  const i = rigs.findIndex(r => r.id === id);
+  if (i < 0) return { ok: false, reason: 'gone' };
+  const rig = rigs[i];
+  if (rigIsWorking(rig)) return { ok: false, reason: 'busy' };
+  const pay = machineSellPrice(rig);
+  const name = rig.label || '农机';
+  rigs.splice(i, 1);
+  economy.revenue += pay;
+  log.push({ type: 'sale', pay, name, n: 1, t: worldDay });
+  return { ok: true, pay, name, id };
+}
+
 export function buyMachine(kind) {
   const item = MACHINE_SHOP.find(m => m.id === kind);
   if (!item) return { ok: false, reason: 'kind' };
