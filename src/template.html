@@ -88,6 +88,8 @@ body.nohud .hud,body.nohud #labels{opacity:0!important}
 /* 地表标注 */
 #labels{position:fixed;inset:0;pointer-events:none;z-index:2;transition:opacity .4s}
 #layers{top:100px;right:20px;padding:9px 12px 7px;min-width:236px}
+#lbl-cycle{display:block;width:100%;margin:6px 0 4px;font:inherit;color:var(--fg);background:transparent;border:1px solid var(--line);padding:4px 8px;letter-spacing:.12em;cursor:pointer;font-size:12px;text-align:left}
+#lbl-cycle:hover{border-color:var(--sig);color:var(--sig)}
 #layers .lh{font-size:10px;letter-spacing:.2em;color:var(--mut);margin-bottom:5px;display:flex;justify-content:space-between}
 #layers .lh em{font-style:normal;color:var(--mut);opacity:.8}
 #layers .ly{display:grid;grid-template-columns:10px 1fr auto;column-gap:8px;align-items:center;padding:3px 0;opacity:.42;transition:opacity .3s;cursor:pointer}
@@ -294,6 +296,6 @@ body.underground #dock{display:none}
 <div class="hud panel hit" id="planmenu"></div>
 <div id="viewer"><div class="bar"><div><h2>资产</h2><div class="sub">当前的薯田阶段、机器和田块。每张卡片是名字加上现在的样子。点一张就能指着它改。这是查看，不能上传。</div></div><button type="button" id="viewer-close">关闭</button></div><div class="sec">商品薯阶段</div><div class="grid" id="view-stages"></div><div class="sec">机器</div><div class="grid" id="view-machines"></div><div class="sec">田块</div><div class="grid" id="view-tiles"></div></div>
 <div class="hud" id="scale"><span id="scaletxt"></span><div id="scalebar"></div></div>
-<div class="hud" id="buildrev">环穗 v6.25</div>
+<div class="hud" id="buildrev">环穗 v6.26</div>
 <script>__BUNDLE__</script>
 </body></html>

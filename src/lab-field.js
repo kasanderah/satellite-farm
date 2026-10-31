@@ -16,6 +16,19 @@ import {
 } from './field-stages.js';
 import potatoBRaw from '../data/field-stages/potato-b.json' with { type: 'json' };
 import lastikaRaw from '../data/field-stages/lastika.json' with { type: 'json' };
+import { SOIL_STORE, SOIL_PROPS, normalizeSoilCurves, defaultSoilCurves } from './soil.js';
+
+function loadSoilCurves() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(SOIL_STORE) || 'null');
+    if (raw && raw.curves) return normalizeSoilCurves(raw.curves);
+  } catch { /* 用默认 */ }
+  return defaultSoilCurves();
+}
+
+function saveSoilCurves(curves) {
+  localStorage.setItem(SOIL_STORE, JSON.stringify({ curves: normalizeSoilCurves(curves) }));
+}
 
 const PREVIEW = { width: 36, length: 28 };
 // 一条垄至少这么多段，陡壁和平顶才不会被 10 来个顶点收成圆丘。行数最多 16。
@@ -442,12 +455,22 @@ export function createFieldWorkshop(els) {
   }
 
   function paintShell() {
-    panel.innerHTML = `<h3>田间阶段</h3>
-<label>作物<select id="fs-crop"></select></label>
-<p id="fs-editing" class="fs-note"></p>
+    panel.innerHTML = `<div id="fs-blue">
+<div class="fs-zone">作物</div>
+<label>当前作物<select id="fs-crop"></select></label>
 <label>显示名<input id="fs-name" type="text" maxlength="24" placeholder="显示名"></label>
+<div class="fs-row">
+<button type="button" id="fs-save">保存</button>
+<button type="button" id="fs-new">新建</button>
+<button type="button" id="fs-reset-doc">还原</button>
+<button type="button" id="fs-dl">下载</button>
+</div>
+<p id="fs-editing" class="fs-note"></p>
+</div>
+<div id="fs-stageview"></div>
+<div id="fs-purple">
 <p id="fs-now" class="fs-note"></p>
-<p class="fs-note">节点图在中间。拖节点，从右侧端子接到下一阶段。软作业和硬作业挂在阶段下方。底栏仍按天数分格。</p>
+<p class="fs-note">节点图在中间大块。这里只编当前阶段的细节。拖节点，从右侧端子接到下一阶段。</p>
 <div id="fs-gantt" class="fs-gantt" hidden></div>
 <div id="fs-stages"></div>
 <div id="fs-edit"></div>
@@ -477,17 +500,13 @@ export function createFieldWorkshop(els) {
 <label>株距 m<input id="fs-plant-along" type="number" min="0.25" max="1.4" step="0.05"></label>
 <div id="fs-edges"></div>
 <p id="fs-mach" class="fs-note"></p>
-<div class="fs-row">
-<button type="button" id="fs-save">保存</button>
-<button type="button" id="fs-dl">下载 JSON</button>
-<button type="button" id="fs-reset-doc">恢复占位</button>
-<button type="button" id="fs-new">新作物</button>
-</div>
 <p class="fs-note">新作物复制当前阶段链，另起 id。主游戏种植只读拉斯提卡。整地不写进这条链。</p>
 <p id="fs-note" class="fs-note"></p>
-<p class="fs-help">${HELP.replace(/\n/g, '<br>')}</p>`;
+<div id="soil-editor"></div>
+<p class="fs-help">${HELP.replace(/\n/g, '<br>')}</p>
+</div>`;
 
-    bar.innerHTML = `<div id="fs-status"></div>
+    bar.innerHTML = `<div class="fs-zone">进度预览</div><div id="fs-status"></div>
 <div id="fs-bar-gantt" class="fs-gantt"></div>
 <div class="fs-row" id="fs-transport"></div>
 <div class="fs-row" id="fs-opbar"></div>`;
@@ -1560,6 +1579,96 @@ ${variants}
     if (trans) trans.value = doc.transition.template + '|' + doc.transition.span;
   }
 
+  function paintSoilEditor() {
+    const host = panel.querySelector('#soil-editor');
+    if (!host || host.childElementCount) return;
+    host.innerHTML = `<h3>田块属性曲线</h3><p class="fs-note">横轴是 120 世界日里的位置，纵轴是每天增减。生长、作业是以后接到作物和田面作业的系数，现在默认 0 就不改数。</p>` + SOIL_PROPS.map(prop => `<div class="soil-row" data-soil="${prop.id}"><b>${prop.name}</b><canvas data-soil-cv="${prop.id}" width="280" height="72"></canvas><div class="fs-split"><label>生长<input data-soil-bias="crop" data-soil-id="${prop.id}" type="number" min="-1" max="1" step="0.01"></label><label>作业<input data-soil-bias="work" data-soil-id="${prop.id}" type="number" min="-1" max="1" step="0.01"></label></div></div>`).join('');
+    const curves = loadSoilCurves();
+    const draw = (id) => {
+      const canvas = host.querySelector(`[data-soil-cv="${id}"]`);
+      const curve = curves[id];
+      if (!canvas || !curve) return;
+      const ctx = canvas.getContext('2d');
+      const w = canvas.width;
+      const h = canvas.height;
+      ctx.clearRect(0, 0, w, h);
+      ctx.strokeStyle = 'rgba(188,195,196,.35)';
+      ctx.beginPath();
+      ctx.moveTo(0, h / 2);
+      ctx.lineTo(w, h / 2);
+      ctx.stroke();
+      const yOf = (v) => h / 2 - (v / 2) * (h / 2 - 6);
+      const xOf = (t) => 8 + t * (w - 16);
+      ctx.strokeStyle = '#d8693c';
+      ctx.beginPath();
+      curve.points.forEach((p, i) => {
+        const x = xOf(p.t);
+        const y = yOf(p.v);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+      ctx.fillStyle = '#e8d8d0';
+      for (const p of curve.points) {
+        ctx.beginPath();
+        ctx.arc(xOf(p.t), yOf(p.v), 4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    };
+    for (const prop of SOIL_PROPS) {
+      draw(prop.id);
+      const crop = host.querySelector(`[data-soil-bias="crop"][data-soil-id="${prop.id}"]`);
+      const work = host.querySelector(`[data-soil-bias="work"][data-soil-id="${prop.id}"]`);
+      if (crop) crop.value = curves[prop.id].crop;
+      if (work) work.value = curves[prop.id].work;
+    }
+    host.addEventListener('input', (e) => {
+      const id = e.target.dataset.soilId;
+      const bias = e.target.dataset.soilBias;
+      if (!id || !bias || !curves[id]) return;
+      curves[id][bias] = Math.max(-1, Math.min(1, Number(e.target.value) || 0));
+      saveSoilCurves(curves);
+    });
+    let drag = null;
+    host.addEventListener('pointerdown', (e) => {
+      const canvas = e.target.closest('[data-soil-cv]');
+      if (!canvas) return;
+      const id = canvas.dataset.soilCv;
+      const rect = canvas.getBoundingClientRect();
+      const x = (e.clientX - rect.left) * (canvas.width / rect.width);
+      const y = (e.clientY - rect.top) * (canvas.height / rect.height);
+      const curve = curves[id];
+      let best = 0;
+      let bestD = 1e9;
+      curve.points.forEach((p, i) => {
+        const px = 8 + p.t * (canvas.width - 16);
+        const py = canvas.height / 2 - (p.v / 2) * (canvas.height / 2 - 6);
+        const d = Math.hypot(px - x, py - y);
+        if (d < bestD) { bestD = d; best = i; }
+      });
+      drag = { id, index: best, canvas };
+      canvas.setPointerCapture(e.pointerId);
+    });
+    host.addEventListener('pointermove', (e) => {
+      if (!drag) return;
+      const canvas = drag.canvas;
+      const rect = canvas.getBoundingClientRect();
+      const x = (e.clientX - rect.left) * (canvas.width / rect.width);
+      const y = (e.clientY - rect.top) * (canvas.height / rect.height);
+      const point = curves[drag.id].points[drag.index];
+      point.t = Math.max(0, Math.min(1, (x - 8) / (canvas.width - 16)));
+      point.v = Math.max(-2, Math.min(2, -((y - canvas.height / 2) / (canvas.height / 2 - 6)) * 2));
+      curves[drag.id].points.sort((a, b) => a.t - b.t);
+      drag.index = curves[drag.id].points.indexOf(point);
+      draw(drag.id);
+    });
+    host.addEventListener('pointerup', () => {
+      if (!drag) return;
+      saveSoilCurves(curves);
+      drag = null;
+    });
+  }
+
   function paintDynamic(rebuildLists) {
     if (rebuildLists) {
       listSig = '';
@@ -1575,6 +1684,7 @@ ${variants}
     paintEdges();
     paintNumbers();
     paintGantt();
+    paintSoilEditor();
     paintTransport();
     curveDirty = true;
   }

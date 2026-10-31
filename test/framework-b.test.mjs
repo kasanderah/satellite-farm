@@ -821,6 +821,9 @@ test('回库待机放下软单和未开工硬单，正在做的硬单做完才�
   assert.equal(farm.orders.length, 0);
   assert.equal(standbyClock(machine), '1 d');
   assert.equal(machine.standby, STANDBY_SECONDS);
+  const longer = recallMachine(farm, machine.id);
+  assert.equal(longer.extended, true);
+  assert.equal(machine.standby, STANDBY_SECONDS * 2);
   assert.equal(chooseMachine(farm, ['播种']), null);
   assert.equal(removePlayerMachine(farm, machine.id).ok, true);
 
@@ -864,7 +867,7 @@ test('回库待机放下软单和未开工硬单，正在做的硬单做完才�
 });
 
 test('拉斯提卡阶段和版本戳来自同一份定义', () => {
-  assert.equal(HUD_VERSION, '环穗 v6.25');
+  assert.equal(HUD_VERSION, '环穗 v6.26');
   const doc = parseFieldStageDoc(structuredClone(lastikaRaw));
   const windows = jobWindows(doc, alignFieldCalendar(doc)).filter(item => item.op.kind === 'optional');
   assert.deepEqual(windows.map(item => item.op.id), ['topdress', 'hill']);

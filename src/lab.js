@@ -712,9 +712,16 @@ function applyPose(p) {
   applyLightGroups();
 }
 
+function previewHost() {
+  const slot = document.getElementById('fs-stageview');
+  if (fieldShop.active && slot) return slot;
+  return viewEl;
+}
 function resize() {
-  const w = viewEl.clientWidth || 800;
-  const h = viewEl.clientHeight || 600;
+  const host = previewHost();
+  if (renderer.domElement.parentElement !== host) host.appendChild(renderer.domElement);
+  const w = host.clientWidth || 800;
+  const h = host.clientHeight || 600;
   renderer.setSize(w, h, false);
   cam.aspect = w / Math.max(h, 1);
   cam.updateProjectionMatrix();
@@ -867,6 +874,7 @@ canvas.addEventListener('pointermove', (e) => {
 canvas.addEventListener('pointerup', () => { drag = null; });
 canvas.addEventListener('pointercancel', () => { drag = null; });
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+document.addEventListener('contextmenu', (e) => e.preventDefault(), true);
 canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
   const distCap = curId === 'hub' ? 90000 : 6000;

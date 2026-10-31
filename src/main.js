@@ -28,6 +28,7 @@ import { bootSlice, tickSlice, prepField, plantCrop, dockOf, dropDrive, adoptBou
 import { PLANT_CROPS, PREP_RECIPES, JOBS, stageDisplayStops } from './framework-b.js';
 import { HUD_VERSION } from './version.js';
 import { DAY_SECONDS } from './world-clock.js';
+import { SOIL_STORE, defaultSoilCurves, normalizeSoilCurves, freshSoil, stepSoil, soilDrivers, soilText } from './soil.js';
 
 const Q = new URLSearchParams(location.search);
 const VIEW = Q.get('view') || '', PREWARM = +Q.get('t') || 0, NOPOST = Q.has('nopost'), SHOWFPS = Q.has('fps');
@@ -2155,7 +2156,8 @@ function rigActions(r) {
   const st = r?.bDrive ? rigStandby(r) : null;
   const items = [{ id: 'follow', name: '跟随', enabled: true }];
   if (st) {
-    items.push({ id: 'recall', name: st.waiting ? '硬作业做完后回库' : '回库待机 1 天', enabled: !st.waiting && !st.standby });
+    const recallName = st.waiting ? '完成当前作业后待机' : st.standby ? '增加待机 1 天' : '回库待机 1 天';
+    items.push({ id: 'recall', name: recallName, enabled: !st.waiting });
     if (st.standby) items.push({ id: 'resume', name: '恢复接单', enabled: true });
   }
   items.push({ id: 'sell', name: busy ? '出售（作业中）' : '出售', enabled: !busy });
@@ -2166,7 +2168,7 @@ function recallCurrent() {
   if (!r?.bDrive) { toast('这台不接田里的单'); return; }
   const res = recallRig(r);
   if (!res.ok) { toast(res.reason === 'standby' ? '已经在待机' : '不能回库'); return; }
-  toast(res.waiting ? '硬作业做完就回库待机' : '回库待机 1 天');
+  toast(res.extended ? '已增加待机 1 天' : res.waiting ? '完成当前作业后待机' : '回库待机 1 天');
   updateDock();
 }
 function resumeCurrent() {
@@ -2205,7 +2207,12 @@ function paintContext() {
   menu.classList.add('on');
   menu.style.left = Math.min(ctxAt.x, innerWidth - 200) + 'px';
   menu.style.top = Math.min(ctxAt.y, Math.max(12, innerHeight - 36 - (items.length + extra) * 40)) + 'px';
-  menu.innerHTML = items.map(it => {
+  const many = selectionKind() === 'field' && pickedFields.size > 1
+    ? `<div class="who"><b>已选 ${pickedFields.size} 块</b></div>`
+    : selectionKind() === 'rig' && pickedRigs.size > 1
+      ? `<div class="who"><b>已选 ${pickedRigs.size} 台</b></div>`
+      : '';
+  menu.innerHTML = many + items.map(it => {
     const open = ctxOpen === it.id;
     const head = `<button type="button" class="sell${open ? ' on' : ''}" data-ctx="${it.id}"${it.enabled === false ? ' disabled' : ''}>${it.name}</button>`;
     if (it.id === 'prep' && open) {
@@ -2220,17 +2227,22 @@ function paintContext() {
 function onRightClick(cx, cy) {
   if (viewLayer !== 'surface' || mode === 'build') return;
   const rig = pickRigScreen(cx, cy);
+  const f = rig ? null : fieldFromScreen(cx, cy);
+  const fieldsOn = selectionKind() === 'field' && pickedFields.size > 0;
+  const rigsOn = selectionKind() === 'rig' && pickedRigs.size > 0;
   if (rig) {
+    if (rigsOn && pickedRigs.has(rig.id)) { openContext(cx, cy); return; }
     selectOnlyRig(rig, false);
     openContext(cx, cy);
     return;
   }
-  const f = fieldFromScreen(cx, cy);
   if (f?.owned) {
+    if (fieldsOn && pickedFields.has(f.idx)) { openContext(cx, cy); return; }
     selectOnlyField(f);
     openContext(cx, cy);
     return;
   }
+  if (fieldsOn || rigsOn) { openContext(cx, cy); return; }
   closePlanMenu();
 }
 function zoomClamp(d) { return Math.max(22, Math.min(8000, d)); }
@@ -2736,7 +2748,7 @@ function rigLine(r) {
   const caps = r.bDrive && r.caps?.length ? ` · ${r.caps.join('、')}` : '';
   const st = r.bDrive ? rigStandby(r) : null;
   if (st?.standby) return `${role}待机剩余 ${st.clock} · 电 ${pct}%${width}`;
-  if (st?.waiting) return `${role}硬作业做完后回库 · 电 ${pct}%${width}`;
+  if (st?.waiting) return `${role}完成当前作业后待机 · 电 ${pct}%${width}`;
   if (!r.busy && r.mode !== 'charge') return `${role}停在机库 · 电 ${pct}%${width}${caps}`;
   const where = r.f ? ' · ' + fieldCode(r.f) : '';
   return `${role}${info.doing}${where} · 电 ${pct}%${width}${caps}`;
@@ -3182,7 +3194,17 @@ $('sheet').addEventListener('click', e => {
 });
 paintModes();
 // 分层面板：列出 LAYERS（剖面打开时，被剖开的层高亮）
-$('layers').innerHTML = `<div class="lh">分层 · LAYERS <em>点一层 · C</em></div>` + LAYERS.map(l => `<div class="ly ly-${l.id}" data-layer="${l.id}"><i></i><span>${l.name}</span><small>${l.en}</small><em>${l.floor === 0 ? '±0 m' : l.floor.toFixed(0) + ' m'}</em></div>`).join('');
+$('layers').innerHTML = `<div class="lh">分层 · LAYERS <em>点一层 · C</em></div><button type="button" id="lbl-cycle">浮标 · 全部</button>` + LAYERS.map(l => `<div class="ly ly-${l.id}" data-layer="${l.id}"><i></i><span>${l.name}</span><small>${l.en}</small><em>${l.floor === 0 ? '±0 m' : l.floor.toFixed(0) + ' m'}</em></div>`).join('');
+const LABEL_MODES = ['全部', '仅单元', '仅农机', '无'];
+let labelMode = 0;
+function paintLabelMode() {
+  const btn = $('lbl-cycle');
+  if (btn) btn.textContent = `浮标 · ${LABEL_MODES[labelMode]}`;
+}
+$('lbl-cycle').addEventListener('click', () => {
+  labelMode = (labelMode + 1) % LABEL_MODES.length;
+  paintLabelMode();
+});
 function paintLayers() {
   document.querySelectorAll('#layers .ly').forEach(el => el.classList.toggle('on', el.dataset.layer === viewLayer));
   document.body.classList.toggle('underground', viewLayer !== 'surface');
@@ -3392,6 +3414,33 @@ function paintPicks() {
   paintRigHud();
   paintAim();
 }
+let soilCurves = defaultSoilCurves();
+let soilStamp = -1;
+function loadSoilCurves() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(SOIL_STORE) || 'null');
+    if (raw && raw.curves) soilCurves = normalizeSoilCurves(raw.curves);
+  } catch { /* 空浏览器用默认曲线 */ }
+}
+function tickFieldSoil() {
+  const day = Math.floor(worldDay);
+  if (day === soilStamp) return;
+  const steps = soilStamp < 0 ? 1 : Math.min(4, Math.max(1, day - soilStamp));
+  for (let n = 0; n < steps; n++) {
+    for (const f of fields) {
+      if (!f.owned) continue;
+      if (!f.soil) f.soil = freshSoil();
+      const drivers = soilDrivers({
+        crop: !!(f.bUnit && f.bUnit.timed),
+        work: !!(f.bUnit && f.bUnit.sweep),
+      });
+      stepSoil(f.soil, soilCurves, drivers);
+    }
+  }
+  soilStamp = day;
+}
+loadSoilCurves();
+addEventListener('focus', loadSoilCurves);
 function updateLabels(d) {
   const want = [];
   if (camS.deck) { fillDeckLabels(want, d); }
@@ -3403,21 +3452,23 @@ function updateLabels(d) {
     const hub = bi === L.HUBX && bj === L.HUBZ; if (!hub && (bi % 3 !== 1 || bj % 3 !== 1)) continue;
     want.push({ x, z, pr: hub ? 0 : 1, a: aSec, html: hub ? `<b>中枢 · CENTRAL HUB</b><small>试验卫星 · 农神VIII</small>` : `<b>${secName(bi, bj)}</b><small>邻区</small>`, cls: hub ? 'hub' : 'sec' });
   }
-  if (aField > 0) for (const f of fields) {
+  if ((labelMode === 0 || labelMode === 1) && aField > 0) for (const f of fields) {
     if (f.crop < 0) continue; const x = f.x0 + 64, z = f.z0 + 64; if (Math.hypot(x - camS.x, z - camS.z) > Math.min(d * 1.15, 720) || inCut(x, z, 40)) continue;
     const watch = cropWatch(f);
     const st = f.bUnit?.label || (watch ? `${watch.label} · 第 ${Math.floor(watch.day)} 日` : (f.state === 3 ? '作业' : '定格冠层'));
     const sw = watch ? PALETTE.olive : PALETTE.rego;
     want.push({ x, z, pr: 2, a: aField, html: `<i style="background:${sw}"></i><b>F-${String(f.i).padStart(2, '0')}${String(f.j).padStart(2, '0')}</b><span>${st}</span>`, cls: 'fld' + ((f === selected || watch) ? ' act' : '') });
   }
-  if (ops) for (const h of nearH.slice(0, 6)) if (h.mode === 'cut' || h.mode === 'turn') want.push({ x: h.x, z: h.z, y: 8, pr: 3, a: Math.min(1, (260 - d) / 60) * Math.min(1, (d - 60) / 30), html: `<b>H-${String(h.id).padStart(3, '0')}</b><span>作业</span>`, cls: 'veh' });
-  if (!camS.deck) for (const r of rigs) {
+  const showRigs = !camS.deck && (labelMode === 0 || labelMode === 2);
+  if (showRigs && ops) for (const h of nearH.slice(0, 6)) if (h.mode === 'cut' || h.mode === 'turn') want.push({ x: h.x, z: h.z, y: 8, pr: 3, a: Math.min(1, (260 - d) / 60) * Math.min(1, (d - 60) / 30), html: `<b>H-${String(h.id).padStart(3, '0')}</b><span>作业</span>`, cls: 'veh' });
+  if (!camS.deck && labelMode !== 3) for (const r of rigs) {
     if (r.kind === 'plow') continue;
     const st = r.bDrive ? rigStandby(r) : null;
-    const mark = st?.standby ? `待机剩余: ${st.clock}` : '';
-    if (!r.busy && !pickedRigs.has(r.id) && !mark) continue;
+    const mark = st?.standby ? `待机剩余: ${st.clock}` : st?.waiting ? '完成当前作业后待机' : '';
+    if (!showRigs && !mark) continue;
     const html = mark ? `<b>${r.label}</b><span>${mark}</span>` : `<b>${r.label}</b>`;
-    want.push({ x: r.x, z: r.z, y: 6, pr: mark ? -1 : 3, a: mark ? 1 : Math.min(1, Math.max(0, (1400 - d) / 500)), html, cls: 'veh' });
+    const near = Math.min(1, Math.max(0.35, (1600 - d) / 700));
+    want.push({ x: r.x, z: r.z, y: 6, pr: mark ? -1 : 1, a: mark ? 1 : near, html, cls: 'veh' });
   }
   if (cut.on && d < 2200) {
     const I = cutInner(), a = 1 - Math.min(1, Math.max(0, (d - 1500) / 500));
@@ -3431,9 +3482,9 @@ function updateLabels(d) {
   for (const w of want) {
     if (w.a <= 0.01 || n >= LBL.length) continue;
     const s = project(w.x, w.y || 0, w.z); if (!s || s[0] < 30 || s[0] > innerWidth - 160 || s[1] < 70 || s[1] > innerHeight - 90) continue;
-    const minD = w.cls === 'sec' ? 170 : 175;
-    if (placed.some(p => Math.abs(p[0] - s[0]) < minD && Math.abs(p[1] - s[1]) < 46)) continue;
-    placed.push(s); const el = LBL[n++];
+    const minD = w.cls === 'sec' ? 170 : w.cls === 'veh' ? 72 : 175;
+    if (placed.some(p => p.cls === w.cls && Math.abs(p[0] - s[0]) < minD && Math.abs(p[1] - s[1]) < 46)) continue;
+    placed.push({ 0: s[0], 1: s[1], cls: w.cls }); const el = LBL[n++];
     if (el._h !== w.html) { el.innerHTML = w.html; el._h = w.html; }
     el.className = 'lbl ' + w.cls; el.style.transform = `translate(${s[0].toFixed(1)}px,${s[1].toFixed(1)}px)`; el.style.opacity = w.a.toFixed(2);
   }
@@ -3659,10 +3710,10 @@ function updateDock() {
     if (rigOnly) sum.textContent = rigLine(selectedRig);
     else if (many) sum.textContent = '操作取这些田都能做的';
     else if (!f?.owned) sum.textContent = selNote || '邻区快照 · 只读';
-    else if (!desc?.crop) sum.textContent = desc?.stat || '未整地';
+    else if (!desc?.crop) sum.innerHTML = `${desc?.stat || '未整地'}<br><span>${soilText(f.soil)}</span>`;
     else {
       const quality = desc.quality == null ? '—' : desc.quality;
-      sum.innerHTML = `<b>${desc.crop}</b> · ${desc.stageName || '播种'} · ${(desc.age || 0).toFixed(1)} / ${desc.cycle || 0} 世界日<br><span>成熟度 ${Math.round(desc.maturity || 0)}% · 产量值 ${desc.yieldValue ?? '—'} · 品质值 ${quality}</span>`;
+      sum.innerHTML = `<b>${desc.crop}</b> · ${desc.stageName || '播种'} · ${(desc.age || 0).toFixed(1)} / ${desc.cycle || 0} 世界日<br><span>成熟度 ${Math.round(desc.maturity || 0)}% · 产量值 ${desc.yieldValue ?? '—'} · 品质值 ${quality}</span><br><span>${soilText(f.soil)}</span>`;
     }
   }
   const jobsHost = $('dock-jobs');
@@ -4410,6 +4461,7 @@ function frame(now) {
   }
   const mpp = d * 2 * Math.tan(15 * DEG) / innerHeight; const [m, px] = niceScale(mpp);
   $('scalebar').style.width = px.toFixed(0) + 'px'; $('scaletxt').textContent = m >= 1000 ? (m / 1000) + ' km' : m + ' m';
+  tickFieldSoil();
   updateLabels(d);
   paintKpi();
   updateDock();

@@ -1031,7 +1031,10 @@ export function standbyClock(machine) {
 export function recallMachine(farm, machineId) {
   const machine = farm.machines.find(m => m.id === machineId);
   if (!machine || machine.classId === 'hitch' || machine.classId === 'air') return { ok: false, reason: 'machine' };
-  if (machine.standby > 0) return { ok: false, reason: 'standby' };
+  if (machine.standby > 0) {
+    machine.standby += STANDBY_SECONDS;
+    return { ok: true, extended: true, waiting: false };
+  }
   machine.hold = true;
   const mine = farm.orders.filter(order => order.machineId === machine.id);
   let waiting = false;
