@@ -6,6 +6,7 @@ import {
   stageDisplayStops, stageTint, stageShadeG, growthAge, BRUSH_FADE_DAYS,
   maturityPercent, harvestAllowed, qualityNow, harvestWindow,
   createFarm, addField, addMachine, mountHitch, chooseMachine, requestPrep, requestPlant, setNextCrop, stepFarm, fieldWork, describeField,
+  recallMachine, releaseStandby, standbyMinutesLeft, writePose, STANDBY_SECONDS, removePlayerMachine,
   installPlayerMachine,
 } from '../src/framework-b.js';
 import { installShippedLastika, lastikaSpecFromDoc } from '../src/lastika-stage.js';
@@ -805,8 +806,64 @@ test('下一轮计划在收拾后才下播种单，没有计划不自动种', ()
   assert.equal(fieldWork(farm, 'a')?.jobId === 'sow' || field.plant.stageId === 'seedling' || field.look === 'sown', true);
 });
 
+test('回库待机放下软单和未开工硬单，正在做的硬单做完才待机', () => {
+  const farm = createFarm();
+  addMachine(farm, { ...OMNI, caps: OMNI.caps.slice(), energyLeft: OMNI.energyKwh });
+  addField(farm, { id: 'a', length: 128, width: 128, ground: 'general', look: 'raw' });
+  const machine = farm.machines[0];
+  farm.orders.push({
+    id: 1, fieldId: 'a', jobId: 'topdress', machineId: machine.id, hitchId: null,
+    lane: 'soft', width: 16, origin: 3.2, progress: 0.2, phase: 'cruise', pose: null,
+  });
+  machine.busy = true;
+  const soft = recallMachine(farm, machine.id);
+  assert.equal(soft.waiting, false);
+  assert.equal(farm.orders.length, 0);
+  assert.equal(standbyMinutesLeft(machine), 10);
+  assert.equal(chooseMachine(farm, ['播种']), null);
+  assert.equal(removePlayerMachine(farm, machine.id).ok, true);
+
+  addMachine(farm, { ...OMNI, caps: OMNI.caps.slice(), energyLeft: OMNI.energyKwh });
+  const again = farm.machines[0];
+  farm.orders.push({
+    id: 2, fieldId: 'a', jobId: 'plow', machineId: again.id, hitchId: null,
+    lane: 'prep', width: 16, origin: 3.2, progress: 0, phase: 'cruise', pose: null,
+  });
+  again.busy = true;
+  const early = recallMachine(farm, again.id);
+  assert.equal(early.waiting, false);
+  assert.equal(farm.orders.length, 0);
+  assert.equal(farm.queue.some(item => item.jobId === 'plow'), true);
+  assert.equal(chooseMachine(farm, ['犁田']), null);
+  releaseStandby(farm, again.id);
+  assert.equal(again.standby, 0);
+  assert.ok(chooseMachine(farm, ['犁田']));
+
+  again.hold = false;
+  again.busy = true;
+  farm.queue = [];
+  farm.orders.push({
+    id: 3, fieldId: 'a', jobId: 'harvest', machineId: again.id, hitchId: null,
+    lane: 'plant', width: 16, origin: 3.2, progress: 0.99, phase: 'work', pose: null,
+  });
+  writePose(farm, farm.orders[0]);
+  const running = recallMachine(farm, again.id);
+  assert.equal(running.waiting, true);
+  assert.equal(farm.orders.length, 1);
+  assert.equal(farm.orders[0].phase, 'work');
+  assert.equal(again.standby || 0, 0);
+  stepFarm(farm, 2);
+  assert.equal(farm.orders.length, 0);
+  assert.ok(again.standby > 0);
+  const left = again.standby;
+  stepFarm(farm, left);
+  assert.equal(again.standby, 0);
+  assert.equal(again.hold, false);
+  assert.equal(STANDBY_SECONDS > 0, true);
+});
+
 test('拉斯提卡阶段和版本戳来自同一份定义', () => {
-  assert.equal(HUD_VERSION, '环穗 v6.23');
+  assert.equal(HUD_VERSION, '环穗 v6.24');
   const doc = parseFieldStageDoc(structuredClone(lastikaRaw));
   const windows = jobWindows(doc, alignFieldCalendar(doc)).filter(item => item.op.kind === 'optional');
   assert.deepEqual(windows.map(item => item.op.id), ['topdress', 'hill']);

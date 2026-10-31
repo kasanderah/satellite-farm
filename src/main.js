@@ -24,7 +24,7 @@ import { surfaceKits, hitchOffset } from './surface-kits.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CULT_EMPTY } from './lab-catalog.js';
 import { makeColony } from './colony-art.js';
-import { bootSlice, tickSlice, prepField, plantCrop, dockOf, dropDrive, adoptBought } from './b-bind.js';
+import { bootSlice, tickSlice, prepField, plantCrop, dockOf, dropDrive, adoptBought, recallRig, resumeRig, rigStandby, dispatchBoard } from './b-bind.js';
 import { PLANT_CROPS, PREP_RECIPES, JOBS, stageDisplayStops } from './framework-b.js';
 import { HUD_VERSION } from './version.js';
 import { DAY_SECONDS } from './world-clock.js';
@@ -2150,14 +2150,40 @@ function onLeftClick(cx, cy, shift) {
   if (shift && f.owned) { toggleField(f); return; }
   selectOnlyField(f);
 }
+function rigActions(r) {
+  const busy = rigIsWorking(r);
+  const st = r?.bDrive ? rigStandby(r) : null;
+  const items = [{ id: 'follow', name: '跟随', enabled: true }];
+  if (st) {
+    items.push({ id: 'recall', name: st.waiting ? '硬作业做完后回库' : '回库待机 10 分钟', enabled: !st.waiting && !st.standby });
+    if (st.standby) items.push({ id: 'resume', name: '恢复接单', enabled: true });
+  }
+  items.push({ id: 'sell', name: busy ? '出售（作业中）' : '出售', enabled: !busy });
+  return items;
+}
+function recallCurrent() {
+  const r = selectedRig && rigs.includes(selectedRig) ? selectedRig : null;
+  if (!r?.bDrive) { toast('这台不接田里的单'); return; }
+  const res = recallRig(r);
+  if (!res.ok) { toast(res.reason === 'standby' ? '已经在待机' : '不能回库'); return; }
+  toast(res.waiting ? '硬作业做完就回库待机' : '回库待机 10 分钟');
+  updateDock();
+}
+function resumeCurrent() {
+  const r = selectedRig && rigs.includes(selectedRig) ? selectedRig : null;
+  if (!r) return;
+  const res = resumeRig(r);
+  if (!res.ok) { toast('这台不在待机'); return; }
+  toast('恢复接单');
+  updateDock();
+}
 function contextItems() {
   if (selectionKind() === 'rig') {
-    const busy = rigIsWorking(selectedRig);
-    return [
-      { id: 'follow', name: '跟随' },
-      { id: 'sell', name: busy ? '出售（作业中）' : `出售 · +${fmt(machineSellPrice(selectedRig))}` },
-      { id: 'clear', name: '取消选择' },
-    ];
+    const items = rigActions(selectedRig).map(it => (
+      it.id === 'sell' && it.enabled ? { ...it, name: `出售 · +${fmt(machineSellPrice(selectedRig))}` } : it
+    ));
+    items.push({ id: 'clear', name: '取消选择', enabled: true });
+    return items;
   }
   const list = ownedFields();
   if (!list.length) return [];
@@ -2181,7 +2207,7 @@ function paintContext() {
   menu.style.top = Math.min(ctxAt.y, Math.max(12, innerHeight - 36 - (items.length + extra) * 40)) + 'px';
   menu.innerHTML = items.map(it => {
     const open = ctxOpen === it.id;
-    const head = `<button type="button" class="sell${open ? ' on' : ''}" data-ctx="${it.id}">${it.name}</button>`;
+    const head = `<button type="button" class="sell${open ? ' on' : ''}" data-ctx="${it.id}"${it.enabled === false ? ' disabled' : ''}>${it.name}</button>`;
     if (it.id === 'prep' && open) {
       return head + Object.values(PREP_RECIPES).map(recipe => `<button type="button" class="sub" data-recipe="${recipe.id}"><b>${recipe.name}</b><small>${recipe.targetName}</small></button>`).join('');
     }
@@ -2464,6 +2490,8 @@ document.getElementById('planmenu').addEventListener('click', e => {
   closePlanMenu();
   if (ctx.dataset.ctx === 'follow') enterLock();
   else if (ctx.dataset.ctx === 'sell') sellCurrentRig();
+  else if (ctx.dataset.ctx === 'recall') recallCurrent();
+  else if (ctx.dataset.ctx === 'resume') resumeCurrent();
   else if (ctx.dataset.ctx === 'clear') exitToDefault();
 });
 addEventListener('pointerdown', e => {
@@ -2673,7 +2701,7 @@ legend.innerHTML = [
   ['收割', PALETTE.ochre, PALETTE.straw],
   ['收拾', PALETTE.rego, PALETTE.regoLt],
 ].map(([name, a, b]) => `<div class="lg"><i style="background:linear-gradient(90deg,${a},${b})"></i><span>${name}</span></div>`).join('');
-const MODES = [['machines', '农机', 'FLEET'], ['rigshop', '农机店', 'BUY'], ['plan', '区域', 'PLAN'], ['crops', '作物', 'CROP'], ['scheme', '规划', 'ASSIGN'], ['store', '仓库', 'STORE'], ['build', '建设', 'BUILD'], ['shop', '商店', 'SHOP']];
+const MODES = [['machines', '农机', 'FLEET'], ['rigshop', '农机店', 'BUY'], ['plan', '区域', 'PLAN'], ['dispatch', '调度', 'DISPATCH'], ['crops', '作物', 'CROP'], ['scheme', '规划', 'ASSIGN'], ['store', '仓库', 'STORE'], ['build', '建设', 'BUILD'], ['shop', '商店', 'SHOP']];
 $('tiers').innerHTML = MODES.map(([id, zh, en]) => `<button type="button" data-mode="${id}"><b>${zh}</b><small>${en}</small></button>`).join('');
 function gotoTier(n) { camT.d = [4800, 900, 160, 34][n - 1]; camT.pOff = 0; camT.lookUp = 0; camT.fovAdd = 0; }
 function fieldCode(f) { return `F-${String(f.i).padStart(3, '0')}${String(f.j).padStart(2, '0')}`; }
@@ -2706,6 +2734,9 @@ function rigLine(r) {
   const width = fleetWidth(r);
   const role = r.bDrive && r.role ? `${r.role} · ` : '';
   const caps = r.bDrive && r.caps?.length ? ` · ${r.caps.join('、')}` : '';
+  const st = r.bDrive ? rigStandby(r) : null;
+  if (st?.standby) return `${role}待机剩余 ${st.minutes} min · 电 ${pct}%${width}`;
+  if (st?.waiting) return `${role}硬作业做完后回库 · 电 ${pct}%${width}`;
   if (!r.busy && r.mode !== 'charge') return `${role}停在机库 · 电 ${pct}%${width}${caps}`;
   const where = r.f ? ' · ' + fieldCode(r.f) : '';
   return `${role}${info.doing}${where} · 电 ${pct}%${width}${caps}`;
@@ -2824,9 +2855,26 @@ function stackSlots(list, pick, attr) {
   if (!list.length) return '<p class="note">这里还是空的。</p>';
   return `<div class="slots">${list.map(item => `<button type="button" class="slot${pick === item.key ? ' on' : ''}" ${attr}="${item.key}"><b>${item.name}</b><small>${item.sub}</small></button>`).join('')}</div>`;
 }
+let dispatchSig = '';
+function paintDispatch(force) {
+  const host = document.getElementById('dispatch-body');
+  if (!host) return;
+  const board = dispatchBoard();
+  const sig = JSON.stringify(board);
+  if (!force && sig === dispatchSig) return;
+  dispatchSig = sig;
+  const row = (item) => `<div class="sched ${item.kind === '软' ? 'soft' : 'hard'}" data-order="${item.id}" data-bucket="${item.bucket}"><span>${item.crop}</span><span>${item.job}</span><span>${item.kind}</span><span>${item.field}</span><span>${item.machine}</span><span>${item.status}</span></div>`;
+  const list = [...board.orders, ...board.queue];
+  const jobs = list.length ? list.map(row).join('') : '<p class="note">没有待派或进行中的工单。</p>';
+  const machines = board.machines.length
+    ? board.machines.map(m => `<div class="sched mach ${m.tone}" data-machine="${m.id}"><b>${m.name}</b><span>${m.state}</span><span>${m.job || '—'}</span></div>`).join('')
+    : '<p class="note">没有可派的农机。</p>';
+  host.innerHTML = `<div class="sched head"><span>作物</span><span>作业</span><span>软硬</span><span>田</span><span>农机</span><span>状态</span></div>${jobs}<p class="note">农机</p><div class="sched head mach"><span>农机</span><span>状态</span><span>当前作业</span></div>${machines}`;
+}
 function paintSheet() {
   const el = $('sheet');
-  el.classList.toggle('wide', mode === 'crops' || mode === 'store' || mode === 'shop' || mode === 'scheme' || mode === 'rigshop');
+  el.classList.toggle('wide', mode === 'crops' || mode === 'store' || mode === 'shop' || mode === 'scheme' || mode === 'rigshop' || mode === 'dispatch');
+  el.classList.toggle('dispatch', mode === 'dispatch');
   if (mode === 'plan' || mode === 'look') { el.classList.remove('on'); el.innerHTML = ''; return; }
   el.classList.add('on');
   if (mode === 'crops') {
@@ -2842,6 +2890,10 @@ function paintSheet() {
   } else if (mode === 'scheme') {
     const n = pickedFields.size;
     el.innerHTML = `<div class="who"><b>规划</b><span>已选 ${n} 块田</span></div><p class="note">拖出方框选田。按住 Shift 再点，加选。右键已选的田，种拉斯提卡。田要先整成一般田地。</p>${planTicks()}${planCropButtons(!n)}`;
+  } else if (mode === 'dispatch') {
+    dispatchSig = '';
+    el.innerHTML = `<div class="who"><b>调度</b><span>只观察，还不能改派</span></div><div id="dispatch-body"></div>`;
+    paintDispatch(true);
   } else if (mode === 'machines') {
     const fleetRows = rigs.map(r => `<button type="button" class="rowbtn${watchRig === r ? ' on' : ''}" data-rig="${r.id}"><b>${rigTitle(r)}</b><small>${rigLine(r)}</small></button>`).join('')
       + workDrones.map(d => `<button type="button" class="rowbtn${watchRig === d ? ' on' : ''}" data-drone="${d.id}"><b>${d.label}</b><small>${rigLine(d)}</small></button>`).join('');
@@ -3361,8 +3413,11 @@ function updateLabels(d) {
   if (ops) for (const h of nearH.slice(0, 6)) if (h.mode === 'cut' || h.mode === 'turn') want.push({ x: h.x, z: h.z, y: 8, pr: 3, a: Math.min(1, (260 - d) / 60) * Math.min(1, (d - 60) / 30), html: `<b>H-${String(h.id).padStart(3, '0')}</b><span>作业</span>`, cls: 'veh' });
   if (!camS.deck) for (const r of rigs) {
     if (r.kind === 'plow') continue;
-    if (!r.busy && !pickedRigs.has(r.id)) continue;
-    want.push({ x: r.x, z: r.z, y: 6, pr: 3, a: Math.min(1, Math.max(0, (1400 - d) / 500)), html: `<b>${r.label}</b>`, cls: 'veh' });
+    const st = r.bDrive ? rigStandby(r) : null;
+    const mark = st?.standby ? `待机剩余: ${st.minutes} min` : '';
+    if (!r.busy && !pickedRigs.has(r.id) && !mark) continue;
+    const html = mark ? `<b>${r.label}</b><span>${mark}</span>` : `<b>${r.label}</b>`;
+    want.push({ x: r.x, z: r.z, y: 6, pr: mark ? -1 : 3, a: mark ? 1 : Math.min(1, Math.max(0, (1400 - d) / 500)), html, cls: 'veh' });
   }
   if (cut.on && d < 2200) {
     const I = cutInner(), a = 1 - Math.min(1, Math.max(0, (d - 1500) / 500));
@@ -3585,7 +3640,7 @@ function updateDock() {
     chip.classList.toggle('on', !!title);
     chip.textContent = title;
   }
-  const show = viewLayer === 'surface' && (list.length || rigOnly) && (mode === 'look' || mode === 'plan' || mode === 'machines');
+  const show = viewLayer === 'surface' && (list.length || rigOnly) && (mode === 'look' || mode === 'plan' || mode === 'machines' || mode === 'dispatch');
   if (!show) { el.classList.remove('on'); dockHover = null; return; }
   el.classList.add('on');
   const f = list[0] || selected;
@@ -3622,12 +3677,7 @@ function updateDock() {
   const ops = $('dock-ops');
   if (ops) {
     const shared = many ? contextItems() : null;
-    const actions = rigOnly
-      ? [
-        { id: 'follow', name: '跟随', enabled: true },
-        { id: 'sell', name: rigIsWorking(selectedRig) ? '出售（作业中）' : '出售', enabled: !rigIsWorking(selectedRig) },
-      ]
-      : (shared || desc?.actions || []);
+    const actions = rigOnly ? rigActions(selectedRig) : (shared || desc?.actions || []);
     const sig = actions.map(act => `${act.id}:${act.name}:${act.enabled ? 1 : 0}`).join('|');
     ops.style.gridTemplateColumns = `repeat(${Math.max(actions.length, 1)}, minmax(0, 1fr))`;
     if (sig !== dockOpsSig) {
@@ -3749,6 +3799,8 @@ $('dock').addEventListener('pointerdown', (e) => {
   else if (btn.dataset.act === 'plant') toggleSub('plant');
   else if (btn.dataset.act === 'follow') enterLock();
   else if (btn.dataset.act === 'sell') sellCurrentRig();
+  else if (btn.dataset.act === 'recall') recallCurrent();
+  else if (btn.dataset.act === 'resume') resumeCurrent();
 });
 $('dock').addEventListener('pointerover', (e) => {
   const seg = e.target.closest('[data-stage]');
@@ -4327,6 +4379,7 @@ function frame(now) {
   paintPicks();
   composer.render();
   // HUD
+  if (mode === 'dispatch') paintDispatch(false);
   if (mode === 'machines') {
     document.querySelectorAll('#sheet [data-rig] small').forEach(el => {
       const r = rigs.find(x => x.id === +el.parentElement.dataset.rig);

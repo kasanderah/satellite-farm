@@ -2,7 +2,7 @@
 import {
   OMNI, TRACTOR, PLOW, JOBS, TURN_SECONDS, createFarm, addField, addMachine, mountHitch,
   requestPrep, requestPlant, setNextCrop, stepFarm, describeField, plotAddress, growthAge, workSweepLook, PLANT_CROPS,
-  cycleDays, installPlayerMachine, removePlayerMachine,
+  cycleDays, installPlayerMachine, removePlayerMachine, recallMachine, releaseStandby, standbyMinutesLeft,
 } from './framework-b.js';
 import { roadRoute } from './_shared.js';
 
@@ -106,7 +106,9 @@ function readout(order, unit) {
   const machine = order ? machineOf(order.machineId) : machineOf(unit?.machineId);
   const home = !order && unit && Math.hypot(unit.x - unit.parkX, unit.z - unit.parkZ) <= 1.2;
   let doing = '停在机库';
-  if (order?.phase === 'cruise') doing = '开往田块';
+  if (machine?.standby > 0) doing = `待机剩余 ${standbyMinutesLeft(machine)} min`;
+  else if (machine?.recall === 'wait') doing = '等硬作业做完';
+  else if (order?.phase === 'cruise') doing = '开往田块';
   else if (order?.phase === 'turn') doing = '地头转弯';
   else if (order?.phase === 'work') doing = job?.name || '作业';
   else if (!home) doing = '返回机库';
@@ -389,4 +391,83 @@ export function planNext(f, cropId) {
 export function dockOf(f) {
   if (!farm || !f?.owned) return null;
   return describeField(farm, fieldKey(f));
+}
+
+export function recallRig(rig) {
+  if (!farm || !rig?.machineId) return { ok: false, reason: 'machine' };
+  return recallMachine(farm, rig.machineId);
+}
+
+export function resumeRig(rig) {
+  if (!farm || !rig?.machineId) return { ok: false, reason: 'machine' };
+  return releaseStandby(farm, rig.machineId);
+}
+
+export function rigStandby(rig) {
+  const machine = machineOf(rig?.machineId);
+  if (!machine) return null;
+  return {
+    waiting: machine.recall === 'wait',
+    standby: machine.standby > 0,
+    minutes: standbyMinutesLeft(machine),
+  };
+}
+
+export function dispatchBoard() {
+  if (!farm || !ctx) return { orders: [], queue: [], machines: [] };
+  const jobName = (id) => JOBS[id]?.name || id || '—';
+  const kindOf = (id) => (JOBS[id]?.kind === 'soft' ? '软' : '硬');
+  const fieldName = (id) => {
+    const mesh = byKey.get(id);
+    if (mesh) return `F-${String(mesh.i).padStart(2, '0')}${String(mesh.j).padStart(2, '0')}`;
+    return farm.fields.get(id)?.plot || id;
+  };
+  const cropName = (id) => {
+    const field = farm.fields.get(id);
+    if (field?.plant?.cropId) return PLANT_CROPS[field.plant.cropId]?.name || field.plant.cropId;
+    if (field?.prep) return '整地';
+    return '—';
+  };
+  const phaseName = (phase) => (phase === 'cruise' ? '开往' : phase === 'turn' ? '转弯' : phase === 'work' ? '作业中' : phase || '—');
+  const orders = farm.orders.map(order => ({
+    id: order.id,
+    crop: cropName(order.fieldId),
+    job: jobName(order.jobId),
+    kind: kindOf(order.jobId),
+    field: fieldName(order.fieldId),
+    machine: rigFor(order.machineId)?.label || order.machineId,
+    status: phaseName(order.phase),
+    bucket: 'run',
+  }));
+  const queue = farm.queue.map(item => ({
+    id: item.id,
+    crop: cropName(item.fieldId),
+    job: jobName(item.jobId),
+    kind: kindOf(item.jobId),
+    field: fieldName(item.fieldId),
+    machine: '待派',
+    status: '排队',
+    bucket: 'queue',
+  }));
+  const machines = driveRigs().map(rig => {
+    const machine = machineOf(rig.machineId);
+    const order = farm.orders.find(item => item.machineId === rig.machineId);
+    let state = '空闲';
+    let tone = 'idle';
+    if (machine?.standby > 0) {
+      state = `待机剩余 ${standbyMinutesLeft(machine)} min`;
+      tone = 'wait';
+    } else if (machine?.recall === 'wait') {
+      state = '等硬作业做完';
+      tone = 'hard';
+    } else if (order) {
+      state = '作业中';
+      tone = 'run';
+    } else if (rig.bRead?.doing === '返回机库') {
+      state = '回库中';
+      tone = 'home';
+    }
+    return { id: rig.id, name: rig.label, state, tone, job: order ? jobName(order.jobId) : '' };
+  });
+  return { orders, queue, machines };
 }

@@ -51,6 +51,15 @@ body.nohud .hud,body.nohud #labels{opacity:0!important}
 #sheet{left:50%;bottom:78px;transform:translateX(-50%);width:380px;max-height:52vh;overflow:auto;display:none;padding:10px 12px 12px}
 #sheet.on{display:block}
 #sheet.wide{width:640px}
+#sheet.dispatch{width:min(760px,calc(100vw - 48px))}
+#sheet .sched{display:grid;grid-template-columns:1fr .8fr .5fr .9fr .9fr .7fr;gap:8px;align-items:baseline;padding:4px 0;border-bottom:1px solid rgba(188,195,196,.18);font-size:12px;letter-spacing:.04em}
+#sheet .sched.head{color:var(--mut);font-size:10px;letter-spacing:.14em;border-bottom-color:var(--line)}
+#sheet .sched.mach{grid-template-columns:1.2fr 1.4fr 1fr}
+#sheet .sched.soft span:nth-child(3){color:#7eb6d6}
+#sheet .sched.hard span:nth-child(3){color:#c4503a}
+#sheet .sched.wait b,#sheet .sched.wait span{color:var(--sig)}
+#sheet .sched.run span{color:var(--fg)}
+#sheet .sched b{font-weight:500}
 #sheet .split{display:grid;grid-template-columns:1fr 1.15fr;gap:12px;align-items:start}
 #sheet .slots{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
 #sheet .slot{display:flex;flex-direction:column;justify-content:flex-end;min-height:64px;text-align:left;padding:6px}
@@ -285,6 +294,6 @@ body.underground #dock{display:none}
 <div class="hud panel hit" id="planmenu"></div>
 <div id="viewer"><div class="bar"><div><h2>资产</h2><div class="sub">当前的薯田阶段、机器和田块。每张卡片是名字加上现在的样子。点一张就能指着它改。这是查看，不能上传。</div></div><button type="button" id="viewer-close">关闭</button></div><div class="sec">商品薯阶段</div><div class="grid" id="view-stages"></div><div class="sec">机器</div><div class="grid" id="view-machines"></div><div class="sec">田块</div><div class="grid" id="view-tiles"></div></div>
 <div class="hud" id="scale"><span id="scaletxt"></span><div id="scalebar"></div></div>
-<div class="hud" id="buildrev">环穗 v6.23</div>
+<div class="hud" id="buildrev">环穗 v6.24</div>
 <script>__BUNDLE__</script>
 </body></html>

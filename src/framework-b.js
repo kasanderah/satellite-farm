@@ -58,6 +58,9 @@ export const PREP_RECIPES = {
 export const GROW_DAYS = 12;
 // 1× 下的现实秒。12 世界日前段 × 720 现实秒/世界日。烂地和收获后不计入。
 export const GROW_SECONDS = GROW_DAYS * DAY_SECONDS;
+// 回库待机 10 世界分钟。1× 下约 5 现实秒，和世界钟同一口：1 现实分钟 = 120 世界分钟。
+export const STANDBY_MINUTES = 10;
+export const STANDBY_SECONDS = (STANDBY_MINUTES / 1440) * DAY_SECONDS;
 
 export const PLANT_CROPS = {
   lastika: {
@@ -573,7 +576,7 @@ export function chooseMachine(farm, caps, travelOf = null) {
   const need = caps || [];
   let best = null;
   for (const machine of farm.machines) {
-    if (machine.busy) continue;
+    if (machine.busy || machine.hold || machine.standby > 0 || machine.recall) continue;
     const covered = coveredBy(farm, machine, need);
     if (!covered) continue;
     if (covered.hitch?.busy) continue;
@@ -982,6 +985,90 @@ function storePlantHarvest(farm, field, crop) {
   if (harvestSink) harvestSink(spec);
 }
 
+function abandonOrder(farm, order) {
+  const field = farm.fields.get(order.fieldId);
+  const job = JOBS[order.jobId];
+  if (job?.kind === 'soft') {
+    const row = field?.plant?.soft?.[order.jobId];
+    if (row && row.status !== '执行完' && row.status !== '过期') {
+      row.status = '未执行';
+      row.progress = 0;
+    }
+  }
+  const lane = order.lane;
+  const fieldId = order.fieldId;
+  const jobId = order.jobId;
+  releaseOrder(farm, order);
+  if (job && job.kind !== 'soft' && field && !farm.queue.some(item => item.fieldId === fieldId && item.jobId === jobId) && !farm.orders.some(item => item.fieldId === fieldId && item.jobId === jobId)) {
+    farm.queue.push({ id: farm.seq++, fieldId, jobId, caps: job.caps.slice(), lane: lane || 'plant' });
+  }
+}
+
+function beginStandby(machine) {
+  machine.recall = null;
+  machine.hold = true;
+  machine.busy = false;
+  machine.standby = STANDBY_SECONDS;
+}
+
+function maybeStandby(farm, machine) {
+  if (!machine || machine.recall !== 'wait') return;
+  const still = farm.orders.some(order => order.machineId === machine.id && (order.phase === 'work' || order.phase === 'turn') && JOBS[order.jobId]?.kind === 'hard');
+  if (still) return;
+  beginStandby(machine);
+}
+
+export function standbyMinutesLeft(machine) {
+  if (!(machine?.standby > 0)) return 0;
+  return Math.max(1, Math.ceil(machine.standby / DAY_SECONDS * 1440));
+}
+
+// 放弃软作业和还没开工的硬作业。正在做的硬作业做完才开始 10 世界分钟待机。
+export function recallMachine(farm, machineId) {
+  const machine = farm.machines.find(m => m.id === machineId);
+  if (!machine || machine.classId === 'hitch' || machine.classId === 'air') return { ok: false, reason: 'machine' };
+  if (machine.standby > 0) return { ok: false, reason: 'standby' };
+  machine.hold = true;
+  const mine = farm.orders.filter(order => order.machineId === machine.id);
+  let waiting = false;
+  for (const order of [...mine]) {
+    const job = JOBS[order.jobId];
+    if (job?.kind === 'hard' && (order.phase === 'work' || order.phase === 'turn')) {
+      waiting = true;
+      continue;
+    }
+    abandonOrder(farm, order);
+  }
+  if (waiting) {
+    machine.recall = 'wait';
+    machine.busy = true;
+    return { ok: true, waiting: true };
+  }
+  beginStandby(machine);
+  return { ok: true, waiting: false };
+}
+
+export function releaseStandby(farm, machineId) {
+  const machine = farm.machines.find(m => m.id === machineId);
+  if (!machine || !(machine.standby > 0)) return { ok: false, reason: 'idle' };
+  machine.standby = 0;
+  machine.hold = false;
+  machine.recall = null;
+  return { ok: true };
+}
+
+function tickStandby(farm, dt) {
+  for (const machine of farm.machines) {
+    if (!(machine.standby > 0)) continue;
+    machine.standby -= dt;
+    if (machine.standby <= 0) {
+      machine.standby = 0;
+      machine.hold = false;
+      machine.recall = null;
+    }
+  }
+}
+
 function releaseOrder(farm, order) {
   const field = farm.fields.get(order.fieldId);
   const machine = orderMachine(farm, order);
@@ -997,6 +1084,7 @@ function releaseOrder(farm, order) {
 function finishOrder(farm, order) {
   const field = farm.fields.get(order.fieldId);
   const job = JOBS[order.jobId];
+  const machine = orderMachine(farm, order);
   if (job?.kind === 'soft') {
     const row = field?.plant?.soft?.[order.jobId];
     let painted = null;
@@ -1019,6 +1107,7 @@ function finishOrder(farm, order) {
       lane: order.lane,
       progress: row ? row.progress : 1,
     });
+    maybeStandby(farm, machine);
     return;
   }
   releaseOrder(farm, order);
@@ -1050,6 +1139,7 @@ function finishOrder(farm, order) {
       }
     }
   }
+  maybeStandby(farm, machine);
 }
 
 function growthLeft(field) {
@@ -1199,6 +1289,7 @@ function finishGrowth(farm) {
 
 export function stepFarm(farm, dt, env = null) {
   if (!(dt > 0)) return farm;
+  tickStandby(farm, dt);
   fadeBrush(farm, dt);
   fadeStage(farm, dt);
   let left = dt;
