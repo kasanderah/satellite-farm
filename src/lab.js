@@ -9,7 +9,7 @@ import {
   tractorKit, planterKit, hillerKit, topperKit, potatoLifterKit,
   cultureTankKit, warehouseKit, garageKit, processKit, armKit, irrigatorKit,
 } from './prefabs.js';
-import { createFieldWorkshop } from './lab-field.js';
+import { createFieldWorkshop, createSoilWorkshop } from './lab-field.js';
 import { createMachineWorkshop } from './lab-machine-editor.js';
 
 const $ = id => document.getElementById(id);
@@ -21,6 +21,9 @@ const fieldShop = createFieldWorkshop({
   viewEl,
   panel: $('field-panel'),
   bar: $('fieldbar'),
+});
+const soilShop = createSoilWorkshop({
+  panel: $('soil-panel'),
 });
 const machineShop = createMachineWorkshop({
   panel: $('machine-panel'),
@@ -484,6 +487,7 @@ const BUILD = {
   'ref-kenney-shovel': () => refShows.shovel(),
   'ref-sketchfab-combine': () => refShows.combine(),
   'field-stage': () => fieldShop.build(),
+  'field-soil': () => buildUnit('field', 128),
   'machine-editor': () => machineShop.build(),
 };
 for (const entry of LAB_ENTRIES) {
@@ -576,11 +580,14 @@ function frameSpan(entry) {
 function applyEditorChrome(kind) {
   const on = kind === 'field' || kind === 'machine';
   const main = document.querySelector('main');
-  if (main) main.classList.toggle('field-on', on);
+  if (main) {
+    main.classList.toggle('field-on', on);
+    main.classList.toggle('soil-on', kind === 'soil');
+  }
   const brief = $('brief-form');
-  if (brief) brief.hidden = on;
+  if (brief) brief.hidden = on || kind === 'soil';
   const states = $('states');
-  if (states) states.style.display = on ? 'none' : '';
+  if (states) states.style.display = (on || kind === 'soil') ? 'none' : '';
   const hint = $('hint');
   if (!hint) return;
   if (kind === 'field') hint.innerHTML = '拖动 旋转 · 右键 平移 · 滚轮 缩放<br>空格 播放 / 暂停';
@@ -592,8 +599,9 @@ function show(id) {
   const entry = LAB_ENTRIES.find(e => e.id === id) || LAB_ENTRIES[0];
   curId = entry.id;
   disposeStage();
-  const editor = entry.id === 'field-stage' ? 'field' : entry.id === 'machine-editor' ? 'machine' : '';
+  const editor = entry.id === 'field-stage' ? 'field' : entry.id === 'field-soil' ? 'soil' : entry.id === 'machine-editor' ? 'machine' : '';
   fieldShop.setActive(editor === 'field');
+  soilShop.setActive(editor === 'soil');
   machineShop.setActive(editor === 'machine');
   applyEditorChrome(editor);
   const built = BUILD[entry.id]();

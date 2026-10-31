@@ -318,7 +318,10 @@ function syncFields() {
       ground: unit.ground,
       plot: unit.plot,
     };
-    const sweepLook = order ? workSweepLook(JOBS[order.jobId]) : null;
+    const jobDef = order ? JOBS[order.jobId] : null;
+    const spec = jobDef && stage ? (stage.jobs || []).find(item => item.job === order.jobId) : null;
+    const sweepJob = jobDef && spec?.brush ? { ...jobDef, brush: { ...(jobDef.brush || {}), ...spec.brush } } : jobDef;
+    const sweepLook = sweepJob ? workSweepLook(sweepJob) : null;
     if (sweeping && sweepLook) {
       f.bUnit.sweep = {
         width: order.width,

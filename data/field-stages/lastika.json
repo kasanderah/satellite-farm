@@ -27,7 +27,7 @@
   },
   "chain": ["A", "B", "D"],
   "graph": {
-    "entry": { "job": "sow", "to": "seedling" },
+    "entry": { "job": "sow", "to": "seedling", "checks": { "ground": "一般田地", "other": "" } },
     "stages": [
       { "id": "seedling", "name": "青苗", "role": "head", "kind": "time", "look": "sown", "days": 2, "color": "#51542c", "display": { "from": { "color": "#4a4844", "cover": 0.16 }, "to": { "color": "#51542c", "cover": 0.42 } }, "jobs": [] },
       { "id": "develop", "name": "发育", "role": "node", "kind": "time", "look": "sown", "days": 6, "color": "#6a7340", "display": { "from": { "color": "#51542c", "cover": 0.42 }, "to": { "color": "#6a7340", "cover": 0.72 } }, "jobs": [
@@ -51,7 +51,23 @@
       { "from": "mature", "to": "rot", "kind": "natural" },
       { "from": "rot", "to": "exit", "kind": "hard", "job": "tidy" },
       { "from": "after", "to": "exit", "kind": "hard", "job": "tidy" }
-    ]
+    ],
+    "layout": {
+      "nodes": {
+        "entry": { "x": 16, "y": 72 },
+        "seedling": { "x": 132, "y": 48 },
+        "develop": { "x": 292, "y": 48 },
+        "mature": { "x": 468, "y": 48 },
+        "rot": { "x": 680, "y": 16 },
+        "after": { "x": 680, "y": 148 },
+        "exit": { "x": 860, "y": 78 },
+        "job:develop:0": { "x": 292, "y": 196 },
+        "job:mature:0": { "x": 448, "y": 188 },
+        "job:mature:1": { "x": 560, "y": 268 },
+        "job:rot:0": { "x": 680, "y": 196 },
+        "job:after:0": { "x": 820, "y": 248 }
+      }
+    }
   },
   "stages": [
     { "id": "O", "group": "O", "name": "未整地", "kind": "idle", "days": 1, "color": "#6f6a61", "canopy": "#4a4844", "roughness": 0.97, "cover": 0, "plantScale": 0, "variants": [] },

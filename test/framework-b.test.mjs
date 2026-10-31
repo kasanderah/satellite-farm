@@ -9,7 +9,8 @@ import {
   recallMachine, releaseStandby, standbyClock, writePose, STANDBY_SECONDS, removePlayerMachine,
   installPlayerMachine,
 } from '../src/framework-b.js';
-import { installShippedLastika, lastikaSpecFromDoc } from '../src/lastika-stage.js';
+import { installShippedLastika, installShippedTuber, lastikaSpecFromDoc } from '../src/lastika-stage.js';
+import { analyzeGraph, compilePlayableGraph } from '../src/stage-graph.js';
 import { alignFieldCalendar, jobWindows, parseFieldStageDoc } from '../src/field-stages.js';
 import lastikaRaw from '../data/field-stages/lastika.json' with { type: 'json' };
 import { HUD_VERSION } from '../src/version.js';
@@ -867,7 +868,7 @@ test('回库待机放下软单和未开工硬单，正在做的硬单做完才�
 });
 
 test('拉斯提卡阶段和版本戳来自同一份定义', () => {
-  assert.equal(HUD_VERSION, '环穗 v6.27');
+  assert.equal(HUD_VERSION, '环穗 v6.28');
   const doc = parseFieldStageDoc(structuredClone(lastikaRaw));
   const windows = jobWindows(doc, alignFieldCalendar(doc)).filter(item => item.op.kind === 'optional');
   assert.deepEqual(windows.map(item => item.op.id), ['topdress', 'hill']);
@@ -912,4 +913,39 @@ test('拉斯提卡阶段和版本戳来自同一份定义', () => {
   assert.equal(spec.stages.find(stage => stage.id === 'seedling').layout, undefined);
   assert.equal(spec.graph.layout, undefined);
   assert.equal(spec.graph.entry.to, 'seedling');
+  assert.equal(spec.graph.entry.checks, undefined);
+});
+
+test('短季薯能种，飘节点不进运行，主流程两个头不能编译', () => {
+  const crop = installShippedTuber();
+  assert.equal(crop.name, '短季薯');
+  assert.equal(crop.id, 'tuber');
+  assert.equal(crop.grounds[0], 'general');
+  assert.equal(crop.growDays, 5);
+  assert.equal(crop.graph.entry.job, 'sow');
+  assert.equal(crop.graph.entry.to, 'sprout');
+  assert.equal(crop.stages.find(stage => stage.id === 'bulking').jobs.find(job => job.job === 'hill').from, 2);
+  assert.equal(crop.stages.find(stage => stage.id === 'bulking').jobs.find(job => job.job === 'harvest').to, 5);
+  assert.equal(PLANT_CROPS.tuber.name, '短季薯');
+  const graph = {
+    entry: { ...crop.graph.entry },
+    edges: crop.graph.edges.map(edge => ({ ...edge })),
+    stages: crop.stages.map(stage => ({ ...stage, jobs: (stage.jobs || []).map(job => ({ ...job })) })),
+  };
+  graph.stages.push({ id: 'spare', name: '备用', role: 'head', kind: 'time', days: 1, jobs: [] });
+  const loose = analyzeGraph(graph);
+  assert.equal(loose.errors.length, 0);
+  assert.equal(loose.floating.has('spare'), true);
+  const playable = compilePlayableGraph(graph);
+  assert.equal(playable.stages.some(stage => stage.id === 'spare'), false);
+  assert.equal(playable.growDays, 5);
+  graph.edges.push({ from: 'spare', to: 'sprout', kind: 'natural' });
+  assert.throws(() => compilePlayableGraph(graph), /两个头/);
+  const missed = {
+    entry: { ...PLANT_CROPS.lastika.graph.entry },
+    edges: PLANT_CROPS.lastika.graph.edges.map(edge => ({ ...edge })),
+    stages: PLANT_CROPS.lastika.stages.map(stage => ({ ...stage, jobs: (stage.jobs || []).map(job => ({ ...job })) })),
+  };
+  missed.edges = missed.edges.filter(edge => !(edge.from === 'mature' && edge.job === 'harvest'));
+  assert.equal(analyzeGraph(missed).errors.some(item => item.includes('硬作业')), true);
 });

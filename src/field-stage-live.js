@@ -1,13 +1,14 @@
-// 可玩页的种植阶段只读拉斯提卡。来源是工坊存档里的 crops.lastika，没有就用仓库 data/field-stages/lastika.json。
+// 可玩页的种植阶段读拉斯提卡和短季薯。来源是工坊存档里的 crops.lastika / crops.tuber，
+// 没有就用仓库 data/field-stages/lastika.json 和 tuber.json。
 // 商品薯甘特不进这条路径。整地仍是旁边的清地，不写进种植链。
 //
 // 工坊「保存」写入 localStorage `ringsheaf.assetlab.fieldStages.v1`，形状是
-// `{ schema, cropId: 'lastika', crops: { lastika: doc } }`。
+// `{ schema, cropId, crops: { lastika: doc, tuber: doc } }`。旧档只有 lastika 时，短季薯仍用仓库默认。
 // 同一来源（本地服务器上同时打开 asset-lab.html 和 index.html）两页共用这把钥匙。
 // file:// 在 Chrome 里每个文件各算一个来源，两页的 localStorage 互不可见。
 import { FIELD_STAGE_SCHEMA, FIELD_STAGE_STORE } from './field-stages.js';
 import { PLANT_CROPS } from './framework-b.js';
-import { installLastikaDoc, installShippedLastika } from './lastika-stage.js';
+import { installLastikaDoc, installShippedLastika, installTuberDoc, installShippedTuber } from './lastika-stage.js';
 
 export { FIELD_STAGE_STORE };
 
@@ -55,6 +56,10 @@ export function applyStagePayload(raw) {
   }
   try {
     const crop = installLastikaDoc(doc, 'workshop');
+    const tuber = tuberSlot(raw);
+    if (tuber) {
+      try { installTuberDoc(tuber, 'workshop'); } catch { /* 短季薯坏了就留仓库默认 */ }
+    }
     return { ok: true, origin: 'workshop', doc, crop };
   } catch (err) {
     return { ok: false, reason: 'parse', message: err.message || '这份田间配置读不了' };
@@ -124,6 +129,28 @@ export function resumeLastikaStage(storage) {
   storage.setItem(FIELD_STAGE_STORE, JSON.stringify(prev));
 }
 
+function tuberSlot(payload) {
+  const crops = payload?.crops;
+  if (!crops || typeof crops !== 'object' || Array.isArray(crops)) return null;
+  const slot = crops.tuber;
+  if (slot && typeof slot === 'object' && slot.graph && Array.isArray(slot.graph.stages)) return slot;
+  return null;
+}
+
+function bootTuber(storage, stagesParam) {
+  if (stagesParam === 'repo') return { crop: installShippedTuber(), origin: 'repo', skipped: true };
+  const payload = readStageStore(storage);
+  if (!payload || payload.__parseError) return { crop: installShippedTuber(), origin: 'repo', skipped: true };
+  const doc = tuberSlot(payload);
+  if (!doc) return { crop: installShippedTuber(), origin: 'repo', skipped: true };
+  try {
+    return { ok: true, origin: 'workshop', crop: installTuberDoc(doc, 'workshop'), doc };
+  } catch (err) {
+    installShippedTuber();
+    return { ok: false, reason: 'parse', message: err.message || '短季薯读不了', origin: 'repo' };
+  }
+}
+
 function bootLastika(storage, stagesParam) {
   if (stagesParam === 'repo') return { crop: installShippedLastika(), origin: 'repo', skipped: true };
   const payload = readStageStore(storage);
@@ -146,6 +173,7 @@ function bootLastika(storage, stagesParam) {
 // stagesParam 为 repo 时忽略浏览器里的工坊存档。不装商品薯。
 export function bootFieldStageSource(storage, stagesParam) {
   const booted = bootLastika(storage, stagesParam);
+  const tuber = bootTuber(storage, stagesParam);
   if (booted.ok === false) return booted;
-  return { ok: true, ...booted };
+  return { ok: true, ...booted, tuber: tuber.ok === false ? tuber.message : tuber.origin };
 }

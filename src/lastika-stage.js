@@ -3,7 +3,9 @@
 import { parseFieldStageDoc, stageByGroup } from './field-stages.js';
 import { JOBS, PLANT_CROPS } from './framework-b.js';
 import { DAY_SECONDS } from './world-clock.js';
+import { compilePlayableGraph } from './stage-graph.js';
 import lastikaRaw from '../data/field-stages/lastika.json' with { type: 'json' };
+import tuberRaw from '../data/field-stages/tuber.json' with { type: 'json' };
 
 // 阶段编辑器里没有单独的 soft 字段。可选作业加上阶段内窗口，就是软窗口。
 function softJobsFromDoc(doc, stage) {
@@ -24,37 +26,8 @@ function hexOf(value, fallback) {
 }
 
 function compileGraph(doc) {
-  const graph = doc.graph;
-  if (!graph || !graph.entry || !Array.isArray(graph.stages) || !Array.isArray(graph.edges)) {
-    throw new Error('拉斯提卡缺少阶段图');
-  }
-  const stages = graph.stages.map(stage => ({
-    ...stage,
-    jobs: (stage.jobs || []).map(job => ({ ...job })),
-  }));
-  const edges = graph.edges.map(edge => ({ ...edge }));
-  if (edges.some(edge => edge.kind !== 'hard' && edge.kind !== 'natural')) {
-    throw new Error('阶段图的边只能是 hard 或 natural');
-  }
-  const heads = stages.filter(stage => stage.role === 'head');
-  const tails = stages.filter(stage => stage.role === 'tail');
-  const rots = stages.filter(stage => stage.role === 'rot');
-  if (heads.length !== 1 || tails.length !== 1 || rots.length !== 1) throw new Error('阶段图要有一个头、烂地、以及收获后');
-  const head = heads[0];
-  if (edges.some(edge => edge.to === head.id)) throw new Error('头阶段不能从作物阶段进来');
-  for (const end of [...tails, ...rots]) {
-    if (Number(end.days) > 0) throw new Error('尾阶段没有时长');
-    const out = edges.filter(edge => edge.from === end.id);
-    if (out.some(edge => edge.kind !== 'hard' || edge.to !== 'exit')) throw new Error('尾阶段只留收拾硬边');
-  }
-  const mature = stages.find(stage => stage.id === 'mature');
-  if (!mature || mature.role === 'tail' || mature.role === 'rot') throw new Error('成熟不是尾阶段');
-  if (!edges.some(edge => edge.from === 'mature' && edge.kind === 'natural' && edge.to === rots[0].id)) {
-    throw new Error('成熟到点要能进烂地');
-  }
-  if (graph.entry.job !== 'sow' || graph.entry.to !== head.id) throw new Error('作物图从播种进入头阶段，整地不在图里');
-  const growDays = stages.reduce((sum, stage) => sum + (Number(stage.days) > 0 ? Number(stage.days) : 0), 0);
-  return { entry: { ...graph.entry }, edges, stages, growDays };
+  if (!doc?.graph) throw new Error('缺少阶段图');
+  return compilePlayableGraph(doc.graph);
 }
 
 export function lastikaSpecFromDoc(doc) {
@@ -120,4 +93,72 @@ export function installLastikaDoc(raw, origin = 'workshop') {
 
 export function installShippedLastika() {
   return installLastikaDoc(lastikaRaw, 'repo');
+}
+
+function paintOf(doc, fallback) {
+  const bare = stageByGroup(doc, 'O');
+  const sow = stageByGroup(doc, 'A');
+  const mature = stageByGroup(doc, 'B');
+  const harvest = stageByGroup(doc, 'D');
+  const plant = doc.plant || {};
+  return {
+    raw: hexOf(bare?.color, fallback.raw),
+    young: hexOf(plant.young, hexOf(sow?.canopy, fallback.young)),
+    ripe: hexOf(plant.ripe, hexOf(mature?.canopy, fallback.ripe)),
+    straw: hexOf(plant.stub, hexOf(harvest?.color, fallback.straw)),
+    sown: hexOf(sow?.color, fallback.sown),
+    mature: hexOf(mature?.color, fallback.mature),
+    harvest: hexOf(harvest?.color, fallback.harvest),
+  };
+}
+
+export function tuberSpecFromDoc(doc) {
+  const graph = compileGraph(doc);
+  const plant = doc.plant || {};
+  const fallback = PLANT_CROPS.tuber;
+  return {
+    name: doc.cropName || doc.name || fallback.name,
+    growDays: graph.growDays > 0 ? graph.growDays : fallback.growDays,
+    growSeconds: (graph.growDays > 0 ? graph.growDays : fallback.growDays) * DAY_SECONDS,
+    visual: {
+      shape: plant.shape || fallback.visual.shape,
+      tex: 'ridges',
+      height: Number(plant.height) > 0 ? Number(plant.height) : fallback.visual.height,
+      row: Number(plant.row) > 0 ? Number(plant.row) : fallback.visual.row,
+      along: Number(plant.along) > 0 ? Number(plant.along) : fallback.visual.along,
+    },
+    paints: paintOf(doc, fallback.paints),
+    graph: { entry: graph.entry, edges: graph.edges },
+    stages: graph.stages,
+    maturity: doc.maturity || fallback.maturity,
+    yieldBase: Number(doc.yieldBase) > 0 ? Number(doc.yieldBase) : fallback.yieldBase,
+    quality: doc.quality == null ? null : doc.quality,
+    qualityBase: Number(doc.qualityBase) > 0 ? Number(doc.qualityBase) : 1,
+  };
+}
+
+export function applyTuberSpec(spec, origin = 'repo') {
+  const crop = PLANT_CROPS.tuber;
+  crop.name = spec.name;
+  crop.growDays = spec.growDays;
+  crop.growSeconds = spec.growSeconds;
+  crop.graph = spec.graph;
+  crop.maturity = spec.maturity;
+  crop.yieldBase = spec.yieldBase;
+  crop.quality = spec.quality;
+  crop.qualityBase = spec.qualityBase;
+  crop.visual = { ...crop.visual, ...spec.visual, tex: 'ridges' };
+  crop.stages.splice(0, crop.stages.length, ...spec.stages);
+  crop.paints = { ...spec.paints };
+  crop.origin = origin === 'workshop' ? 'workshop' : 'repo';
+  return crop;
+}
+
+export function installTuberDoc(raw, origin = 'workshop') {
+  const doc = parseFieldStageDoc(structuredClone(raw));
+  return applyTuberSpec(tuberSpecFromDoc(doc), origin);
+}
+
+export function installShippedTuber() {
+  return installTuberDoc(tuberRaw, 'repo');
 }

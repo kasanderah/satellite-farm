@@ -102,6 +102,49 @@ export const PLANT_CROPS = {
       ] },
     ],
   },
+  tuber: {
+    id: 'tuber',
+    name: '短季薯',
+    grounds: ['general'],
+    growDays: 5,
+    growSeconds: 5 * DAY_SECONDS,
+    yieldBase: 80,
+    qualityBase: 1,
+    maturity: { maxHarvest: 120, rotLine: 120 },
+    visual: { shape: 'bush', tex: 'ridges', height: 0.48, row: 0.82, along: 0.42 },
+    paints: {
+      raw: '#6f6a61',
+      young: '#6a7340',
+      ripe: '#81683f',
+      straw: '#b59a63',
+      sown: '#4a4844',
+      mature: '#81683f',
+      harvest: '#b59a63',
+    },
+    graph: {
+      entry: { job: 'sow', to: 'sprout' },
+      edges: [
+        { from: 'sprout', to: 'bulking', kind: 'natural' },
+        { from: 'bulking', to: 'after', kind: 'hard', job: 'harvest' },
+        { from: 'bulking', to: 'rot', kind: 'natural' },
+        { from: 'rot', to: 'exit', kind: 'hard', job: 'tidy' },
+        { from: 'after', to: 'exit', kind: 'hard', job: 'tidy' },
+      ],
+    },
+    stages: [
+      { id: 'sprout', name: '出芽', role: 'head', kind: 'time', look: 'sown', days: 2, color: '#6a7340', display: { from: { color: '#4a4844', cover: 0.12 }, to: { color: '#6a7340', cover: 0.4 } }, jobs: [] },
+      { id: 'bulking', name: '结薯', role: 'node', kind: 'time', look: 'mature', days: 3, color: '#81683f', display: { from: { color: '#6a7340', cover: 0.4 }, to: { color: '#81683f', cover: 0.86 } }, jobs: [
+        { job: 'hill', kind: 'soft', name: '培土', from: 2, to: 4, qualityAdd: 1 },
+        { job: 'harvest', kind: 'hard', name: '收获', from: 4, to: 5 },
+      ] },
+      { id: 'rot', name: '烂地', role: 'rot', kind: 'rot', look: 'rot', color: '#5c4636', jobs: [
+        { job: 'tidy', kind: 'hard', name: '收拾', full: true },
+      ] },
+      { id: 'after', name: '收获后', role: 'tail', kind: 'tail', look: 'harvested', color: '#b59a63', jobs: [
+        { job: 'tidy', kind: 'hard', name: '收拾', full: true },
+      ] },
+    ],
+  },
 };
 
 export const OMNI = {
@@ -1103,7 +1146,9 @@ function finishOrder(farm, order) {
         const base = field.plant.quality ?? cropOfPlant(field)?.qualityBase ?? 1;
         field.plant.quality = base + row.qualityAdd;
       }
-      painted = commitSweep(field, job);
+      const spec = (stageRow(field)?.jobs || []).find(item => item.job === job.id && item.kind === 'soft');
+      const brushed = spec?.brush ? { ...job, brush: { ...(job.brush || {}), ...spec.brush } } : job;
+      painted = commitSweep(field, brushed);
     }
     releaseOrder(farm, order);
     pushEvent(farm, {

@@ -51,7 +51,11 @@ main.field-on #field-panel{flex:1;min-height:0;display:grid;grid-template-rows:a
 #fs-purple{border-top:4px solid #8a4db3}
 .fs-zone{font-size:10px;letter-spacing:.16em;color:var(--mut);margin-bottom:4px}
 #brief-form{display:flex;flex-direction:column;gap:10px;min-height:0}
-#brief-form[hidden],#field-panel[hidden],#fieldbar[hidden],#machine-panel[hidden]{display:none !important}
+#brief-form[hidden],#field-panel[hidden],#fieldbar[hidden],#machine-panel[hidden],#soil-panel[hidden]{display:none !important}
+main.soil-on{grid-template-columns:200px 1fr 340px}
+main.soil-on #brief{padding:12px;overflow:auto}
+main.soil-on #brief-form{display:none !important}
+#soil-panel{display:flex;flex-direction:column;gap:8px;overflow:auto;min-height:0}
 #fieldbar{position:absolute;left:12px;right:12px;bottom:12px;z-index:2;display:flex;flex-direction:column;gap:6px;background:rgba(10,12,20,.82);border:1px solid var(--line);padding:8px 10px}
 #fieldbar button,#field-panel button{font:inherit;color:var(--fg);background:transparent;border:1px solid var(--line);padding:4px 8px;letter-spacing:.08em;cursor:pointer;font-size:12px}
 #fieldbar button.on,#field-panel button.on{border-color:var(--sig);color:var(--zone)}
@@ -80,18 +84,33 @@ main.field-on #field-panel{flex:1;min-height:0;display:grid;grid-template-rows:a
 .fs-node small{display:block;font-size:10px;letter-spacing:.12em;color:var(--mut)}
 .fs-node b{display:block;font-weight:500;font-size:13px;letter-spacing:.06em;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .fs-node em{display:block;margin-top:2px;font-style:normal;font-size:10px;letter-spacing:.04em}
-.fs-node.head{border-color:#d8693c}
+.fs-node.head,.fs-node.rot,.fs-node.tail{border-color:rgba(188,195,196,.75);background-image:repeating-linear-gradient(90deg, transparent, transparent 7px, rgba(255,255,255,.1) 7px, rgba(255,255,255,.1) 8px)}
 .fs-node.node{border-color:rgba(232,216,208,.7)}
-.fs-node.rot,.fs-node.tail{background-image:repeating-linear-gradient(90deg, transparent, transparent 7px, rgba(255,255,255,.1) 7px, rgba(255,255,255,.1) 8px)}
 .fs-node.soft{border-color:#7eb6d6;width:108px}
 .fs-node.hard{border-color:#c4503a;width:108px}
-.fs-node.exit{width:68px;min-height:44px;border-style:dashed}
+.fs-node.entry,.fs-node.exit{width:78px;min-height:44px;border-style:dashed;border-color:rgba(188,195,196,.85)}
+.fs-node.float{outline:1px dashed rgba(224,177,58,.75)}
 .fs-node.on{box-shadow:inset 0 0 0 1px #d8693c}
 .fs-port{position:absolute;width:10px;height:10px;border:1px solid var(--fg);background:#0a0c14;cursor:crosshair}
 .fs-port.in{left:-6px;top:50%;margin-top:-5px}
 .fs-port.out{right:-6px;top:50%;margin-top:-5px;background:#d8693c}
-.fs-port.hang{left:50%;bottom:-6px;margin-left:-5px;background:#7eb6d6}
+.fs-port.hang{bottom:-6px;margin-left:0;background:#7eb6d6}
+.fs-port.hang.soft,.fs-port.up.soft{background:#7eb6d6}
+.fs-port.hang.hard,.fs-port.up.hard{background:#c4503a}
+.fs-port.out.flow{background:#a2998a}
 .fs-port.up{left:50%;top:-6px;margin-left:-5px}
+.fs-node .fs-bang{position:absolute;right:6px;top:3px;margin:0;font-size:12px}
+.fs-bang{color:#e0b13a;font-style:normal;font-weight:500}
+.fs-warnline{color:#e0b13a;font-size:12px;line-height:1.45;margin:0}
+.fs-box{border:1px solid var(--line);margin:6px 0;padding:8px;display:flex;flex-direction:column;gap:6px}
+.fs-box legend{padding:0 4px;font-size:10px;letter-spacing:.12em;color:var(--mut)}
+.fs-jobjump{display:flex;flex-direction:column;gap:4px}
+.fs-jobjump button{text-align:left}
+#fs-purple #fs-prop{position:static;width:auto;top:auto;right:auto;background:transparent;border:0;padding:0}
+#fs-prop textarea{font:inherit;color:var(--fg);background:#0a0c14;border:1px solid var(--line);padding:4px 6px;font-size:12px;min-height:48px;resize:vertical}
+.fs-legacy{margin-top:10px}
+.fs-legacy summary{cursor:pointer;color:var(--mut);font-size:11px;letter-spacing:.06em}
+.soil-row canvas{width:100%;height:72px;background:#10131c;border:1px solid var(--line);display:block;touch-action:none}
 #fs-prop{position:absolute;right:8px;top:44px;width:188px;z-index:3;display:flex;flex-direction:column;gap:6px;padding:8px;background:rgba(10,12,20,.94);border:1px solid rgba(188,195,196,.4)}
 #fs-prop:empty{display:none}
 #fs-prop label{display:flex;flex-direction:column;gap:3px;font-size:10px;letter-spacing:.12em;color:var(--mut)}
@@ -155,6 +174,7 @@ main.field-on #field-panel{flex:1;min-height:0;display:grid;grid-template-rows:a
     <div class="foot">备注只留在这台浏览器里，不写入环穗存档。</div>
     </div>
     <div id="field-panel" class="fs" hidden></div>
+    <div id="soil-panel" class="fs" hidden></div>
     <div id="machine-panel" class="fs" hidden></div>
   </aside>
 </main>
