@@ -8,7 +8,7 @@ import {
   createFarm, addField, addMachine, mountHitch, chooseMachine, requestPrep, requestPlant, setNextCrop, stepFarm, fieldWork, describeField,
   installPlayerMachine,
 } from '../src/framework-b.js';
-import { installShippedLastika } from '../src/lastika-stage.js';
+import { installShippedLastika, lastikaSpecFromDoc } from '../src/lastika-stage.js';
 import { alignFieldCalendar, jobWindows, parseFieldStageDoc } from '../src/field-stages.js';
 import lastikaRaw from '../data/field-stages/lastika.json' with { type: 'json' };
 import { HUD_VERSION } from '../src/version.js';
@@ -806,7 +806,7 @@ test('下一轮计划在收拾后才下播种单，没有计划不自动种', ()
 });
 
 test('拉斯提卡阶段和版本戳来自同一份定义', () => {
-  assert.equal(HUD_VERSION, '环穗 v6.21');
+  assert.equal(HUD_VERSION, '环穗 v6.22');
   const doc = parseFieldStageDoc(structuredClone(lastikaRaw));
   const windows = jobWindows(doc, alignFieldCalendar(doc)).filter(item => item.op.kind === 'optional');
   assert.deepEqual(windows.map(item => item.op.id), ['topdress', 'hill']);
@@ -843,4 +843,12 @@ test('拉斯提卡阶段和版本戳来自同一份定义', () => {
   assert.equal(crop.visual.height, 0.7);
   assert.equal(crop.visual.along, 0.36);
   assert.equal(crop.visual.tex, 'ridges');
+  doc.graph.layout = { nodes: { seedling: { x: 12, y: 40 } } };
+  const kept = parseFieldStageDoc(doc);
+  assert.equal(kept.schema, 'ringsheaf.field-stage/1');
+  assert.equal(kept.graph.layout.nodes.seedling.x, 12);
+  const spec = lastikaSpecFromDoc(kept);
+  assert.equal(spec.stages.find(stage => stage.id === 'seedling').layout, undefined);
+  assert.equal(spec.graph.layout, undefined);
+  assert.equal(spec.graph.entry.to, 'seedling');
 });

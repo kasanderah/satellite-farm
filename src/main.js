@@ -1988,7 +1988,7 @@ function pickRigScreen(cx, cy) {
     const side = project(r.x - fz * body.across, 1.6, r.z + fx * body.across);
     const nose = project(r.x + fx * body.along, 1.6, r.z + fz * body.along);
     const tail = project(r.x - fx * body.along, 1.6, r.z - fz * body.along);
-    const rad = side ? Math.max(56, Math.hypot(side[0] - mid[0], side[1] - mid[1])) : 72;
+    const rad = side ? Math.max(22, Math.hypot(side[0] - mid[0], side[1] - mid[1])) : 28;
     const dist = nose && tail ? screenDistToSeg(cx, cy, tail, nose) : Math.hypot(mid[0] - cx, mid[1] - cy);
     if (dist <= rad && dist < bd) { bd = dist; best = r; }
   }
@@ -2096,11 +2096,36 @@ function toggleRig(r) {
   if (!pickedRigs.size) selectedRig = null;
   updateDock();
 }
+function fieldBeside(x, z) {
+  const pad = 2.5;
+  let best = null;
+  let bestD = Infinity;
+  for (const [dx, dz] of [[pad, 0], [-pad, 0], [0, pad], [0, -pad]]) {
+    const f = fieldAtWorld(x + dx, z + dz);
+    if (!f) continue;
+    const d = Math.hypot(x - (f.x0 + L.FIELD / 2), z - (f.z0 + L.FIELD / 2));
+    if (d < bestD) { bestD = d; best = f; }
+  }
+  return best;
+}
+function fieldFromScreen(cx, cy) {
+  const p = pickFlat(cx, cy);
+  if (p) {
+    const hit = fieldAtWorld(p.x, p.z) || fieldBeside(p.x, p.z);
+    if (hit) return hit;
+  }
+  for (const [dx, dy] of [[12, 0], [-12, 0], [0, 12], [0, -12]]) {
+    const q = pickFlat(cx + dx, cy + dy);
+    if (!q) continue;
+    const hit = fieldAtWorld(q.x, q.z);
+    if (hit) return hit;
+  }
+  return null;
+}
 function hitSelected(cx, cy) {
   const rig = pickRigScreen(cx, cy);
   if (rig && pickedRigs.has(rig.id)) return true;
-  const p = pickFlat(cx, cy);
-  const f = p ? fieldAtWorld(p.x, p.z) : null;
+  const f = fieldFromScreen(cx, cy);
   return !!(f && pickedFields.has(f.idx));
 }
 function onLeftClick(cx, cy, shift) {
@@ -2112,8 +2137,7 @@ function onLeftClick(cx, cy, shift) {
     else selectOnlyRig(rig, false);
     return;
   }
-  const p = pickFlat(cx, cy);
-  const f = p ? fieldAtWorld(p.x, p.z) : null;
+  const f = fieldFromScreen(cx, cy);
   if (!f) { if (!shift) exitToDefault(); return; }
   if (shift && f.owned) { toggleField(f); return; }
   selectOnlyField(f);
@@ -2313,7 +2337,7 @@ function orderTargets() {
   return list;
 }
 function paintSubbar() {
-  const host = $('subbar');
+  const host = $('dock-sub') || $('subbar');
   if (!host) return;
   if (subTool !== 'prep' && subTool !== 'plant') {
     host.classList.remove('on');
@@ -2412,7 +2436,7 @@ R.domElement.addEventListener('pointerdown', e => {
     R.domElement.setPointerCapture(e.pointerId);
     return;
   }
-  drag = { b: 'pan', x: e.clientX, y: e.clientY, fromLock: !!(camLock && e.button === 0) };
+  drag = { b: 'pan', x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, fromLock: !!(camLock && e.button === 0) };
   R.domElement.setPointerCapture(e.pointerId);
 });
 addEventListener('pointerup', e => {
@@ -2425,8 +2449,7 @@ addEventListener('pointerup', e => {
         if (drag.shift) toggleRig(rig);
         else selectOnlyRig(rig, false);
       } else if (selectionKind() !== 'rig') {
-        const p = pickFlat(drag.x0, drag.y0);
-        const f = p ? fieldAtWorld(p.x, p.z) : null;
+        const f = fieldFromScreen(drag.x0, drag.y0);
         if (f?.owned && drag.shift) {
           if (pickedFields.has(f.idx)) pickedFields.delete(f.idx);
           else pickedFields.add(f.idx);
@@ -2461,8 +2484,7 @@ addEventListener('pointerup', e => {
   }
   if (drag && drag.b === 'rmb') {
     if (Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) < 6) {
-      const p = pickFlat(e.clientX, e.clientY);
-      const f = p ? fieldAtWorld(p.x, p.z) : null;
+      const f = fieldFromScreen(e.clientX, e.clientY);
       if (f?.owned && !pickedFields.has(f.idx)) pickedFields.add(f.idx);
       if (f?.owned) selectField(f, '');
       openPlanMenu(e.clientX, e.clientY);
@@ -2475,12 +2497,13 @@ addEventListener('pointerup', e => {
     onRightClick(rightArm.x, rightArm.y);
     rightArm = null;
   }
-  if (ptr && ptr.b === 0 && Math.hypot(e.clientX - ptr.x, e.clientY - ptr.y) < 6 && !(drag && drag.moved)) onLeftClick(ptr.x, ptr.y, ptr.shift);
+  if (ptr && ptr.b === 0 && Math.hypot(e.clientX - ptr.x, e.clientY - ptr.y) < 10) onLeftClick(ptr.x, ptr.y, ptr.shift);
   drag = null; ptr = null;
 });
 let hoverPtr = null, deckHover = null;
 addEventListener('pointermove', e => {
-  hoverPtr = { x: e.clientX, y: e.clientY };
+  const onHud = e.target && e.target.closest && e.target.closest('.hit, button, a, input, textarea');
+  hoverPtr = onHud ? null : { x: e.clientX, y: e.clientY };
   if (rightArm && !drag) {
     const held = performance.now() - rightArm.t;
     const moved = Math.hypot(e.clientX - rightArm.x, e.clientY - rightArm.y);
@@ -2502,6 +2525,8 @@ addEventListener('pointermove', e => {
   if (drag.b === 'rmb') return;
   const dx = e.clientX - drag.x, dy = e.clientY - drag.y; drag.x = e.clientX; drag.y = e.clientY;
   if (drag.b === 'pan') {
+    const travel = Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0);
+    if (travel < 10) return;
     drag.moved = true;
     if (drag.fromLock) { drag.fromLock = false; exitToDefault(); }
     const k = camT.d * 2 * Math.tan(15 * DEG) / innerHeight, s = Math.sin(camT.yaw), c = Math.cos(camT.yaw);
@@ -3192,11 +3217,55 @@ function paintRigHud() {
     el.style.height = box.h.toFixed(1) + 'px';
   }
 }
+function fieldScreenBox(f) {
+  const y = 0.6;
+  const pts = [[f.x0, f.z0], [f.x0 + L.FIELD, f.z0], [f.x0 + L.FIELD, f.z0 + L.FIELD], [f.x0, f.z0 + L.FIELD]];
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity, n = 0;
+  for (const [x, z] of pts) {
+    const p = project(x, y, z);
+    if (!p) continue;
+    n += 1;
+    minX = Math.min(minX, p[0]);
+    maxX = Math.max(maxX, p[0]);
+    minY = Math.min(minY, p[1]);
+    maxY = Math.max(maxY, p[1]);
+  }
+  if (n < 2 || maxX < 0 || maxY < 0 || minX > innerWidth || minY > innerHeight) return null;
+  return { x: minX, y: minY, w: Math.max(8, maxX - minX), h: Math.max(8, maxY - minY) };
+}
+function placeAim(box) {
+  const el = $('aimhud');
+  if (!el || !box) return;
+  el.classList.add('on');
+  el.style.left = box.x.toFixed(1) + 'px';
+  el.style.top = box.y.toFixed(1) + 'px';
+  el.style.width = box.w.toFixed(1) + 'px';
+  el.style.height = box.h.toFixed(1) + 'px';
+}
+function paintAim() {
+  const el = $('aimhud');
+  if (!el) return;
+  if (viewLayer !== 'surface' || !hoverPtr || drag) { el.classList.remove('on'); return; }
+  const rig = pickRigScreen(hoverPtr.x, hoverPtr.y);
+  if (rig) {
+    if (pickedRigs.has(rig.id)) { el.classList.remove('on'); return; }
+    const box = rigScreenBox(rig);
+    if (!box) { el.classList.remove('on'); return; }
+    placeAim(box);
+    return;
+  }
+  const f = fieldFromScreen(hoverPtr.x, hoverPtr.y);
+  if (!f || f === selected || pickedFields.has(f.idx)) { el.classList.remove('on'); return; }
+  const box = fieldScreenBox(f);
+  if (!box) { el.classList.remove('on'); return; }
+  placeAim(box);
+}
 function paintPicks() {
   const host = $('picks');
   if (host && host.childElementCount) host.innerHTML = '';
   paintPickEdges();
   paintRigHud();
+  paintAim();
 }
 function updateLabels(d) {
   const want = [];
@@ -3582,8 +3651,23 @@ function bootStagesSync() {
 }
 const bootStageNote = bootStagesSync();
 $('kpi').innerHTML = `<div class="k-rev"><small>营收</small><b class="hv" id="kpi-rev">0</b></div><div class="k-day"><small>世界日</small><b id="kpi-day">0</b></div><div class="k-time"><small>时刻</small><span class="clk"><i class="face" id="kpi-face" aria-hidden="true"><i id="kpi-hh"></i><i id="kpi-mh"></i></i><b id="kpi-hm">00:00</b><b id="kpi-rate">1×</b></span></div><div class="k-act"><small>作业</small><b class="hv" id="kpi-act">0</b><em>/ ${rigs.length}</em></div>`;
-$('dock').innerHTML = `<div class="drow"><div class="dlab">单元信息</div><div class="who"><div class="name"><b id="selid"></b><em id="selwork" hidden></em></div></div></div><div class="drow"><div class="dlab">作物概况</div><div class="sum" id="crop-sum"></div></div><div class="drow"><div class="dlab" id="dock-jobs-lab">当前阶段作业监控</div><div id="dock-jobs" class="jobs"></div></div><div class="drow"><div class="dlab">生长阶段监控</div><div id="stagebar"></div></div><div class="drow"><div class="dlab">操作按钮</div><div class="ops" id="dock-ops"></div></div>`;
+$('dock').innerHTML = `<div class="drow"><div class="dlab">单元信息</div><div class="who"><div class="name"><b id="selid"></b><em id="selwork" hidden></em></div></div></div><div class="drow"><div class="dlab">作物概况</div><div class="sum" id="crop-sum"></div></div><div class="drow"><div class="dlab" id="dock-jobs-lab">当前阶段作业监控</div><div id="dock-jobs" class="jobs"></div></div><div class="drow"><div class="dlab">生长阶段监控</div><div id="stagebar"></div></div><div class="drow"><div class="dlab">操作按钮</div><div id="dock-sub" class="strip"></div><div class="ops" id="dock-ops"></div></div>`;
 $('dock').addEventListener('pointerdown', (e) => {
+  const recipe = e.target.closest('[data-recipe]');
+  const cropBtn = e.target.closest('[data-crop]');
+  if (recipe || cropBtn) {
+    e.preventDefault();
+    e.stopPropagation();
+    const list = orderTargets();
+    if (!list.length) return;
+    for (const field of list) {
+      selected = field;
+      if (recipe) doPrep(recipe.dataset.recipe);
+      else doPlant(cropBtn.dataset.crop);
+    }
+    closeSubTool();
+    return;
+  }
   const btn = e.target.closest('[data-act]');
   if (!btn || btn.disabled) return;
   e.preventDefault();

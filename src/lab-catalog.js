@@ -194,7 +194,7 @@ export const LAB_ENTRIES = [
     name: '阶段编辑器',
     size: '预览 36 × 28 m',
     span: 44,
-    notes: `田间阶段编辑器。打开就是拉斯提卡。主游戏种植阶段、软窗、田面色和生长钟只读这份，或仓库 data/field-stages/lastika.json。保存写进这台浏览器，钥匙 ringsheaf.assetlab.fieldStages.v1，作物槽是 lastika。可玩页刷新或点「重读工坊」后生效。
+    notes: `田间阶段编辑器。打开就是拉斯提卡。中间是节点图：头、尾、一般阶段，软作业和硬作业用线挂在阶段上。主游戏种植阶段、软窗、田面色和生长钟只读这份 graph，或仓库 data/field-stages/lastika.json。节点位置在 graph.layout，主游戏不读。保存写进这台浏览器，钥匙仍是 ringsheaf.assetlab.fieldStages.v1，作物槽是 lastika。可玩页刷新或点「重读工坊」后生效。
 
 序列组 O、A、B、D、E 必须有。C 和中间段可以加减。阶段名和 id 都能改。作业色条从上到下是执行顺序。硬作业锁到做完。软作业带窗口，过窗可挂起。田面可以改色、植株、垄截面，也可以不影响。
 

@@ -31,19 +31,15 @@ const REASON = {
   empty: '现在没有可扫的格子',
 };
 
-const HELP = `打开：左侧「田间 / 阶段编辑器」。默认是拉斯提卡。主游戏只读这份。
+const HELP = `打开：左侧「田间 / 阶段编辑器」。默认是拉斯提卡。主游戏只读这份的 graph。
 
-序列：O、A、B、D、E 必须有。C 和中间段可以加、也可以删。阶段名和 id 都能改。
+节点图在中间。可以新建头、尾、一般阶段、软作业、硬作业。从阶段右侧端子拖到下一阶段左侧端子。软作业和硬作业挂在阶段下方。拖动节点改位置。点节点改天数、作业、产量和品质。
 
-时长：点电池图里的一格，或左侧天数，改世界日。播放和主游戏同一口钟。1× 时 1 世界日 = 12 现实分钟（720 现实秒）。软窗、硬窗的起止是这一阶段内的世界日。烂地和收获后不按天数占格。
+底栏仍按天数分格，给预览用。烂地和收获后不按天数占格。
 
-作业：色条从上到下就是执行顺序。硬作业锁到做完。软作业带窗口，过了窗口可以失败并挂起。田面可以选色、植株、垄截面，也可以不影响。
+序列 O、A、B、D、E 仍要有，给田面色和预览。主游戏不读这条按天条。保存钥匙仍是 ringsheaf.assetlab.fieldStages.v1。节点位置在 graph.layout，主游戏不读。
 
-色、植株、垄截面旁边的问号是这三类切换。自然阶段的散点、推进、窗口仍可用。
-
-整地不在这条链里。主游戏的清地 → 一般田地是旁边的配方，不要写回 O 到 A。
-
-存：保存进这台浏览器，钥匙仍是 ringsheaf.assetlab.fieldStages.v1，作物槽是 lastika。可玩页刷新或点「重读工坊」后生效。`;
+整地不在这条链里。主游戏的清地 → 一般田地是旁边的配方，不要写回 O 到 A。`;
 
 function potatoDoc() {
   return parseFieldStageDoc(structuredClone(potatoBRaw));
@@ -239,7 +235,7 @@ function makeMachine() {
 }
 
 export function createFieldWorkshop(els) {
-  const { panel, bar } = els;
+  const { panel, bar, viewEl } = els;
   const builtin = CROPS.filter(c => c.plantable).map(cropVisual);
   let docs = { lastika: lastikaDoc() };
   let cropId = 'lastika';
@@ -256,6 +252,11 @@ export function createFieldWorkshop(els) {
   let editorSig = '';
   let jobsSig = '';
   let ganttHtml = '';
+  let graphPick = null;
+  let graphSig = '';
+  let propSig = '';
+  let nodeDrag = null;
+  let wireDrag = null;
   let dragPt = null;
   let view = null;
   let lastNow = 0;
@@ -310,11 +311,39 @@ export function createFieldWorkshop(els) {
     }
   }
 
+  function graphError(doc) {
+    if ((doc.cropId || cropId) !== 'lastika') return '';
+    const graph = doc.graph;
+    if (!graph || !graph.entry || !Array.isArray(graph.stages) || !Array.isArray(graph.edges)) return '拉斯提卡缺少阶段图';
+    if (graph.edges.some(edge => edge.kind !== 'hard' && edge.kind !== 'natural')) return '阶段图的边只能是 hard 或 natural';
+    const heads = graph.stages.filter(stage => stage.role === 'head');
+    const tails = graph.stages.filter(stage => stage.role === 'tail');
+    const rots = graph.stages.filter(stage => stage.role === 'rot');
+    if (heads.length !== 1 || tails.length !== 1 || rots.length !== 1) return '阶段图要有一个头、烂地、以及收获后';
+    if (graph.edges.some(edge => edge.to === heads[0].id)) return '头阶段不能从作物阶段进来';
+    for (const end of [...tails, ...rots]) {
+      if (Number(end.days) > 0) return '尾阶段没有时长';
+      const out = graph.edges.filter(edge => edge.from === end.id);
+      if (!out.length || out.some(edge => edge.kind !== 'hard' || edge.to !== 'exit')) return '尾阶段只留收拾硬边';
+    }
+    const mature = graph.stages.find(stage => stage.id === 'mature');
+    if (!mature || mature.role === 'tail' || mature.role === 'rot') return '成熟不是尾阶段';
+    if (!graph.edges.some(edge => edge.from === 'mature' && edge.kind === 'natural' && edge.to === rots[0].id)) return '成熟到点要能进烂地';
+    if (graph.entry.job !== 'sow' || graph.entry.to !== heads[0].id) return '作物图从播种进入头阶段';
+    return '';
+  }
+
   function persist() {
     const doc = current();
     const err = calendarError(doc);
     if (err) {
       note = err + '。没写入。阶段合计 ' + chainDays(doc) + ' 日，总周期 ' + (Number.isFinite(+doc.cycle) ? doc.cycle : '未定') + ' 日。';
+      paintStatus();
+      return false;
+    }
+    const gerr = graphError(doc);
+    if (gerr) {
+      note = gerr + '。没写入。';
       paintStatus();
       return false;
     }
@@ -418,8 +447,8 @@ export function createFieldWorkshop(els) {
 <p id="fs-editing" class="fs-note"></p>
 <label>显示名<input id="fs-name" type="text" maxlength="24" placeholder="显示名"></label>
 <p id="fs-now" class="fs-note"></p>
-<div id="fs-gantt" class="fs-gantt"></div>
-<p class="fs-note">电池图按天数分格。点一格编辑该阶段。淡蓝是软窗，红是硬窗。∞ 是烂地或收获后，不按天数占格。</p>
+<p class="fs-note">节点图在中间。拖节点，从右侧端子接到下一阶段。软作业和硬作业挂在阶段下方。底栏仍按天数分格。</p>
+<div id="fs-gantt" class="fs-gantt" hidden></div>
 <div id="fs-stages"></div>
 <div id="fs-edit"></div>
 <div id="fs-jobs"></div>
@@ -692,7 +721,519 @@ export function createFieldWorkshop(els) {
     host.innerHTML = buttons.join('') + '<button type="button" data-act="cancel">取消扫田</button>';
   }
 
+  const GRAPH_JOBS = [
+    { job: 'topdress', kind: 'soft', name: '追肥' },
+    { job: 'hill', kind: 'soft', name: '培土' },
+    { job: 'harvest', kind: 'hard', name: '收获' },
+    { job: 'tidy', kind: 'hard', name: '收拾' },
+    { job: 'sow', kind: 'hard', name: '播种' },
+  ];
+
+  function roleLabel(stage) {
+    if (!stage) return '';
+    if (stage.role === 'head') return '头';
+    if (stage.role === 'rot') return '尾 · 烂地';
+    if (stage.role === 'tail') return '尾 · 收获后';
+    return '阶段';
+  }
+
+  function jobKey(stageId, index) {
+    return 'job:' + stageId + ':' + index;
+  }
+
+  function parseJobKey(id) {
+    const m = /^job:(.+):(\d+)$/.exec(id || '');
+    if (!m) return null;
+    return { stageId: m[1], index: +m[2] };
+  }
+
+  function graphStage(id) {
+    const graph = current().graph;
+    if (!graph) return null;
+    return graph.stages.find(stage => stage.id === id) || null;
+  }
+
+  function freshGraphId(graph, base) {
+    const ids = new Set(graph.stages.map(stage => stage.id));
+    if (!ids.has(base)) return base;
+    let n = 2;
+    while (ids.has(base + n)) n += 1;
+    return base + n;
+  }
+
+  function ensureLayout(graph) {
+    if (!graph.layout || typeof graph.layout !== 'object' || Array.isArray(graph.layout)) graph.layout = { nodes: {} };
+    const nodes = graph.layout.nodes || (graph.layout.nodes = {});
+    const seen = new Set();
+    const order = [];
+    let cur = graph.stages.find(stage => stage.role === 'head')?.id || null;
+    let guard = 0;
+    while (cur && !seen.has(cur) && guard < 24) {
+      guard += 1;
+      seen.add(cur);
+      order.push(cur);
+      const next = (graph.edges || []).find(edge => edge.from === cur && edge.to !== 'exit' && !seen.has(edge.to));
+      cur = next ? next.to : null;
+    }
+    for (const stage of graph.stages) if (!seen.has(stage.id)) order.push(stage.id);
+    order.forEach((id, i) => {
+      if (!nodes[id]) nodes[id] = { x: 12 + i * 118, y: 36 };
+    });
+    if (!nodes.exit) nodes.exit = { x: 12 + order.length * 118, y: 36 };
+    for (const stage of graph.stages) {
+      (stage.jobs || []).forEach((job, index) => {
+        const key = jobKey(stage.id, index);
+        if (!nodes[key]) {
+          const host = nodes[stage.id] || { x: 12, y: 36 };
+          nodes[key] = { x: host.x, y: host.y + 108 + index * 74 };
+        }
+      });
+    }
+    return nodes;
+  }
+
+  function graphStructuralSig(doc) {
+    const graph = doc.graph;
+    if (!graph) return cropId + ':none';
+    const stages = (graph.stages || []).map(stage => stage.id + '/' + stage.role + '/' + (stage.jobs || []).map(job => job.job + ':' + job.kind).join(',')).join(';');
+    const edges = (graph.edges || []).map(edge => edge.from + '>' + edge.to + ':' + edge.kind).join(';');
+    return cropId + '|' + (graphPick || '') + '|' + stages + '|' + edges;
+  }
+
+  function boardEl() {
+    if (!viewEl) return null;
+    let el = document.getElementById('fs-board');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'fs-board';
+      el.hidden = true;
+      el.innerHTML = `<div class="fs-board-tools"><button type="button" data-gadd="head">头</button><button type="button" data-gadd="tail">尾</button><button type="button" data-gadd="node">一般阶段</button><button type="button" data-gadd="soft">软作业</button><button type="button" data-gadd="hard">硬作业</button><button type="button" data-gadd="drop">删除</button></div><div id="fs-graph"><div id="fs-canvas"><svg id="fs-wires"></svg><div id="fs-nodes"></div></div></div><div id="fs-prop"></div>`;
+      viewEl.appendChild(el);
+      bindBoard(el);
+    }
+    return el;
+  }
+
+  function nodeHtml(id, cls, pos, role, name, meta, ports) {
+    const on = graphPick === id ? ' on' : '';
+    return `<div class="fs-node ${cls}${on}" data-nid="${esc(id)}" style="left:${pos.x}px;top:${pos.y}px">${ports}<small>${esc(role)}</small><b>${esc(name)}</b><em>${esc(meta)}</em></div>`;
+  }
+
+  function renderNodes(graph, nodes) {
+    const cards = graph.stages.map(stage => {
+      const pos = nodes[stage.id] || { x: 16, y: 28 };
+      const meta = stage.role === 'rot' || stage.role === 'tail' ? '∞' : (stage.days + ' 日');
+      const inn = stage.role === 'head' ? '' : '<i class="fs-port in"></i>';
+      return nodeHtml(stage.id, stage.role || 'node', pos, roleLabel(stage), stage.name || stage.id, meta, inn + '<i class="fs-port out"></i><i class="fs-port hang"></i>');
+    });
+    for (const stage of graph.stages) {
+      (stage.jobs || []).forEach((job, index) => {
+        const key = jobKey(stage.id, index);
+        const pos = nodes[key] || { x: 16, y: 160 };
+        const meta = job.full ? '整段' : ((job.from ?? 0) + '–' + (job.to ?? 0));
+        cards.push(nodeHtml(key, job.kind === 'hard' ? 'hard' : 'soft', pos, job.kind === 'hard' ? '硬作业' : '软作业', job.name || job.job, meta, '<i class="fs-port up"></i>'));
+      });
+    }
+    const exit = nodes.exit || { x: 16, y: 28 };
+    cards.push(nodeHtml('exit', 'exit', exit, '出口', '出口', '', '<i class="fs-port in"></i>'));
+    return cards.join('');
+  }
+
+  function syncNodeText(graph, nodes) {
+    const host = document.getElementById('fs-nodes');
+    if (!host) return;
+    const apply = (id, name, meta) => {
+      const el = host.querySelector(`[data-nid="${CSS.escape(id)}"]`);
+      if (!el) return;
+      const pos = nodes[id];
+      if (pos) { el.style.left = pos.x + 'px'; el.style.top = pos.y + 'px'; }
+      const b = el.querySelector('b');
+      const em = el.querySelector('em');
+      if (b && b.textContent !== name) b.textContent = name;
+      if (em && em.textContent !== meta) em.textContent = meta;
+      el.classList.toggle('on', graphPick === id);
+    };
+    for (const stage of graph.stages) {
+      const meta = stage.role === 'rot' || stage.role === 'tail' ? '∞' : (stage.days + ' 日');
+      apply(stage.id, stage.name || stage.id, meta);
+    }
+    for (const stage of graph.stages) {
+      (stage.jobs || []).forEach((job, index) => {
+        const meta = job.full ? '整段' : ((job.from ?? 0) + '–' + (job.to ?? 0));
+        apply(jobKey(stage.id, index), job.name || job.job, meta);
+      });
+    }
+    apply('exit', '出口', '');
+  }
+
+  function canvasPoint(clientX, clientY) {
+    const canvas = document.getElementById('fs-canvas');
+    const rect = canvas.getBoundingClientRect();
+    return { x: clientX - rect.left, y: clientY - rect.top };
+  }
+
+  function portPoint(nid, selector) {
+    const host = document.getElementById('fs-nodes');
+    const canvas = document.getElementById('fs-canvas');
+    if (!host || !canvas) return null;
+    const el = host.querySelector(`[data-nid="${CSS.escape(nid)}"]`);
+    if (!el) return null;
+    const port = el.querySelector(selector) || el;
+    const root = canvas.getBoundingClientRect();
+    const box = port.getBoundingClientRect();
+    return { x: box.left + box.width / 2 - root.left, y: box.top + box.height / 2 - root.top };
+  }
+
+  function wirePath(a, b, vertical) {
+    if (vertical) {
+      const dy = Math.max(28, Math.abs(b.y - a.y) * 0.45);
+      return `M ${a.x} ${a.y} C ${a.x} ${a.y + dy}, ${b.x} ${b.y - dy}, ${b.x} ${b.y}`;
+    }
+    const dx = Math.max(36, Math.abs(b.x - a.x) * 0.45);
+    const dir = b.x >= a.x ? 1 : -1;
+    return `M ${a.x} ${a.y} C ${a.x + dx * dir} ${a.y}, ${b.x - dx * dir} ${b.y}, ${b.x} ${b.y}`;
+  }
+
+  function drawWires(graph) {
+    const svg = document.getElementById('fs-wires');
+    const canvas = document.getElementById('fs-canvas');
+    if (!svg || !canvas || !graph) return;
+    const nodes = graph.layout.nodes;
+    let w = 960;
+    let h = 560;
+    for (const id of Object.keys(nodes)) {
+      w = Math.max(w, (nodes[id].x || 0) + 220);
+      h = Math.max(h, (nodes[id].y || 0) + 150);
+    }
+    canvas.style.width = w + 'px';
+    canvas.style.height = h + 'px';
+    svg.setAttribute('width', String(w));
+    svg.setAttribute('height', String(h));
+    svg.style.width = w + 'px';
+    svg.style.height = h + 'px';
+    const paths = [];
+    for (const edge of graph.edges || []) {
+      const a = portPoint(edge.from, '.out');
+      const b = portPoint(edge.to, '.in');
+      if (!a || !b) continue;
+      const color = edge.kind === 'hard' ? '#c4503a' : '#a2998a';
+      paths.push(`<path d="${wirePath(a, b, false)}" fill="none" stroke="${color}" stroke-width="1.5"/>`);
+    }
+    for (const stage of graph.stages) {
+      (stage.jobs || []).forEach((job, index) => {
+        const a = portPoint(stage.id, '.hang');
+        const b = portPoint(jobKey(stage.id, index), '.up');
+        if (!a || !b) return;
+        const color = job.kind === 'hard' ? '#c4503a' : '#7eb6d6';
+        paths.push(`<path d="${wirePath(a, b, true)}" fill="none" stroke="${color}" stroke-width="1.5"/>`);
+      });
+    }
+    if (wireDrag) {
+      const fromSel = wireDrag.kind === 'hang' ? '.hang' : '.out';
+      const a = portPoint(wireDrag.from, fromSel);
+      const b = canvasPoint(wireDrag.x, wireDrag.y);
+      if (a) paths.push(`<path d="${wirePath(a, b, wireDrag.kind === 'hang')}" fill="none" stroke="#d8693c" stroke-width="1.5" stroke-dasharray="4 3"/>`);
+    }
+    svg.innerHTML = paths.join('');
+  }
+
+  function paintProp() {
+    const host = document.getElementById('fs-prop');
+    if (!host) return;
+    const sig = cropId + '|' + (graphPick || '');
+    if (sig === propSig && host.childElementCount) return;
+    propSig = sig;
+    const graph = current().graph;
+    if (!graph || !graphPick || graphPick === 'exit') {
+      host.innerHTML = '';
+      return;
+    }
+    const located = parseJobKey(graphPick);
+    if (located) {
+      const stage = graphStage(located.stageId);
+      const job = stage && stage.jobs[located.index];
+      if (!job) { host.innerHTML = ''; return; }
+      const options = GRAPH_JOBS.map(item => `<option value="${item.job}"${item.job === job.job ? ' selected' : ''}>${item.name}</option>`).join('');
+      const windowed = job.full ? '' : `<label>起<input id="gp-from" type="number" step="0.25" value="${job.from ?? 0}"></label><label>止<input id="gp-to" type="number" step="0.25" value="${job.to ?? 0}"></label>`;
+      host.innerHTML = `<label>作业<select id="gp-job">${options}</select></label>${windowed}<label>产量倍数<input id="gp-yield" type="number" step="0.1" value="${job.yieldMul ?? ''}"></label><label>品质加<input id="gp-qual" type="number" step="1" value="${job.qualityAdd ?? ''}"></label>`;
+      const touchJob = () => { graphSig = ''; paintGraph(); persist(); };
+      host.querySelector('#gp-job').addEventListener('change', (e) => {
+        const preset = GRAPH_JOBS.find(item => item.job === e.target.value);
+        if (!preset) return;
+        job.job = preset.job;
+        job.kind = preset.kind;
+        job.name = preset.name;
+        propSig = '';
+        touchJob();
+      });
+      const from = host.querySelector('#gp-from');
+      const to = host.querySelector('#gp-to');
+      if (from) from.addEventListener('input', () => { job.from = clampNum(from.value, 0, 400, job.from ?? 0); syncNodeText(graph, graph.layout.nodes); persist(); });
+      if (to) to.addEventListener('input', () => { job.to = clampNum(to.value, 0, 400, job.to ?? 0); syncNodeText(graph, graph.layout.nodes); persist(); });
+      host.querySelector('#gp-yield').addEventListener('input', (e) => {
+        const n = Number(e.target.value);
+        if (e.target.value === '' || !Number.isFinite(n)) delete job.yieldMul;
+        else job.yieldMul = Math.round(n * 100) / 100;
+        persist();
+      });
+      host.querySelector('#gp-qual').addEventListener('input', (e) => {
+        const n = Number(e.target.value);
+        if (e.target.value === '' || !Number.isFinite(n)) delete job.qualityAdd;
+        else job.qualityAdd = Math.round(n);
+        persist();
+      });
+      return;
+    }
+    const stage = graphStage(graphPick);
+    if (!stage) { host.innerHTML = ''; return; }
+    const days = stage.role === 'rot' || stage.role === 'tail' ? '' : `<label>天数<input id="gp-days" type="number" min="0.25" max="400" step="0.25" value="${stage.days}"></label>`;
+    const cuts = (graph.edges || []).map((edge, index) => {
+      if (edge.from !== stage.id) return '';
+      const where = edge.to === 'exit' ? '出口' : (graphStage(edge.to)?.name || edge.to);
+      const kind = edge.kind === 'hard' ? '硬' : '自然';
+      return `<div class="fs-cut"><span>到 ${esc(where)} · ${kind}</span><button type="button" data-gcut="${index}">断开</button></div>`;
+    }).join('');
+    host.innerHTML = `<p class="fs-note">${esc(roleLabel(stage))}</p><label>名称<input id="gp-name" type="text" maxlength="24" value="${esc(stage.name || '')}"></label>${days}${cuts}`;
+    host.querySelector('#gp-name').addEventListener('input', (e) => {
+      stage.name = e.target.value;
+      syncNodeText(graph, graph.layout.nodes);
+      persist();
+    });
+    const daysInput = host.querySelector('#gp-days');
+    if (daysInput) daysInput.addEventListener('input', () => {
+      stage.days = clampNum(daysInput.value, 0.25, 400, stage.days);
+      syncNodeText(graph, graph.layout.nodes);
+      persist();
+    });
+  }
+
+  function paintGraph() {
+    const board = boardEl();
+    if (!board) return;
+    board.hidden = !active;
+    if (!active) return;
+    const doc = current();
+    const graph = doc.graph;
+    const nodesHost = document.getElementById('fs-nodes');
+    if (!graph || !Array.isArray(graph.stages)) {
+      const sig = cropId + ':none';
+      if (sig !== graphSig) {
+        graphSig = sig;
+        propSig = '';
+        nodesHost.innerHTML = '<div class="fs-empty">这份作物没有阶段图。主游戏只读拉斯提卡的图。</div>';
+        document.getElementById('fs-wires').innerHTML = '';
+        document.getElementById('fs-prop').innerHTML = '';
+      }
+      return;
+    }
+    const nodes = ensureLayout(graph);
+    const sig = graphStructuralSig(doc);
+    if (sig !== graphSig) {
+      graphSig = sig;
+      propSig = '';
+      nodesHost.innerHTML = renderNodes(graph, nodes);
+    } else syncNodeText(graph, nodes);
+    drawWires(graph);
+    paintProp();
+  }
+
+  function addGraphStage(role) {
+    const doc = current();
+    if (!doc.graph) { note = '这份没有阶段图'; paintStatus(); return; }
+    const graph = doc.graph;
+    let next = role;
+    if (role === 'head' && graph.stages.some(stage => stage.role === 'head')) { note = '已经有头阶段'; paintStatus(); return; }
+    if (role === 'tail') {
+      if (!graph.stages.some(stage => stage.role === 'rot')) next = 'rot';
+      else if (!graph.stages.some(stage => stage.role === 'tail')) next = 'tail';
+      else { note = '烂地和收获后都已经在图上'; paintStatus(); return; }
+    }
+    const made = {
+      head: { id: freshGraphId(graph, 'head'), name: '头', role: 'head', kind: 'time', look: 'sown', days: 2, color: '#51542c', jobs: [] },
+      node: { id: freshGraphId(graph, 'stage'), name: '阶段', role: 'node', kind: 'time', look: 'sown', days: 2, color: '#6a7340', jobs: [] },
+      rot: { id: freshGraphId(graph, 'rot'), name: '烂地', role: 'rot', kind: 'rot', look: 'rot', color: '#5c4636', jobs: [{ job: 'tidy', kind: 'hard', name: '收拾', full: true }] },
+      tail: { id: freshGraphId(graph, 'after'), name: '收获后', role: 'tail', kind: 'tail', look: 'harvested', color: '#b59a63', jobs: [{ job: 'tidy', kind: 'hard', name: '收拾', full: true }] },
+    }[next];
+    graph.stages.push(made);
+    if (next === 'head') graph.entry = { job: 'sow', to: made.id };
+    if (next === 'rot' || next === 'tail') graph.edges.push({ from: made.id, to: 'exit', kind: 'hard', job: 'tidy' });
+    if (next === 'rot' && graph.stages.some(stage => stage.id === 'mature') && !graph.edges.some(edge => edge.from === 'mature' && edge.to === made.id)) {
+      graph.edges.push({ from: 'mature', to: made.id, kind: 'natural' });
+    }
+    graphPick = made.id;
+    graphSig = '';
+    propSig = '';
+    note = '';
+    paintGraph();
+    persist();
+  }
+
+  function addGraphJob(kind) {
+    const graph = current().graph;
+    if (!graph) { note = '这份没有阶段图'; paintStatus(); return; }
+    const stage = graphStage(graphPick) || graph.stages.find(item => item.role === 'node') || graph.stages.find(item => item.role === 'head');
+    if (!stage) { note = '先点一个阶段，再挂作业'; paintStatus(); return; }
+    const job = kind === 'hard'
+      ? { job: 'harvest', kind: 'hard', name: '收获', from: 0, to: 1 }
+      : { job: 'topdress', kind: 'soft', name: '追肥', from: 0, to: 1, yieldMul: 1 };
+    stage.jobs = stage.jobs || [];
+    stage.jobs.push(job);
+    graphPick = jobKey(stage.id, stage.jobs.length - 1);
+    graphSig = '';
+    propSig = '';
+    note = '';
+    paintGraph();
+    persist();
+  }
+
+  function deleteGraphPick() {
+    const graph = current().graph;
+    if (!graph || !graphPick || graphPick === 'exit') return;
+    const located = parseJobKey(graphPick);
+    if (located) {
+      const stage = graphStage(located.stageId);
+      if (stage) stage.jobs.splice(located.index, 1);
+      if (graph.layout && graph.layout.nodes) delete graph.layout.nodes[graphPick];
+    } else {
+      const stage = graphStage(graphPick);
+      if (!stage) return;
+      if (stage.role === 'head' || stage.role === 'rot' || stage.role === 'tail') {
+        note = '头、烂地、收获后各留一个，主游戏才读得了';
+        paintStatus();
+        return;
+      }
+      graph.stages = graph.stages.filter(item => item.id !== stage.id);
+      graph.edges = graph.edges.filter(edge => edge.from !== stage.id && edge.to !== stage.id);
+    }
+    graphPick = null;
+    graphSig = '';
+    propSig = '';
+    paintGraph();
+    persist();
+  }
+
+  function connectGraph(fromId, toId, kind) {
+    const graph = current().graph;
+    if (!graph || fromId === toId) return;
+    if (kind === 'hang') {
+      const located = parseJobKey(toId);
+      const stage = graphStage(fromId);
+      if (!located || !stage) { note = '把作业挂到阶段下方的端子上'; paintStatus(); return; }
+      if (located.stageId === stage.id) return;
+      const src = graphStage(located.stageId);
+      if (!src || !src.jobs[located.index]) return;
+      const [job] = src.jobs.splice(located.index, 1);
+      stage.jobs = stage.jobs || [];
+      stage.jobs.push(job);
+      graphPick = jobKey(stage.id, stage.jobs.length - 1);
+      note = '';
+      return;
+    }
+    const src = graphStage(fromId);
+    if (!src) return;
+    if (toId === 'exit') {
+      if (src.role !== 'tail' && src.role !== 'rot') { note = '只有尾阶段接到出口'; paintStatus(); return; }
+      graph.edges = graph.edges.filter(edge => edge.from !== fromId);
+      graph.edges.push({ from: fromId, to: 'exit', kind: 'hard', job: 'tidy' });
+      note = '';
+      return;
+    }
+    const dst = graphStage(toId);
+    if (!dst) { note = '接到下一个阶段的左侧端子'; paintStatus(); return; }
+    if (dst.role === 'head') { note = '头阶段不能从作物阶段进来'; paintStatus(); return; }
+    if (src.role === 'tail' || src.role === 'rot') { note = '尾阶段只接到出口'; paintStatus(); return; }
+    const edgeKind = dst.role === 'tail' ? 'hard' : 'natural';
+    const job = dst.role === 'tail' ? 'harvest' : undefined;
+    graph.edges = graph.edges.filter(edge => !(edge.from === fromId && edge.to === toId));
+    graph.edges.push({ from: fromId, to: toId, kind: edgeKind, ...(job ? { job } : {}) });
+    note = '';
+  }
+
+  function bindBoard(board) {
+    board.addEventListener('pointerdown', (e) => {
+      const add = e.target.closest('[data-gadd]');
+      if (add) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (add.dataset.gadd === 'head') addGraphStage('head');
+        else if (add.dataset.gadd === 'tail') addGraphStage('tail');
+        else if (add.dataset.gadd === 'node') addGraphStage('node');
+        else if (add.dataset.gadd === 'soft') addGraphJob('soft');
+        else if (add.dataset.gadd === 'hard') addGraphJob('hard');
+        else deleteGraphPick();
+        return;
+      }
+      const cut = e.target.closest('[data-gcut]');
+      if (cut) {
+        e.preventDefault();
+        e.stopPropagation();
+        const graph = current().graph;
+        const index = +cut.dataset.gcut;
+        if (graph && graph.edges[index]) graph.edges.splice(index, 1);
+        graphSig = '';
+        propSig = '';
+        paintGraph();
+        persist();
+        return;
+      }
+      if (e.target.closest('#fs-prop')) return;
+      const port = e.target.closest('.fs-port');
+      const node = e.target.closest('.fs-node');
+      if (!node) return;
+      e.preventDefault();
+      e.stopPropagation();
+      board.setPointerCapture(e.pointerId);
+      if (port && (port.classList.contains('out') || port.classList.contains('hang'))) {
+        wireDrag = { from: node.dataset.nid, kind: port.classList.contains('hang') ? 'hang' : 'flow', x: e.clientX, y: e.clientY };
+        return;
+      }
+      graphPick = node.dataset.nid;
+      const pos = canvasPoint(e.clientX, e.clientY);
+      const laid = current().graph?.layout?.nodes?.[graphPick] || { x: 0, y: 0 };
+      nodeDrag = { id: graphPick, ox: pos.x - laid.x, oy: pos.y - laid.y };
+      propSig = '';
+      paintGraph();
+    });
+    board.addEventListener('pointermove', (e) => {
+      if (wireDrag) {
+        wireDrag.x = e.clientX;
+        wireDrag.y = e.clientY;
+        drawWires(current().graph);
+        return;
+      }
+      if (!nodeDrag) return;
+      const graph = current().graph;
+      if (!graph) return;
+      const pos = canvasPoint(e.clientX, e.clientY);
+      const x = Math.max(8, pos.x - nodeDrag.ox);
+      const y = Math.max(8, pos.y - nodeDrag.oy);
+      graph.layout.nodes[nodeDrag.id] = { x, y };
+      const el = document.querySelector(`#fs-nodes [data-nid="${CSS.escape(nodeDrag.id)}"]`);
+      if (el) { el.style.left = x + 'px'; el.style.top = y + 'px'; }
+      drawWires(graph);
+    });
+    const endDrag = (e) => {
+      if (wireDrag) {
+        const under = document.elementFromPoint(e.clientX, e.clientY);
+        const node = under && under.closest ? under.closest('.fs-node') : null;
+        if (node) connectGraph(wireDrag.from, node.dataset.nid, wireDrag.kind);
+        wireDrag = null;
+        graphSig = '';
+        propSig = '';
+        paintGraph();
+        persist();
+      }
+      if (nodeDrag) {
+        nodeDrag = null;
+        persist();
+      }
+    };
+    board.addEventListener('pointerup', endDrag);
+    board.addEventListener('pointercancel', () => { wireDrag = null; nodeDrag = null; });
+  }
+
   function paintGantt() {
+    paintGraph();
     const doc = current();
     const cells = batteryCells(doc);
     const finite = cells.reduce((sum, cell) => sum + (cell.infinite ? 0 : cell.days), 0) || 1;
@@ -708,8 +1249,8 @@ export function createFieldWorkshop(els) {
     }).join('')}</div>`;
     if (html === ganttHtml) return;
     ganttHtml = html;
-    panel.querySelector('#fs-gantt').innerHTML = html;
-    bar.querySelector('#fs-bar-gantt').innerHTML = html;
+    const host = bar.querySelector('#fs-bar-gantt');
+    if (host) host.innerHTML = html;
   }
 
   function paintStages() {
@@ -1421,7 +1962,11 @@ ${variants}
     active = on;
     if (panel) panel.hidden = !on;
     if (bar) bar.hidden = !on;
+    const board = document.getElementById('fs-board');
+    if (board) board.hidden = !on;
     if (on) {
+      graphSig = '';
+      propSig = '';
       paintDynamic(true);
       curveDirty = true;
       lastNow = 0;
