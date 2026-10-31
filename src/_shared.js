@@ -2502,6 +2502,7 @@ export function exportSnapshot() {
       paid: !!f.paid, sprayed: !!f.sprayed,
       cycle: !!f.cycle, autoBuy: !!f.autoBuy, failed: f.failed || null,
       harvested: !!f.harvested, stored: !!f.stored, yieldFactor: f.yieldFactor == null ? 1 : f.yieldFactor,
+      unitName: f.unitName ? String(f.unitName).slice(0, 16) : undefined,
       jobs: f.jobS ? Object.fromEntries(Object.entries(f.jobS).map(([k, v]) => [k, +v || 0])) : undefined,
       laneW: f.laneW ? Object.fromEntries(Object.entries(f.laneW).map(([k, v]) => [k, +v || 0])) : undefined,
     })),
@@ -2541,6 +2542,7 @@ export function applySnapshot(data) {
     f.harvested = !!s.harvested; f.stored = !!s.stored;
     f.yieldFactor = Number.isFinite(+s.yieldFactor) ? +s.yieldFactor : 1;
     f.claimed = false; f.frozen = false; f.owned = true;
+    f.unitName = typeof s.unitName === 'string' ? s.unitName.trim().slice(0, 16) : '';
     if (s.jobs && typeof s.jobs === 'object') {
       f.jobS = {};
       for (const k of Object.keys(s.jobs)) f.jobS[k] = +s.jobs[k] || 0;

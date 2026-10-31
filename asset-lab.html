@@ -38,15 +38,15 @@ main{display:grid;grid-template-columns:220px 1fr 268px;min-height:0}
 #brief textarea{min-height:220px;line-height:1.5}
 #brief .foot{margin-top:8px;font-size:11px;letter-spacing:.06em;color:var(--mut);line-height:1.55}
 main.field-on{grid-template-columns:200px 1fr 340px}
-main.field-on #view{display:flex;flex-direction:column;min-height:0}
+main.field-on #view{display:flex;flex-direction:column;gap:12px;padding:12px;box-sizing:border-box;min-height:0}
 main.field-on #hint,main.field-on #states{display:none !important}
-main.field-on #fieldbar{position:relative;left:auto;right:auto;bottom:auto;order:0;flex:none;z-index:2;border-left:4px solid #7dba4a}
-main.field-on #fs-board{position:relative;left:auto;right:auto;top:auto;bottom:auto;order:1;flex:1;min-height:0;margin:8px;border-left:4px solid #e0b13a}
-main.field-on #brief{padding:8px;overflow:hidden;min-height:0;display:flex;flex-direction:column}
-main.field-on #field-panel{flex:1;min-height:0;display:grid;grid-template-rows:auto 200px minmax(0,1fr);gap:8px}
-#fs-blue,#fs-purple{min-height:0;overflow:auto;border:1px solid var(--line);padding:8px}
+main.field-on #fieldbar{position:relative;left:auto;right:auto;bottom:auto;order:0;flex:none;z-index:2;margin:0;border-left:4px solid #7dba4a}
+main.field-on #fs-board{position:relative;left:auto;right:auto;top:auto;bottom:auto;order:1;flex:1;min-height:0;margin:0;border-left:4px solid #e0b13a}
+main.field-on #brief{padding:12px;overflow:hidden;min-height:0;display:flex;flex-direction:column;box-sizing:border-box}
+main.field-on #field-panel{flex:1;min-height:0;display:grid;grid-template-rows:auto minmax(180px,32%) minmax(0,1fr);gap:12px;align-content:stretch}
+#fs-blue,#fs-purple{min-height:0;overflow:auto;border:1px solid var(--line);padding:10px;box-sizing:border-box}
 #fs-blue{border-top:4px solid #3d7ec8}
-#fs-stageview{position:relative;min-height:0;background:#10131c;border:1px solid var(--line);border-top:4px solid #c4503a;overflow:hidden}
+#fs-stageview{position:relative;min-height:0;height:100%;background:#10131c;border:1px solid var(--line);border-top:4px solid #c4503a;overflow:hidden;box-sizing:border-box}
 #fs-stageview canvas{position:absolute;inset:0;width:100%;height:100%}
 #fs-purple{border-top:4px solid #8a4db3}
 .fs-zone{font-size:10px;letter-spacing:.16em;color:var(--mut);margin-bottom:4px}

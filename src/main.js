@@ -3679,6 +3679,22 @@ function paintStageBar(desc) {
     }
   }
 }
+let unitEdit = null;
+function fieldCoord(f, desc) {
+  const addr = desc?.plot || '';
+  return addr ? `C0 · ${addr}` : `F-${String(f.i).padStart(3, '0')}${String(f.j).padStart(2, '0')}`;
+}
+function commitUnitName() {
+  const input = $('unit-name');
+  const f = unitEdit != null ? fields[unitEdit] : null;
+  if (f && input) f.unitName = input.value.trim().slice(0, 16);
+  unitEdit = null;
+  if (input) input.hidden = true;
+  const title = $('selid');
+  if (title) title.hidden = false;
+  updateDock();
+  saveSoon();
+}
 function updateDock() {
   const el = $('dock');
   const list = ownedFields();
@@ -3696,9 +3712,27 @@ function updateDock() {
   el.classList.add('on');
   const f = list[0] || selected;
   const addr = desc?.plot || '';
-  $('selid').textContent = rigOnly
+  const coord = addr ? `C0 · ${addr}` : (f ? `F-${String(f.i).padStart(3, '0')}${String(f.j).padStart(2, '0')}` : '');
+  const fieldOne = !rigOnly && !many && f?.owned;
+  const editing = fieldOne && unitEdit === f.idx;
+  const title = rigOnly
     ? (pickedRigs.size > 1 ? `已选 ${pickedRigs.size} 台农机` : rigTitle(selectedRig))
-    : (many ? `已选 ${list.length} 个田块` : (addr ? `C0 · ${addr}` : `F-${String(f.i).padStart(3, '0')}${String(f.j).padStart(2, '0')}`));
+    : many ? `已选 ${list.length} 个田块`
+    : (f?.unitName || coord);
+  if (!editing) $('selid').textContent = title;
+  const rename = $('unit-rename');
+  const nameInput = $('unit-name');
+  if (rename) rename.hidden = !fieldOne;
+  if (nameInput && !editing) nameInput.hidden = true;
+  if (!editing) $('selid').hidden = false;
+  const meta = $('unit-meta');
+  if (meta) {
+    if (!fieldOne) { meta.hidden = true; meta.textContent = ''; }
+    else {
+      meta.hidden = false;
+      meta.innerHTML = `田地类型 ${desc?.groundName || '—'}<br>${soilText(f.soil)}`;
+    }
+  }
   const workEl = $('selwork');
   if (workEl) {
     const badge = !selNote && f?.owned ? (desc?.badge || '') : '';
@@ -3710,10 +3744,10 @@ function updateDock() {
     if (rigOnly) sum.textContent = rigLine(selectedRig);
     else if (many) sum.textContent = '操作取这些田都能做的';
     else if (!f?.owned) sum.textContent = selNote || '邻区快照 · 只读';
-    else if (!desc?.crop) sum.innerHTML = `${desc?.stat || '未整地'}<br><span>${soilText(f.soil)}</span>`;
+    else if (!desc?.crop) sum.textContent = '还没有作物';
     else {
       const quality = desc.quality == null ? '—' : desc.quality;
-      sum.innerHTML = `<b>${desc.crop}</b> · ${desc.stageName || '播种'} · ${(desc.age || 0).toFixed(1)} / ${desc.cycle || 0} 世界日<br><span>成熟度 ${Math.round(desc.maturity || 0)}% · 产量值 ${desc.yieldValue ?? '—'} · 品质值 ${quality}</span><br><span>${soilText(f.soil)}</span>`;
+      sum.innerHTML = `<b>${desc.crop}</b> · ${desc.stageName || '播种'} · ${(desc.age || 0).toFixed(1)} / ${desc.cycle || 0} 世界日<br><span>成熟度 ${Math.round(desc.maturity || 0)}% · 产量值 ${desc.yieldValue ?? '—'} · 品质值 ${quality}</span>`;
     }
   }
   const jobsHost = $('dock-jobs');
@@ -3825,7 +3859,31 @@ function bootStagesSync() {
 }
 const bootStageNote = bootStagesSync();
 $('kpi').innerHTML = `<div class="k-rev"><small>营收</small><b class="hv" id="kpi-rev">0</b></div><div class="k-day"><small>世界日</small><b id="kpi-day">0</b></div><div class="k-time"><small>时刻</small><span class="clk"><i class="face" id="kpi-face" aria-hidden="true"><i id="kpi-hh"></i><i id="kpi-mh"></i></i><b id="kpi-hm">00:00</b><b id="kpi-rate">1×</b></span></div><div class="k-act"><small>作业</small><b class="hv" id="kpi-act">0</b><em>/ ${rigs.length}</em></div>`;
-$('dock').innerHTML = `<div class="drow"><div class="dlab">单元信息</div><div class="who"><div class="name"><b id="selid"></b><em id="selwork" hidden></em></div></div></div><div class="drow"><div class="dlab">作物概况</div><div class="sum" id="crop-sum"></div></div><div class="drow"><div class="dlab" id="dock-jobs-lab">当前阶段作业监控</div><div id="dock-jobs" class="jobs"></div></div><div class="drow"><div class="dlab">生长阶段监控</div><div id="stagebar"></div></div><div class="drow"><div class="dlab">操作按钮</div><div id="dock-sub" class="strip"></div><div class="ops" id="dock-ops"></div></div>`;
+$('dock').innerHTML = `<div class="drow"><div class="dlab">单元信息</div><div class="who"><div class="name"><b id="selid"></b><input id="unit-name" hidden maxlength="16" aria-label="单元名称" autocomplete="off"><button type="button" id="unit-rename">改名</button><em id="selwork" hidden></em></div><div id="unit-meta" hidden></div></div></div><div class="drow"><div class="dlab">作物概况</div><div class="sum" id="crop-sum"></div></div><div class="drow"><div class="dlab" id="dock-jobs-lab">当前阶段作业监控</div><div id="dock-jobs" class="jobs"></div></div><div class="drow"><div class="dlab">生长阶段监控</div><div id="stagebar"></div></div><div class="drow"><div class="dlab">操作按钮</div><div id="dock-sub" class="strip"></div><div class="ops" id="dock-ops"></div></div>`;
+$('unit-rename').addEventListener('click', () => {
+  const list = ownedFields();
+  const f = list.length === 1 ? list[0] : (selected?.owned ? selected : null);
+  const input = $('unit-name');
+  if (!f || !input || list.length > 1) return;
+  unitEdit = f.idx;
+  input.hidden = false;
+  $('selid').hidden = true;
+  input.value = f.unitName || '';
+  input.placeholder = fieldCoord(f, dockOf(f));
+  input.focus();
+  input.select();
+});
+$('unit-name').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); $('unit-name').blur(); }
+  if (e.key === 'Escape') {
+    unitEdit = null;
+    $('unit-name').hidden = true;
+    $('selid').hidden = false;
+    $('unit-name').blur();
+    updateDock();
+  }
+});
+$('unit-name').addEventListener('blur', () => { if (unitEdit != null) commitUnitName(); });
 $('dock').addEventListener('pointerdown', (e) => {
   const recipe = e.target.closest('[data-recipe]');
   const cropBtn = e.target.closest('[data-crop]');
