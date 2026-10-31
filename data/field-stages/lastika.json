@@ -1,0 +1,75 @@
+{
+  "schema": "ringsheaf.field-stage/1",
+  "profile": "lastika",
+  "readme": "拉斯提卡测试作物。主游戏只读 graph。前段合计 12 世界日：青苗 2、发育 6、成熟 4。烂地和收获后无限，不计入。追肥在第 5–6 日，收获在第 11–12 日。没开工就进烂地。收获做完改画收获后。",
+  "cycle": 38,
+  "yieldBase": 100,
+  "qualityBase": 1,
+  "quality": null,
+  "maturity": { "fullAt": 10, "maxHarvest": 120, "rotLine": 120 },
+  "cropId": "lastika",
+  "logicId": "crop_lastika",
+  "cropName": "拉斯提卡",
+  "name": "拉斯提卡",
+  "timeUnit": "gameDay",
+  "secondsPerDayAt1x": 720,
+  "cycleNote": "cycle 仍给工坊甘特对齐。可玩周期是 graph 前段 12 世界日。",
+  "rows": 8,
+  "grid": { "along": 14 },
+  "plant": {
+    "shape": "bush",
+    "height": 0.7,
+    "row": 0.75,
+    "along": 0.36,
+    "young": "#51542c",
+    "ripe": "#787c32",
+    "stub": "#b59a63"
+  },
+  "chain": ["A", "B", "D"],
+  "graph": {
+    "entry": { "job": "sow", "to": "seedling" },
+    "stages": [
+      { "id": "seedling", "name": "青苗", "role": "head", "kind": "time", "look": "sown", "days": 2, "color": "#51542c", "display": { "from": { "color": "#4a4844", "cover": 0.16 }, "to": { "color": "#51542c", "cover": 0.42 } }, "jobs": [] },
+      { "id": "develop", "name": "发育", "role": "node", "kind": "time", "look": "sown", "days": 6, "color": "#6a7340", "display": { "from": { "color": "#51542c", "cover": 0.42 }, "to": { "color": "#6a7340", "cover": 0.72 } }, "jobs": [
+        { "job": "topdress", "kind": "soft", "name": "追肥", "from": 5, "to": 6, "yieldMul": 2 }
+      ] },
+      { "id": "mature", "name": "成熟", "role": "node", "kind": "time", "look": "mature", "days": 4, "color": "#787c32", "display": { "from": { "color": "#6a7340", "cover": 0.72 }, "to": { "color": "#787c32", "cover": 0.95 } }, "jobs": [
+        { "job": "hill", "kind": "soft", "name": "培土", "from": 8, "to": 10, "qualityAdd": 1 },
+        { "job": "harvest", "kind": "hard", "name": "收获", "from": 11, "to": 12 }
+      ] },
+      { "id": "rot", "name": "烂地", "role": "rot", "kind": "rot", "look": "rot", "color": "#5c4636", "jobs": [
+        { "job": "tidy", "kind": "hard", "name": "收拾", "full": true }
+      ] },
+      { "id": "after", "name": "收获后", "role": "tail", "kind": "tail", "look": "harvested", "color": "#b59a63", "jobs": [
+        { "job": "tidy", "kind": "hard", "name": "收拾", "full": true }
+      ] }
+    ],
+    "edges": [
+      { "from": "seedling", "to": "develop", "kind": "natural" },
+      { "from": "develop", "to": "mature", "kind": "natural" },
+      { "from": "mature", "to": "after", "kind": "hard", "job": "harvest" },
+      { "from": "mature", "to": "rot", "kind": "natural" },
+      { "from": "rot", "to": "exit", "kind": "hard", "job": "tidy" },
+      { "from": "after", "to": "exit", "kind": "hard", "job": "tidy" }
+    ]
+  },
+  "stages": [
+    { "id": "O", "group": "O", "name": "未整地", "kind": "idle", "days": 1, "color": "#6f6a61", "canopy": "#4a4844", "roughness": 0.97, "cover": 0, "plantScale": 0, "variants": [] },
+    { "id": "A", "group": "A", "name": "播种", "kind": "growth", "days": 1, "color": "#4a4844", "canopy": "#51542c", "roughness": 0.92, "cover": 0.2, "plantScale": 0.25, "variants": [] },
+    { "id": "B", "group": "B", "name": "成熟", "kind": "growth", "days": 36, "color": "#51542c", "canopy": "#787c32", "roughness": 0.66, "cover": 0.9, "plantScale": 1, "variants": [] },
+    { "id": "D", "group": "D", "name": "收割", "kind": "growth", "days": 1, "color": "#b59a63", "canopy": "#6f6a61", "roughness": 0.9, "cover": 0.08, "plantScale": 0.04, "variants": [] },
+    { "id": "E", "group": "E", "name": "收拾", "kind": "post", "days": 1, "color": "#6f6a61", "canopy": "#4a4844", "roughness": 0.96, "cover": 0, "plantScale": 0, "variants": [] }
+  ],
+  "ops": [
+    { "id": "sow", "name": "播种", "kind": "required", "via": "sow", "stage": "O", "surface": "plant", "requiresMask": false, "requiresUnlocked": true, "writesMask": false, "locksUnswept": false, "sweepDays": 1, "machine": "impl_seeder" },
+    { "id": "topdress", "name": "追肥", "kind": "optional", "via": "topdress", "stage": "B", "surface": "none", "requiresMask": false, "requiresUnlocked": false, "writesMask": false, "locksUnswept": false, "sweepDays": 1, "window": { "from": 4, "to": 30 } },
+    { "id": "hill", "name": "培土", "kind": "optional", "via": "hill", "stage": "B", "surface": "none", "requiresMask": false, "requiresUnlocked": false, "writesMask": false, "locksUnswept": false, "sweepDays": 1, "window": { "from": 20, "to": 26 } },
+    { "id": "harvest", "name": "收割", "kind": "required", "via": "harvest", "stage": "D", "surface": "plant", "requiresMask": false, "requiresUnlocked": false, "writesMask": false, "locksUnswept": false, "sweepDays": 1, "machine": "harvester_potato" },
+    { "id": "clear", "name": "收拾", "kind": "special", "via": "clear", "stage": "E", "surface": "color", "requiresMask": false, "requiresUnlocked": false, "writesMask": false, "locksUnswept": false, "breaksMask": false, "sweepDays": 1, "machine": "impl_cultivator" }
+  ],
+  "edges": [
+    { "from": "O", "fromVariant": "", "to": "A", "toVariant": "", "via": "sow", "when": "process", "enabled": true },
+    { "from": "D", "fromVariant": "", "to": "E", "toVariant": "", "via": "harvest", "when": "process", "enabled": true },
+    { "from": "E", "fromVariant": "", "to": "O", "toVariant": "", "via": "clear", "when": "process", "enabled": true }
+  ]
+}
