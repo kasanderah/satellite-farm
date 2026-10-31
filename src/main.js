@@ -1338,6 +1338,13 @@ edgeMesh.name = 'sel-edge';
 edgeMesh.count = 0; edgeMesh.frustumCulled = false; edgeMesh.castShadow = false; edgeMesh.receiveShadow = false;
 edgeMesh.renderOrder = 3;
 scene.add(edgeMesh);
+const hoverMat = curved(new THREE.MeshBasicMaterial({ color: 0xd8693c, toneMapped: false, fog: false }));
+hoverMat.polygonOffset = true; hoverMat.polygonOffsetFactor = -8; hoverMat.polygonOffsetUnits = -8;
+const hoverEdge = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), hoverMat, 4);
+hoverEdge.name = 'hover-edge';
+hoverEdge.count = 0; hoverEdge.frustumCulled = false; hoverEdge.castShadow = false; hoverEdge.receiveShadow = false;
+hoverEdge.renderOrder = 4;
+scene.add(hoverEdge);
 const buildingSets = {
   warehouse: instanced(warehouseKit(), 8),
   garage: instanced(garageKit(), 8),
@@ -1915,6 +1922,7 @@ function applyDeckView() {
   setShown(boomSet, !on);
   setShown(workDroneMesh, !on);
   setShown(edgeMesh, !on);
+  setShown(hoverEdge, !on);
   if (netMesh) netMesh.visible = !on;
   icons.visible = !on;
   deckSlabs.visible = !on && !!cut.on;
@@ -2157,18 +2165,47 @@ function contextItems() {
   if (!sets[0]) return [];
   return sets[0].filter(act => sets.every(rows => rows.some(item => item.id === act.id && item.enabled)));
 }
+let ctxAt = null, ctxOpen = null;
 function openContext(x, y) {
-  const items = contextItems();
+  ctxAt = { x, y };
+  ctxOpen = null;
+  paintContext();
+}
+function paintContext() {
   const menu = $('planmenu');
-  if (!menu || !items.length) { closePlanMenu(); return; }
+  const items = contextItems();
+  if (!menu || !ctxAt || !items.length) { closePlanMenu(); return; }
+  const extra = ctxOpen === 'prep' ? Object.keys(PREP_RECIPES).length : ctxOpen === 'plant' ? Object.keys(PLANT_CROPS).length : 0;
   menu.classList.add('on');
-  menu.style.left = Math.min(x, innerWidth - 180) + 'px';
-  menu.style.top = Math.min(y, innerHeight - 48 - items.length * 34) + 'px';
-  menu.innerHTML = items.map(it => `<button type="button" class="sell" data-ctx="${it.id}">${it.name}</button>`).join('');
+  menu.style.left = Math.min(ctxAt.x, innerWidth - 200) + 'px';
+  menu.style.top = Math.min(ctxAt.y, Math.max(12, innerHeight - 36 - (items.length + extra) * 40)) + 'px';
+  menu.innerHTML = items.map(it => {
+    const open = ctxOpen === it.id;
+    const head = `<button type="button" class="sell${open ? ' on' : ''}" data-ctx="${it.id}">${it.name}</button>`;
+    if (it.id === 'prep' && open) {
+      return head + Object.values(PREP_RECIPES).map(recipe => `<button type="button" class="sub" data-recipe="${recipe.id}"><b>${recipe.name}</b><small>${recipe.targetName}</small></button>`).join('');
+    }
+    if (it.id === 'plant' && open) {
+      return head + Object.values(PLANT_CROPS).map(crop => `<button type="button" class="sub" data-crop="${crop.id}"><b>${crop.name}</b></button>`).join('');
+    }
+    return head;
+  }).join('');
 }
 function onRightClick(cx, cy) {
-  if (hitSelected(cx, cy)) { openContext(cx, cy); return; }
-  exitToDefault();
+  if (viewLayer !== 'surface' || mode === 'build') return;
+  const rig = pickRigScreen(cx, cy);
+  if (rig) {
+    selectOnlyRig(rig, false);
+    openContext(cx, cy);
+    return;
+  }
+  const f = fieldFromScreen(cx, cy);
+  if (f?.owned) {
+    selectOnlyField(f);
+    openContext(cx, cy);
+    return;
+  }
+  closePlanMenu();
 }
 function zoomClamp(d) { return Math.max(22, Math.min(8000, d)); }
 function applyZoom(factor) {
@@ -2363,6 +2400,8 @@ function toggleSub(kind) {
 }
 function closePlanMenu() {
   const menu = $('planmenu');
+  ctxAt = null;
+  ctxOpen = null;
   if (!menu) return;
   menu.classList.remove('on');
   menu.innerHTML = '';
@@ -2400,17 +2439,39 @@ function openPlanMenu(x, y) {
 }
 document.getElementById('planmenu').addEventListener('change', e => { if (e.target.dataset.flag) readPlanFlags($('planmenu')); });
 document.getElementById('planmenu').addEventListener('click', e => {
+  const recipe = e.target.closest('[data-recipe]');
+  const crop = e.target.closest('[data-crop]');
+  if (recipe || crop) {
+    const list = orderTargets();
+    if (!list.length) { closePlanMenu(); return; }
+    for (const field of list) {
+      selected = field;
+      if (recipe) doPrep(recipe.dataset.recipe);
+      else doPlant(crop.dataset.crop);
+    }
+    closePlanMenu();
+    return;
+  }
   const plan = e.target.closest('[data-plan]');
   if (plan) planSelected(plan.dataset.plan);
   const ctx = e.target.closest('[data-ctx]');
   if (!ctx) return;
+  if (ctx.dataset.ctx === 'prep' || ctx.dataset.ctx === 'plant') {
+    ctxOpen = ctxOpen === ctx.dataset.ctx ? null : ctx.dataset.ctx;
+    paintContext();
+    return;
+  }
   closePlanMenu();
-  if (ctx.dataset.ctx === 'prep') toggleSub('prep');
-  else if (ctx.dataset.ctx === 'plant') toggleSub('plant');
-  else if (ctx.dataset.ctx === 'follow') enterLock();
+  if (ctx.dataset.ctx === 'follow') enterLock();
   else if (ctx.dataset.ctx === 'sell') sellCurrentRig();
   else if (ctx.dataset.ctx === 'clear') exitToDefault();
 });
+addEventListener('pointerdown', e => {
+  const menu = $('planmenu');
+  if (!menu || !menu.classList.contains('on')) return;
+  if (e.target && e.target.closest && e.target.closest('#planmenu')) return;
+  closePlanMenu();
+}, true);
 R.domElement.addEventListener('contextmenu', e => e.preventDefault());
 document.addEventListener('contextmenu', e => e.preventDefault(), true);
 R.domElement.addEventListener('pointerdown', e => {
@@ -2505,10 +2566,9 @@ addEventListener('pointermove', e => {
   const onHud = e.target && e.target.closest && e.target.closest('.hit, button, a, input, textarea');
   hoverPtr = onHud ? null : { x: e.clientX, y: e.clientY };
   if (rightArm && !drag) {
-    const held = performance.now() - rightArm.t;
     const moved = Math.hypot(e.clientX - rightArm.x, e.clientY - rightArm.y);
-    if (held > 280 || moved > 6) {
-      drag = { b: 'rot', x: e.clientX, y: e.clientY };
+    if (moved > 6) {
+      drag = { b: 'rot', x: e.clientX, y: e.clientY, x0: rightArm.x, y0: rightArm.y };
       rightArm = null;
     }
   }
@@ -3217,22 +3277,6 @@ function paintRigHud() {
     el.style.height = box.h.toFixed(1) + 'px';
   }
 }
-function fieldScreenBox(f) {
-  const y = 0.6;
-  const pts = [[f.x0, f.z0], [f.x0 + L.FIELD, f.z0], [f.x0 + L.FIELD, f.z0 + L.FIELD], [f.x0, f.z0 + L.FIELD]];
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity, n = 0;
-  for (const [x, z] of pts) {
-    const p = project(x, y, z);
-    if (!p) continue;
-    n += 1;
-    minX = Math.min(minX, p[0]);
-    maxX = Math.max(maxX, p[0]);
-    minY = Math.min(minY, p[1]);
-    maxY = Math.max(maxY, p[1]);
-  }
-  if (n < 2 || maxX < 0 || maxY < 0 || minX > innerWidth || minY > innerHeight) return null;
-  return { x: minX, y: minY, w: Math.max(8, maxX - minX), h: Math.max(8, maxY - minY) };
-}
 function placeAim(box) {
   const el = $('aimhud');
   if (!el || !box) return;
@@ -3242,23 +3286,52 @@ function placeAim(box) {
   el.style.width = box.w.toFixed(1) + 'px';
   el.style.height = box.h.toFixed(1) + 'px';
 }
+let hoverEdgeIdx = -1;
+function paintHoverEdge(f) {
+  const idx = f ? f.idx : -1;
+  if (idx === hoverEdgeIdx && (idx < 0 || hoverEdge.count === 4)) return;
+  hoverEdgeIdx = idx;
+  if (!f) {
+    if (hoverEdge.count) hoverEdge.count = 0;
+    return;
+  }
+  const w = 0.55, y = 0.72, h = 0.14, inset = 0.6;
+  const x0 = f.x0, z0 = f.z0, x1 = x0 + L.FIELD, z1 = z0 + L.FIELD;
+  const mx = (x0 + x1) / 2, mz = (z0 + z1) / 2;
+  const span = L.FIELD - inset * 2;
+  let n = 0;
+  const place = (x, z, sx, sz) => {
+    tmpM.compose(tmpP.set(x, y, z), tmpQ.identity(), tmpS.set(sx, h, sz));
+    hoverEdge.setMatrixAt(n++, tmpM);
+  };
+  place(mx, z0 + inset, span, w);
+  place(mx, z1 - inset, span, w);
+  place(x0 + inset, mz, w, span);
+  place(x1 - inset, mz, w, span);
+  hoverEdge.count = n;
+  hoverEdge.instanceMatrix.needsUpdate = true;
+}
 function paintAim() {
   const el = $('aimhud');
   if (!el) return;
-  if (viewLayer !== 'surface' || !hoverPtr || drag) { el.classList.remove('on'); return; }
+  if (viewLayer !== 'surface' || !hoverPtr || drag) {
+    el.classList.remove('on');
+    paintHoverEdge(null);
+    return;
+  }
   const rig = pickRigScreen(hoverPtr.x, hoverPtr.y);
   if (rig) {
+    paintHoverEdge(null);
     if (pickedRigs.has(rig.id)) { el.classList.remove('on'); return; }
     const box = rigScreenBox(rig);
     if (!box) { el.classList.remove('on'); return; }
     placeAim(box);
     return;
   }
+  el.classList.remove('on');
   const f = fieldFromScreen(hoverPtr.x, hoverPtr.y);
-  if (!f || f === selected || pickedFields.has(f.idx)) { el.classList.remove('on'); return; }
-  const box = fieldScreenBox(f);
-  if (!box) { el.classList.remove('on'); return; }
-  placeAim(box);
+  if (!f || f === selected || pickedFields.has(f.idx)) { paintHoverEdge(null); return; }
+  paintHoverEdge(f);
 }
 function paintPicks() {
   const host = $('picks');

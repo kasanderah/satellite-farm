@@ -247,6 +247,9 @@ body.underground #dock{display:none}
 #planmenu .who b{font-weight:500}
 #planmenu .who span{color:var(--mut);letter-spacing:.06em;font-size:11px}
 #planmenu button{display:block;width:100%;margin:0;padding:6px 8px 5px;font-weight:500;font-size:13px;letter-spacing:.12em;text-align:left}
+#planmenu button small{display:block;color:var(--mut);font-size:10px;letter-spacing:.04em;margin-top:2px;font-weight:400}
+#planmenu button.sub{padding-left:16px}
+#planmenu button.on{border-color:var(--sig);color:var(--sig)}
 #picks{position:fixed;inset:0;pointer-events:none;z-index:2}
 #picks i{position:absolute;border:1px solid #d8693c;background:rgba(216,105,60,.12)}
 #toasts{position:fixed;top:78px;right:24px;z-index:5;display:flex;flex-direction:column;gap:6px;align-items:flex-end;pointer-events:none}
@@ -274,7 +277,7 @@ body.underground #dock{display:none}
 <div class="hud panel hit" id="dock"></div>
 <div class="hud" id="toasts"></div>
 <div class="hud" id="suspend"></div>
-<div class="hud" id="hint">点一块田。信息框里点整地或种植，再选类型或作物。再点一次，或按 Esc，收起<br>拖动 平移 · 规划时拖框选田、右键指定作物 · 右键 旋转 · 滚轮 缩放 · C 培育层</div>
+<div class="hud" id="hint">点一块田。信息框或右键菜单里点整地、种植，再选类型或作物<br>拖动 平移 · 右键短按 选中并打开菜单 · 右键拖动 旋转 · 滚轮 缩放 · C 培育层</div>
 <div id="picks"></div>
 <div id="machud"></div>
 <div id="aimhud"></div>
@@ -282,6 +285,6 @@ body.underground #dock{display:none}
 <div class="hud panel hit" id="planmenu"></div>
 <div id="viewer"><div class="bar"><div><h2>资产</h2><div class="sub">当前的薯田阶段、机器和田块。每张卡片是名字加上现在的样子。点一张就能指着它改。这是查看，不能上传。</div></div><button type="button" id="viewer-close">关闭</button></div><div class="sec">商品薯阶段</div><div class="grid" id="view-stages"></div><div class="sec">机器</div><div class="grid" id="view-machines"></div><div class="sec">田块</div><div class="grid" id="view-tiles"></div></div>
 <div class="hud" id="scale"><span id="scaletxt"></span><div id="scalebar"></div></div>
-<div class="hud" id="buildrev">环穗 v6.22</div>
+<div class="hud" id="buildrev">环穗 v6.23</div>
 <script>__BUNDLE__</script>
 </body></html>
