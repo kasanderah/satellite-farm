@@ -2155,7 +2155,7 @@ function rigActions(r) {
   const st = r?.bDrive ? rigStandby(r) : null;
   const items = [{ id: 'follow', name: '跟随', enabled: true }];
   if (st) {
-    items.push({ id: 'recall', name: st.waiting ? '硬作业做完后回库' : '回库待机 10 分钟', enabled: !st.waiting && !st.standby });
+    items.push({ id: 'recall', name: st.waiting ? '硬作业做完后回库' : '回库待机 1 天', enabled: !st.waiting && !st.standby });
     if (st.standby) items.push({ id: 'resume', name: '恢复接单', enabled: true });
   }
   items.push({ id: 'sell', name: busy ? '出售（作业中）' : '出售', enabled: !busy });
@@ -2166,7 +2166,7 @@ function recallCurrent() {
   if (!r?.bDrive) { toast('这台不接田里的单'); return; }
   const res = recallRig(r);
   if (!res.ok) { toast(res.reason === 'standby' ? '已经在待机' : '不能回库'); return; }
-  toast(res.waiting ? '硬作业做完就回库待机' : '回库待机 10 分钟');
+  toast(res.waiting ? '硬作业做完就回库待机' : '回库待机 1 天');
   updateDock();
 }
 function resumeCurrent() {
@@ -2735,7 +2735,7 @@ function rigLine(r) {
   const role = r.bDrive && r.role ? `${r.role} · ` : '';
   const caps = r.bDrive && r.caps?.length ? ` · ${r.caps.join('、')}` : '';
   const st = r.bDrive ? rigStandby(r) : null;
-  if (st?.standby) return `${role}待机剩余 ${st.minutes} min · 电 ${pct}%${width}`;
+  if (st?.standby) return `${role}待机剩余 ${st.clock} · 电 ${pct}%${width}`;
   if (st?.waiting) return `${role}硬作业做完后回库 · 电 ${pct}%${width}`;
   if (!r.busy && r.mode !== 'charge') return `${role}停在机库 · 电 ${pct}%${width}${caps}`;
   const where = r.f ? ' · ' + fieldCode(r.f) : '';
@@ -3414,7 +3414,7 @@ function updateLabels(d) {
   if (!camS.deck) for (const r of rigs) {
     if (r.kind === 'plow') continue;
     const st = r.bDrive ? rigStandby(r) : null;
-    const mark = st?.standby ? `待机剩余: ${st.minutes} min` : '';
+    const mark = st?.standby ? `待机剩余: ${st.clock}` : '';
     if (!r.busy && !pickedRigs.has(r.id) && !mark) continue;
     const html = mark ? `<b>${r.label}</b><span>${mark}</span>` : `<b>${r.label}</b>`;
     want.push({ x: r.x, z: r.z, y: 6, pr: mark ? -1 : 3, a: mark ? 1 : Math.min(1, Math.max(0, (1400 - d) / 500)), html, cls: 'veh' });

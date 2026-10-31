@@ -2,7 +2,7 @@
 import {
   OMNI, TRACTOR, PLOW, JOBS, TURN_SECONDS, createFarm, addField, addMachine, mountHitch,
   requestPrep, requestPlant, setNextCrop, stepFarm, describeField, plotAddress, growthAge, workSweepLook, PLANT_CROPS,
-  cycleDays, installPlayerMachine, removePlayerMachine, recallMachine, releaseStandby, standbyMinutesLeft,
+  cycleDays, installPlayerMachine, removePlayerMachine, recallMachine, releaseStandby, standbyClock,
 } from './framework-b.js';
 import { roadRoute } from './_shared.js';
 
@@ -106,7 +106,7 @@ function readout(order, unit) {
   const machine = order ? machineOf(order.machineId) : machineOf(unit?.machineId);
   const home = !order && unit && Math.hypot(unit.x - unit.parkX, unit.z - unit.parkZ) <= 1.2;
   let doing = '停在机库';
-  if (machine?.standby > 0) doing = `待机剩余 ${standbyMinutesLeft(machine)} min`;
+  if (machine?.standby > 0) doing = `待机剩余 ${standbyClock(machine)}`;
   else if (machine?.recall === 'wait') doing = '等硬作业做完';
   else if (order?.phase === 'cruise') doing = '开往田块';
   else if (order?.phase === 'turn') doing = '地头转弯';
@@ -409,7 +409,7 @@ export function rigStandby(rig) {
   return {
     waiting: machine.recall === 'wait',
     standby: machine.standby > 0,
-    minutes: standbyMinutesLeft(machine),
+    clock: standbyClock(machine),
   };
 }
 
@@ -455,7 +455,7 @@ export function dispatchBoard() {
     let state = '空闲';
     let tone = 'idle';
     if (machine?.standby > 0) {
-      state = `待机剩余 ${standbyMinutesLeft(machine)} min`;
+      state = `待机剩余 ${standbyClock(machine)}`;
       tone = 'wait';
     } else if (machine?.recall === 'wait') {
       state = '等硬作业做完';

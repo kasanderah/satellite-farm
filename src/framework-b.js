@@ -58,9 +58,9 @@ export const PREP_RECIPES = {
 export const GROW_DAYS = 12;
 // 1× 下的现实秒。12 世界日前段 × 720 现实秒/世界日。烂地和收获后不计入。
 export const GROW_SECONDS = GROW_DAYS * DAY_SECONDS;
-// 回库待机 10 世界分钟。1× 下约 5 现实秒，和世界钟同一口：1 现实分钟 = 120 世界分钟。
-export const STANDBY_MINUTES = 10;
-export const STANDBY_SECONDS = (STANDBY_MINUTES / 1440) * DAY_SECONDS;
+// 回库待机 1 世界日。和世界钟同一口：1× 下 1 世界日 = 12 现实分钟。
+export const STANDBY_DAYS = 1;
+export const STANDBY_SECONDS = STANDBY_DAYS * DAY_SECONDS;
 
 export const PLANT_CROPS = {
   lastika: {
@@ -1018,12 +1018,16 @@ function maybeStandby(farm, machine) {
   beginStandby(machine);
 }
 
-export function standbyMinutesLeft(machine) {
-  if (!(machine?.standby > 0)) return 0;
-  return Math.max(1, Math.ceil(machine.standby / DAY_SECONDS * 1440));
+export function standbyClock(machine) {
+  if (!(machine?.standby > 0)) return '';
+  const minutes = machine.standby / DAY_SECONDS * 1440;
+  const hours = minutes / 60;
+  if (hours > 22) return `${Math.max(1, Math.round(hours / 24))} d`;
+  if (hours >= 1) return `${Math.ceil(hours)} h`;
+  return `${Math.max(1, Math.ceil(minutes))} min`;
 }
 
-// 放弃软作业和还没开工的硬作业。正在做的硬作业做完才开始 10 世界分钟待机。
+// 放弃软作业和还没开工的硬作业。正在做的硬作业做完才开始 1 世界日待机。
 export function recallMachine(farm, machineId) {
   const machine = farm.machines.find(m => m.id === machineId);
   if (!machine || machine.classId === 'hitch' || machine.classId === 'air') return { ok: false, reason: 'machine' };

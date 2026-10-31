@@ -6,7 +6,7 @@ import {
   stageDisplayStops, stageTint, stageShadeG, growthAge, BRUSH_FADE_DAYS,
   maturityPercent, harvestAllowed, qualityNow, harvestWindow,
   createFarm, addField, addMachine, mountHitch, chooseMachine, requestPrep, requestPlant, setNextCrop, stepFarm, fieldWork, describeField,
-  recallMachine, releaseStandby, standbyMinutesLeft, writePose, STANDBY_SECONDS, removePlayerMachine,
+  recallMachine, releaseStandby, standbyClock, writePose, STANDBY_SECONDS, removePlayerMachine,
   installPlayerMachine,
 } from '../src/framework-b.js';
 import { installShippedLastika, lastikaSpecFromDoc } from '../src/lastika-stage.js';
@@ -819,7 +819,8 @@ test('回库待机放下软单和未开工硬单，正在做的硬单做完才�
   const soft = recallMachine(farm, machine.id);
   assert.equal(soft.waiting, false);
   assert.equal(farm.orders.length, 0);
-  assert.equal(standbyMinutesLeft(machine), 10);
+  assert.equal(standbyClock(machine), '1 d');
+  assert.equal(machine.standby, STANDBY_SECONDS);
   assert.equal(chooseMachine(farm, ['播种']), null);
   assert.equal(removePlayerMachine(farm, machine.id).ok, true);
 
@@ -863,7 +864,7 @@ test('回库待机放下软单和未开工硬单，正在做的硬单做完才�
 });
 
 test('拉斯提卡阶段和版本戳来自同一份定义', () => {
-  assert.equal(HUD_VERSION, '环穗 v6.24');
+  assert.equal(HUD_VERSION, '环穗 v6.25');
   const doc = parseFieldStageDoc(structuredClone(lastikaRaw));
   const windows = jobWindows(doc, alignFieldCalendar(doc)).filter(item => item.op.kind === 'optional');
   assert.deepEqual(windows.map(item => item.op.id), ['topdress', 'hill']);
