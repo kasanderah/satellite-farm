@@ -9,7 +9,8 @@ import {
   tractorKit, planterKit, hillerKit, topperKit, potatoLifterKit,
   cultureTankKit, warehouseKit, garageKit, processKit, armKit, irrigatorKit,
 } from './prefabs.js';
-import { createFieldWorkshop, createSoilWorkshop } from './lab-field.js';
+import { createFieldWorkshop } from './lab-field.js';
+import { createBlockWorkshop } from './lab-block.js';
 import { createMachineWorkshop } from './lab-machine-editor.js';
 
 const $ = id => document.getElementById(id);
@@ -22,7 +23,8 @@ const fieldShop = createFieldWorkshop({
   panel: $('field-panel'),
   bar: $('fieldbar'),
 });
-const soilShop = createSoilWorkshop({
+const blockShop = createBlockWorkshop({
+  viewEl,
   panel: $('soil-panel'),
 });
 const machineShop = createMachineWorkshop({
@@ -429,7 +431,7 @@ function applyStageLight(entry) {
   hemi.groundColor.copy(interior ? C(marathon ? '#0c2414' : '#1c2224') : LIGHT0.hemiGround);
   scene.environmentIntensity = interior ? (marathon ? 0.72 : 0.08) : LIGHT0.env;
   renderer.toneMappingExposure = interior ? (marathon ? 1.05 : 1.02) : LIGHT0.exp;
-  if (id === 'field-stage') {
+  if (id === 'field-stage' || id === 'field-block') {
     sun.intensity = 2.7;
     sun.color.copy(LIGHT0.sunColor);
     sun.shadow.bias = -0.0012;
@@ -487,7 +489,7 @@ const BUILD = {
   'ref-kenney-shovel': () => refShows.shovel(),
   'ref-sketchfab-combine': () => refShows.combine(),
   'field-stage': () => fieldShop.build(),
-  'field-soil': () => buildUnit('field', 128),
+  'field-block': () => buildUnit('field', 128),
   'machine-editor': () => machineShop.build(),
 };
 for (const entry of LAB_ENTRIES) {
@@ -553,7 +555,7 @@ function frameSpan(entry) {
     eye.tz = 0;
     eye.dist = ((half / Math.cos(eye.pitch)) / Math.tan(vfov / 2)) * 1.35;
   }
-  if (entry.id === 'field-stage') {
+  if (entry.id === 'field-stage' || entry.id === 'field-block') {
     eye.yaw = 0.4;
     eye.pitch = 0.78;
     eye.ty = 0.2;
@@ -578,16 +580,17 @@ function frameSpan(entry) {
 }
 
 function applyEditorChrome(kind) {
-  const on = kind === 'field' || kind === 'machine';
+  const on = kind === 'field' || kind === 'machine' || kind === 'block';
   const main = document.querySelector('main');
   if (main) {
-    main.classList.toggle('field-on', on);
-    main.classList.toggle('soil-on', kind === 'soil');
+    main.classList.toggle('field-on', kind === 'field' || kind === 'machine');
+    main.classList.toggle('block-on', kind === 'block');
+    main.classList.remove('soil-on');
   }
   const brief = $('brief-form');
-  if (brief) brief.hidden = on || kind === 'soil';
+  if (brief) brief.hidden = on;
   const states = $('states');
-  if (states) states.style.display = (on || kind === 'soil') ? 'none' : '';
+  if (states) states.style.display = on ? 'none' : '';
   const hint = $('hint');
   if (!hint) return;
   if (kind === 'field') hint.innerHTML = '拖动 旋转 · 右键 平移 · 滚轮 缩放<br>空格 播放 / 暂停';
@@ -599,9 +602,9 @@ function show(id) {
   const entry = LAB_ENTRIES.find(e => e.id === id) || LAB_ENTRIES[0];
   curId = entry.id;
   disposeStage();
-  const editor = entry.id === 'field-stage' ? 'field' : entry.id === 'field-soil' ? 'soil' : entry.id === 'machine-editor' ? 'machine' : '';
+  const editor = entry.id === 'field-stage' ? 'field' : entry.id === 'field-block' ? 'block' : entry.id === 'machine-editor' ? 'machine' : '';
   fieldShop.setActive(editor === 'field');
-  soilShop.setActive(editor === 'soil');
+  blockShop.setActive(editor === 'block');
   machineShop.setActive(editor === 'machine');
   applyEditorChrome(editor);
   const built = BUILD[entry.id]();
@@ -721,8 +724,14 @@ function applyPose(p) {
 }
 
 function previewHost() {
-  const slot = document.getElementById('fs-stageview');
-  if (fieldShop.active && slot) return slot;
+  if (fieldShop.active) {
+    const slot = document.getElementById('fs-stageview');
+    if (slot) return slot;
+  }
+  if (blockShop.active) {
+    const slot = document.getElementById('fb-stageview');
+    if (slot) return slot;
+  }
   return viewEl;
 }
 function resize() {

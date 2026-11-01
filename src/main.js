@@ -12,7 +12,7 @@ import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { HorizontalTiltShiftShader } from 'three/addons/shaders/HorizontalTiltShiftShader.js';
 import { VerticalTiltShiftShader } from 'three/addons/shaders/VerticalTiltShiftShader.js';
 import { PALETTE, CROPS, TEX_ID, L, fields, harvesters, haulers, drones, step, TRUNKS_X, TRUNKS_Z, depots, inCrater, ROADS, RING, LAYERS, CUT, wrapX, PLOT, economy, focus, signals, log, plantField, abandonField, quote, setTimeScale, setPaused, paused, exportSnapshot, applySnapshot, fieldAtWorld, fieldAt, toWorld, onAfterStep, fieldOrigin, simTime, worldDay, stores, rigs, fieldVisual, cropWatch, stageBoard, POTATO_DAYS, POTATO_STAGES, warehouse, buildings, sellLot, sellStack, warehouseStacks, warehouseCapacity, placeBuilding, removeBuilding, rigReadout, SHOP, buySeed, buyItem, SEED_PER_FIELD, FERT_PER_FIELD, resetGame, CULTURES, DECK_CLIMATE, tanks, cultureWatch, startCulture, tendCulture, harvestCulture, BUILDING_KINDS, CULTURE_CELLS, tankSite, devices, potatoStock, fertPlan, cultureFeedPlan, millWatch, startMill, removeMill, orderProcess, HUB_SITES, cropDossier, MACHINE_SHOP, buyMachine, cropDef, boomWatch, rigProfile, DRONE_SHOP, workDrones, buyDrone, sectorLight, sectorWord, dayCenter, setWorldDay, RING_OMEGA, bindPotatoClock, bindSurfaceClock, formatTimeScale, sellRig, machineSellPrice, rigIsWorking } from './_shared.js';
-import { applyStagePayload, bootFieldStageSource, writeStageStore, suspendLastikaStage, resumeLastikaStage, stageBadge } from './field-stage-live.js';
+import { applyStagePayload, bootFieldStageSource, writeStageStore, suspendLastikaStage, resumeLastikaStage, stageBadge, bootFieldBlocks } from './field-stage-live.js';
 import { bootWorkshopMachines } from './machine-live.js';
 import { potatoDrawLooks, POTATO_PAINT_SLOTS, workWidthOf } from './surface-crops.js';
 import { ridgeCrestT } from './field-stages.js';
@@ -25,7 +25,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CULT_EMPTY } from './lab-catalog.js';
 import { makeColony } from './colony-art.js';
 import { bootSlice, tickSlice, prepField, plantCrop, dockOf, dropDrive, adoptBought, recallRig, resumeRig, rigStandby, dispatchBoard } from './b-bind.js';
-import { PLANT_CROPS, PREP_RECIPES, JOBS, stageDisplayStops } from './framework-b.js';
+import { PLANT_CROPS, PREP_RECIPES, FIELD_BLOCKS, JOBS, stageDisplayStops } from './framework-b.js';
 import { HUD_VERSION } from './version.js';
 import { DAY_SECONDS } from './world-clock.js';
 import { SOIL_STORE, defaultSoilCurves, normalizeSoilCurves, freshSoil, stepSoil, soilDrivers, soilText } from './soil.js';
@@ -1205,6 +1205,28 @@ stubDepth.onBeforeCompile = s => {
   s.vertexShader = s.vertexShader.replace(CURVE_PROJECT, '#include <project_vertex>');
 };
 const plantMeshes = {};
+const boardMat = new THREE.MeshStandardMaterial({ color: 0xd7c48a, roughness: 0.55, metalness: 0, side: THREE.DoubleSide, vertexColors: true });
+boardMat.onBeforeCompile = (shader) => {
+  shader.uniforms.uCurve = U.uCurve;
+  shader.vertexShader = shader.vertexShader
+    .replace('#include <common>', `#include <common>\n${CURVE_DECL}`)
+    .replace('#include <project_vertex>', `
+      vec4 bbWorld = modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0);
+      vec3 bbView = (viewMatrix * curveWorld(bbWorld)).xyz;
+      float bbW = length(vec3(instanceMatrix[0][0], instanceMatrix[1][0], instanceMatrix[2][0]));
+      float bbH = length(vec3(instanceMatrix[0][1], instanceMatrix[1][1], instanceMatrix[2][1]));
+      vec4 mvPosition = vec4(bbView + vec3(position.x * bbW, position.y * bbH, 0.0), 1.0);
+      gl_Position = projectionMatrix * mvPosition;
+    `);
+};
+const tuberBoard = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), boardMat, PLANT_CAP);
+tuberBoard.count = 0;
+tuberBoard.frustumCulled = false;
+tuberBoard.castShadow = false;
+tuberBoard.receiveShadow = false;
+tuberBoard.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(PLANT_CAP * 3), 3);
+scene.add(tuberBoard);
+plantMeshes.board = tuberBoard;
 for (const sh of SHAPES) {
   const stub = sh === 'stubble';
   const im = new THREE.InstancedMesh(plantGeometry(sh), stub ? stubMat : MAT.crop, PLANT_CAP);
@@ -1220,13 +1242,13 @@ function ownedLookSig() {
   let s = '';
   for (const f of fields) {
     if (!f.bUnit || (f.bUnit.look === 'hold' && !f.bUnit.sweep)) continue;
-    s += f.idx + ':' + f.bUnit.look + ':' + (f.bUnit.sweep ? f.bUnit.sweep.look : '') + '|';
+    s += f.idx + ':' + f.bUnit.look + ':' + (f.bUnit.cropId || '') + ':' + (f.bUnit.ground || '') + ':' + (f.bUnit.sweep ? f.bUnit.sweep.look : '') + '|';
   }
   return s;
 }
 function rebuildPlants(cx, cz, W) {
   plantWin = { x: cx, z: cz, w: W, sig: ownedLookSig() };
-  const counts = {}; for (const s of SHAPES) counts[s] = 0;
+  const counts = { board: 0 }; for (const s of SHAPES) counts[s] = 0;
   const fi0 = Math.max(0, Math.floor((cx - W - L.X0) / (L.BP / L.PER)) - 1), fi1 = Math.min(NFX - 1, Math.floor((cx + W - L.X0) / (L.BP / L.PER)) + 1);
   const fj0 = Math.max(0, Math.floor((cz - W - L.Z0) / (L.BP / L.PER)) - 1), fj1 = Math.min(NFZ - 1, Math.floor((cz + W - L.Z0) / (L.BP / L.PER)) + 1);
   const potDraw = potatoDrawLooks();
@@ -1235,7 +1257,8 @@ function rebuildPlants(cx, cz, W) {
     if (viewLayer !== 'surface' && f.inPlot) continue;
     // hold 仍用生成时的旧作物，犁地扫过也不换成拉斯提卡株型。已经离开 hold 的田改用拉斯提卡的网格和株行距。
     const bActive = !!(f.bUnit && f.bUnit.look && f.bUnit.look !== 'hold');
-    const vis = PLANT_CROPS.lastika.visual;
+    const cropId = f.bUnit?.cropId || '';
+    const vis = (cropId && PLANT_CROPS[cropId]?.visual) || PLANT_CROPS.lastika.visual;
     const sweepLook = f.bUnit?.sweep?.look;
     // 残茬跟垄走：沿行距（跨行）和株距（沿垄，与收割趟同一条）铺。收割扫过才显示，没割的地方仍是冠层。
     const shapes = [];
@@ -1247,12 +1270,14 @@ function rebuildPlants(cx, cz, W) {
     const xa = Math.max(f.x0, cx - W), xb = Math.min(f.x0 + L.FIELD, cx + W), za = Math.max(f.z0, cz - W), zb = Math.min(f.z0 + L.FIELD, cz + W);
     if (xa >= xb || za >= zb) continue;
     for (const shape of shapes) {
+      const drawShape = bActive && cropId === 'tuber' && shape !== 'stubble' ? 'board' : shape;
       const cr = bActive
-        ? { id: 'lastika', shape, tex: vis.tex, row: potDraw.workshop ? potDraw.row : vis.row, along: potDraw.workshop ? potDraw.along : vis.along }
+        ? { id: cropId || 'lastika', shape: drawShape, tex: vis.tex, row: potDraw.workshop ? potDraw.row : vis.row, along: potDraw.workshop ? potDraw.along : vis.along }
         : CROPS[f.crop];
       const im = plantMeshes[cr.shape];
       if (!im) continue;
-      const rowS = cr.row * (cr.tex === 'beds' ? 1.1 : 1), al = cr.along;
+      const ridge = bActive && f.bUnit?.ridgeWidth > 0 ? f.bUnit.ridgeWidth : cr.row;
+      const rowS = ridge * (cr.tex === 'beds' ? 1.1 : 1), al = cr.along;
       const potRow = cr.id === 'potato' && potDraw.workshop;
       const bWhole = bActive;
       let crestT = 0.5;
@@ -1286,18 +1311,20 @@ function rebuildPlants(cx, cz, W) {
           const s = 0.8 + hr() * 0.4;
           const yj = 0.85 + hr() * 0.3;
           const rowAng = f.dir === 0 ? 0 : Math.PI / 2;
-          const scv = shape === 'stubble' ? 1 : s;
-          const scy = shape === 'stubble' ? 1 : s * yj;
-          tmpM.compose(tmpP.set(x, 0, z), tmpQ.setFromAxisAngle(UP, bWhole ? rowAng : hr() * 6.283), tmpS.set(scv, scy, scv));
+          const scv = shape === 'stubble' ? 1 : (drawShape === 'board' ? 1.15 * s : s);
+          const scy = shape === 'stubble' ? 1 : (drawShape === 'board' ? 1.7 * s : s * yj);
+          const scz = drawShape === 'board' ? 1 : scv;
+          tmpM.compose(tmpP.set(x, drawShape === 'board' ? 0.85 : 0, z), tmpQ.setFromAxisAngle(UP, bWhole && drawShape !== 'board' ? rowAng : hr() * 6.283), tmpS.set(scv, scy, scz));
           im.setMatrixAt(n, tmpM);
           if (shape === 'stubble') im.instanceColor.setXYZ(n, 1, 0.94, 0.72);
+          else if (drawShape === 'board') im.instanceColor.setXYZ(n, 0.55 + hr() * 0.15, 0.62 + hr() * 0.12, 0.22);
           else { const j = 0.9 + hr() * 0.2; im.instanceColor.setXYZ(n, j, j * (0.97 + hr() * 0.06), j); }
           counts[cr.shape] = n + 1;
         }
       }
     }
   }
-  for (const s of SHAPES) { const im = plantMeshes[s]; im.count = counts[s]; im.instanceMatrix.needsUpdate = true; im.instanceColor.needsUpdate = true; }
+  for (const s of [...SHAPES, 'board']) { const im = plantMeshes[s]; if (!im) continue; im.count = counts[s] || 0; im.instanceMatrix.needsUpdate = true; im.instanceColor.needsUpdate = true; }
   return Object.values(counts).reduce((a, b) => a + b, 0);
 }
 
@@ -2194,6 +2221,27 @@ function contextItems() {
   return sets[0].filter(act => sets.every(rows => rows.some(item => item.id === act.id && item.enabled)));
 }
 let ctxAt = null, ctxOpen = null;
+const ACT_TIP = {
+  prep: '把未整地做成田块。点开后选田块类型，农机按那张工序图跑完，才能种。',
+  plant: '在已经做好的田块上播种。点开后先看作物摘要，再决定种哪一种。',
+};
+function tipAttr(text) {
+  const safe = String(text || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+  return safe ? ` data-tip="${safe}"` : '';
+}
+function placeTip(host) {
+  const tip = document.getElementById('tip');
+  if (!tip || !host) return;
+  tip.textContent = host.dataset.tip || '';
+  tip.classList.add('on');
+  const box = host.getBoundingClientRect();
+  const width = Math.min(260, tip.offsetWidth || 220);
+  const left = Math.max(8, Math.min(box.left, innerWidth - width - 8));
+  let top = box.top - tip.offsetHeight - 8;
+  if (top < 8) top = box.bottom + 8;
+  tip.style.left = left + 'px';
+  tip.style.top = top + 'px';
+}
 function openContext(x, y) {
   ctxAt = { x, y };
   ctxOpen = null;
@@ -2214,12 +2262,12 @@ function paintContext() {
       : '';
   menu.innerHTML = many + items.map(it => {
     const open = ctxOpen === it.id;
-    const head = `<button type="button" class="sell${open ? ' on' : ''}" data-ctx="${it.id}"${it.enabled === false ? ' disabled' : ''}>${it.name}</button>`;
+    const head = `<button type="button" class="sell${open ? ' on' : ''}" data-ctx="${it.id}"${tipAttr(ACT_TIP[it.id] || '')}${it.enabled === false ? ' disabled' : ''}>${it.name}</button>`;
     if (it.id === 'prep' && open) {
-      return head + Object.values(PREP_RECIPES).map(recipe => `<button type="button" class="sub" data-recipe="${recipe.id}"><b>${recipe.name}</b><small>${recipe.targetName}</small></button>`).join('');
+      return head + Object.values(PREP_RECIPES).map(recipe => `<button type="button" class="sub" data-recipe="${recipe.id}"${tipAttr(recipe.tip)}><b>${recipe.targetName}</b><small>${recipe.steps.length} 趟</small></button>`).join('');
     }
     if (it.id === 'plant' && open) {
-      return head + Object.values(PLANT_CROPS).map(crop => `<button type="button" class="sub" data-crop="${crop.id}"><b>${crop.name}</b></button>`).join('');
+      return head + Object.values(PLANT_CROPS).map(crop => `<button type="button" class="sub" data-crop="${crop.id}"${tipAttr(crop.tip)}><b>${crop.name}</b></button>`).join('');
     }
     return head;
   }).join('');
@@ -2421,10 +2469,10 @@ function paintSubbar() {
   }
   host.classList.add('on');
   if (subTool === 'prep') {
-    host.innerHTML = Object.values(PREP_RECIPES).map(recipe => `<button type="button" data-recipe="${recipe.id}"><b>${recipe.name}</b><small>${recipe.targetName}</small></button>`).join('');
+    host.innerHTML = Object.values(PREP_RECIPES).map(recipe => `<button type="button" data-recipe="${recipe.id}"${tipAttr(recipe.tip)}><b>${recipe.targetName}</b><small>${recipe.steps.length} 趟</small></button>`).join('');
     return;
   }
-  host.innerHTML = Object.values(PLANT_CROPS).map(crop => `<button type="button" data-crop="${crop.id}"><b>${crop.name}</b></button>`).join('');
+  host.innerHTML = Object.values(PLANT_CROPS).map(crop => `<button type="button" data-crop="${crop.id}"${tipAttr(crop.tip)}><b>${crop.name}</b></button>`).join('');
 }
 function closeSubTool() {
   subTool = null;
@@ -3767,7 +3815,7 @@ function updateDock() {
     ops.style.gridTemplateColumns = `repeat(${Math.max(actions.length, 1)}, minmax(0, 1fr))`;
     if (sig !== dockOpsSig) {
       dockOpsSig = sig;
-      ops.innerHTML = actions.map(act => `<button type="button" data-act="${act.id}"${act.enabled ? '' : ' disabled'}><b>${act.name}</b></button>`).join('');
+      ops.innerHTML = actions.map(act => `<button type="button" data-act="${act.id}"${tipAttr(ACT_TIP[act.id] || '')}${act.enabled ? '' : ' disabled'}><b>${act.name}</b></button>`).join('');
     }
     ops.querySelectorAll('[data-act]').forEach(btn => btn.classList.toggle('on', btn.dataset.act === subTool));
   }
@@ -3816,6 +3864,7 @@ function adoptStageText(text, persist) {
 }
 function reloadStageStore() {
   try { resumeLastikaStage(localStorage); } catch { /* 无痕模式 */ }
+  try { bootFieldBlocks(localStorage); } catch { /* 无痕模式 */ }
   const booted = bootFieldStageSource(localStorage, null);
   bindPlayableClocks();
   if (!booted.ok) {
@@ -3828,6 +3877,7 @@ function reloadStageStore() {
 function useRepoStages() {
   let kept = false;
   try { kept = suspendLastikaStage(localStorage).kept; } catch { /* 无痕模式 */ }
+  bootFieldBlocks(null);
   bootFieldStageSource(localStorage, 'repo');
   bindPlayableClocks();
   paintStageChrome(kept ? '已改用仓库里的拉斯提卡。工坊档还在这台浏览器里，重读即可恢复。' : '');
@@ -3850,6 +3900,7 @@ document.addEventListener('visibilitychange', () => {
 });
 function bootStagesSync() {
   const param = Q.get('stages');
+  bootFieldBlocks(param === 'repo' ? null : localStorage);
   if (stageParamIsUrl(param)) return '';
   const booted = bootFieldStageSource(localStorage, param === 'repo' ? 'repo' : null);
   bindPlayableClocks();
@@ -3884,6 +3935,18 @@ $('unit-name').addEventListener('keydown', (e) => {
   }
 });
 $('unit-name').addEventListener('blur', () => { if (unitEdit != null) commitUnitName(); });
+document.addEventListener('pointerover', (e) => {
+  const host = e.target.closest && e.target.closest('[data-tip]');
+  if (host) placeTip(host);
+});
+document.addEventListener('pointerout', (e) => {
+  const host = e.target.closest && e.target.closest('[data-tip]');
+  if (!host) return;
+  const next = e.relatedTarget && e.relatedTarget.closest && e.relatedTarget.closest('[data-tip]');
+  if (next === host) return;
+  const tip = document.getElementById('tip');
+  if (tip) tip.classList.remove('on');
+});
 $('dock').addEventListener('pointerdown', (e) => {
   const recipe = e.target.closest('[data-recipe]');
   const cropBtn = e.target.closest('[data-crop]');
@@ -4344,6 +4407,7 @@ function frame(now) {
   const lookSig = ownedLookSig();
   if (plantOn && (Math.hypot(camS.x - plantWin.x, camS.z - plantWin.z) > W * 0.2 || Math.abs(W - plantWin.w) > W * 0.25 || lookSig !== plantWin.sig)) rebuildPlants(camS.x, camS.z, W);
   for (const s2 of SHAPES) plantMeshes[s2].visible = plantOn;
+  if (plantMeshes.board) plantMeshes.board.visible = plantOn;
   U.uPlantWin.value.set(plantWin.x, plantWin.z, plantWin.w, plantOn ? 1 : 0);
   // 收割机：离镜头中心最近的 N 台用完整模型
   for (const h of harvesters) h._d = Math.hypot(h.x - camS.x, h.z - camS.z);

@@ -113,7 +113,7 @@ test('没整地不能种；播种做完才开始生长', () => {
   assert.ok(field.plant.grow - atStart < 1);
   assert.equal(field.plant.need, 2);
   assert.equal(PLANT_CROPS.lastika.name, '拉斯提卡');
-  assert.deepEqual(PLANT_CROPS.lastika.grounds, ['general']);
+  assert.deepEqual(PLANT_CROPS.lastika.grounds, ['general', 'deepridge']);
   assert.deepEqual(PLANT_CROPS.lastika.stages.map(s => s.name), ['青苗', '发育', '成熟', '烂地', '收获后']);
   assert.equal(PLANT_CROPS.lastika.visual.shape, 'bush');
   assert.equal(PLANT_CROPS.lastika.visual.tex, 'ridges');
@@ -522,7 +522,7 @@ test('浮标空闲用短文案，有工单时与名称旁状态相同', () => {
   assert.equal(describeField(farm, 'a').float.includes('整地后'), false);
   assert.match(describeField(farm, 'a').stat, /未整地/);
   assert.equal(describeField(farm, 'h').float, '定格冠层');
-  assert.equal(describeField(farm, 'g').float, '一般田地 · 可以种植拉斯提卡');
+  assert.equal(describeField(farm, 'g').float, '田块 · 一般田地');
   requestPrep(farm, 'a');
   assert.equal(describeField(farm, 'a').badge, '整地中');
   assert.equal(describeField(farm, 'a').float, describeField(farm, 'a').badge);
@@ -531,7 +531,7 @@ test('浮标空闲用短文案，有工单时与名称旁状态相同', () => {
   stepFarm(farm, 1);
   assert.equal(describeField(farm, 'a').float, '犁地中');
   until(farm, () => farm.fields.get('a').ground === 'general');
-  assert.equal(describeField(farm, 'a').float, '一般田地 · 可以种植拉斯提卡');
+  assert.equal(describeField(farm, 'a').float, '田块 · 一般田地');
 });
 
 test('方案2：播种还在等一体机时犁地照样派拖拉机，一体机腾出来先接播种', () => {
@@ -868,7 +868,7 @@ test('回库待机放下软单和未开工硬单，正在做的硬单做完才�
 });
 
 test('拉斯提卡阶段和版本戳来自同一份定义', () => {
-  assert.equal(HUD_VERSION, '环穗 v6.28');
+  assert.equal(HUD_VERSION, '环穗 v6.29');
   const doc = parseFieldStageDoc(structuredClone(lastikaRaw));
   const windows = jobWindows(doc, alignFieldCalendar(doc)).filter(item => item.op.kind === 'optional');
   assert.deepEqual(windows.map(item => item.op.id), ['topdress', 'hill']);
@@ -914,6 +914,26 @@ test('拉斯提卡阶段和版本戳来自同一份定义', () => {
   assert.equal(spec.graph.layout, undefined);
   assert.equal(spec.graph.entry.to, 'seedling');
   assert.equal(spec.graph.entry.checks, undefined);
+});
+
+test('深垄田地是犁加培土，土豆类产量和作业倍数相乘', () => {
+  assert.deepEqual(PREP_RECIPES.deepridge.steps, ['plow', 'hill']);
+  assert.equal(PREP_RECIPES.deepridge.targetName, '深垄田地');
+  assert.equal(GROUNDS.deepridge.name, '深垄田地');
+  const farm = slice();
+  const field = farm.fields.get('a');
+  const started = requestPrep(farm, 'a', 'deepridge');
+  assert.equal(started.ok, true);
+  until(farm, () => field.ground === 'deepridge', 4000, 2);
+  assert.equal(field.prep, null);
+  assert.equal(field.look, 'general');
+  field.plant = { cropId: 'tuber', stageId: 'after', yieldMul: 2, stored: false };
+  assert.equal(describeField(farm, 'a').yieldValue, Math.round(80 * 2 * 1.2));
+  field.plant.cropId = 'lastika';
+  field.plant.yieldMul = 1;
+  assert.equal(describeField(farm, 'a').yieldValue, Math.round(100 * 1.2));
+  field.ground = 'general';
+  assert.equal(describeField(farm, 'a').yieldValue, 100);
 });
 
 test('短季薯能种，飘节点不进运行，主流程两个头不能编译', () => {

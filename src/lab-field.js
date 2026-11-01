@@ -47,7 +47,7 @@ const REASON = {
   empty: '现在没有可扫的格子',
 };
 
-const HELP = `打开：左侧「田间 / 阶段编辑器」。拉斯提卡和短季薯都能种。土性在「田间 / 田块属性」，不在这张图里。
+const HELP = `打开：左侧「田间 / 阶段编辑器」。拉斯提卡和短季薯都能种。垄宽、垄数和地面颜色在「田间 / 田块编辑器」，不在这张图里。
 
 七类节点：头、一般、尾，入口、出口，软作业、硬作业。阶段左入右出，右口是自然变化。作业挂在阶段下方，各有一口，按窗口开始排，同时段贴紧。硬作业右侧再拉到下一阶段或出口。没做硬作业仍可走自然线。
 
@@ -704,7 +704,7 @@ export function createFieldWorkshop(els) {
     if (!el) return;
     const plantable = PLANTABLE_CROP_IDS.includes(cropId);
     el.textContent = cropId === 'lastika'
-      ? '正在编辑拉斯提卡。保存后主游戏按这张阶段图种。土性在田块属性里改。'
+      ? '正在编辑拉斯提卡。保存后主游戏按这张阶段图种。垄宽和地面颜色在田块编辑器里改。'
       : cropId === 'tuber'
       ? '正在编辑短季薯。保存后主游戏种植菜单里可以选它。'
       : cropId === 'potato'
@@ -2334,7 +2334,7 @@ ${variants}
   return { build, setActive, api, get active() { return active; }, togglePlay() { api.togglePlay(); } };
 }
 
-function mountSoilEditor(host) {
+export function mountSoilEditor(host) {
   if (!host || host.dataset.ready === "1") return;
   host.dataset.ready = "1";
   host.innerHTML = SOIL_PROPS.map(prop => `<div class="soil-row" data-soil="${prop.id}"><b>${prop.name}</b><canvas data-soil-cv="${prop.id}" width="280" height="72"></canvas><div class="fs-split"><label>生长<input data-soil-bias="crop" data-soil-id="${prop.id}" type="number" min="-1" max="1" step="0.01"></label><label>作业<input data-soil-bias="work" data-soil-id="${prop.id}" type="number" min="-1" max="1" step="0.01"></label></div></div>`).join('');

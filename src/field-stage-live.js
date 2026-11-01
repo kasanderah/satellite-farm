@@ -7,8 +7,29 @@
 // 同一来源（本地服务器上同时打开 asset-lab.html 和 index.html）两页共用这把钥匙。
 // file:// 在 Chrome 里每个文件各算一个来源，两页的 localStorage 互不可见。
 import { FIELD_STAGE_SCHEMA, FIELD_STAGE_STORE } from './field-stages.js';
-import { PLANT_CROPS } from './framework-b.js';
+import { PLANT_CROPS, installFieldBlocks } from './framework-b.js';
+import { FIELD_BLOCK_STORE, cloneFieldBlocks } from './field-blocks.js';
 import { installLastikaDoc, installShippedLastika, installTuberDoc, installShippedTuber } from './lastika-stage.js';
+
+export { FIELD_BLOCK_STORE };
+
+export function bootFieldBlocks(storage) {
+  const shipped = cloneFieldBlocks();
+  const byId = Object.fromEntries(shipped.map(doc => [doc.id, doc]));
+  if (storage) {
+    try {
+      const raw = JSON.parse(storage.getItem(FIELD_BLOCK_STORE) || 'null');
+      const blocks = raw?.blocks;
+      if (blocks && typeof blocks === 'object') {
+        for (const [id, doc] of Object.entries(blocks)) {
+          if (doc && doc.graph && Array.isArray(doc.graph.stages)) byId[id] = doc;
+        }
+      }
+    } catch { /* 坏档用仓库默认 */ }
+  }
+  installFieldBlocks(Object.values(byId));
+  return byId;
+}
 
 export { FIELD_STAGE_STORE };
 

@@ -8,6 +8,7 @@
 // 生长和软窗记世界日。stepFarm 仍收真实秒，只在钟的边界换算。
 
 import { DAY_SECONDS } from './world-clock.js';
+import { FIELD_BLOCK_LIST, prepSteps } from './field-blocks.js';
 
 export const HUB_PLOT = 'C0';
 
@@ -32,6 +33,28 @@ export const GROUNDS = {
   general: { id: 'general', name: '一般田地' },
 };
 
+export const FIELD_BLOCKS = {};
+
+export function installFieldBlocks(list) {
+  for (const id of Object.keys(FIELD_BLOCKS)) delete FIELD_BLOCKS[id];
+  for (const id of Object.keys(PREP_RECIPES)) delete PREP_RECIPES[id];
+  for (const doc of list || []) {
+    FIELD_BLOCKS[doc.id] = doc;
+    GROUNDS[doc.id] = { id: doc.id, name: doc.name, color: doc.groundColor || '#5c5348' };
+    const recipeId = doc.recipeId || doc.id;
+    PREP_RECIPES[recipeId] = {
+      id: recipeId,
+      name: doc.recipeName || doc.name,
+      target: doc.id,
+      targetName: doc.name,
+      steps: prepSteps(doc),
+      tip: doc.tip || '',
+      yieldMul: Number(doc.yieldMul) > 0 ? Number(doc.yieldMul) : 1,
+      families: doc.families || [],
+    };
+  }
+}
+
 // look 为「不影响」时，这道作业自己不充当阶段样子。
 // 硬作业的进行中扫色用 look，不看 brush.enabled。
 // brush 是另外的可选刷色，默认关。关着时软作业不扫，做完也不写入田面。
@@ -45,15 +68,8 @@ export const JOBS = {
   hill: { id: 'hill', name: '培土', kind: 'soft', caps: ['培土'], look: '不影响', brush: { ...BRUSH_OFF, look: 'mature' } },
 };
 
-export const PREP_RECIPES = {
-  clear_general: {
-    id: 'clear_general',
-    name: '清地',
-    target: 'general',
-    targetName: '一般田地',
-    steps: ['plow'],
-  },
-};
+export const PREP_RECIPES = {};
+installFieldBlocks(FIELD_BLOCK_LIST);
 
 export const GROW_DAYS = 12;
 // 1× 下的现实秒。12 世界日前段 × 720 现实秒/世界日。烂地和收获后不计入。
@@ -66,7 +82,9 @@ export const PLANT_CROPS = {
   lastika: {
     id: 'lastika',
     name: '拉斯提卡',
-    grounds: ['general'],
+    family: 'potato',
+    tip: '12 世界日。追肥把产量翻倍，培土加 1 点品质，第 11–12 日收获。错过收获就进烂地。深垄田块上产量再 ×1.2。',
+    grounds: ['general', 'deepridge'],
     growDays: GROW_DAYS,
     growSeconds: GROW_SECONDS,
     yieldBase: 100,
@@ -105,7 +123,9 @@ export const PLANT_CROPS = {
   tuber: {
     id: 'tuber',
     name: '短季薯',
-    grounds: ['general'],
+    family: 'potato',
+    tip: '5 世界日的短循环。培土加品质，第 4–5 日收获。植株是朝向镜头的片子，用来和拉斯提卡的体积对照。深垄田块上产量 ×1.2。',
+    grounds: ['general', 'deepridge'],
     growDays: 5,
     growSeconds: 5 * DAY_SECONDS,
     yieldBase: 80,
@@ -1003,7 +1023,16 @@ function leaveByNatural(farm, field) {
   enterStage(farm, field, natural.to, 'natural');
 }
 
-// 硬收获做完、田面已是收获后，才入仓一次。升数等于信息框产量值 round(yieldBase × yieldMul)。
+export function groundYieldMul(field, crop) {
+  const block = FIELD_BLOCKS[field?.ground];
+  const mul = Number(block?.yieldMul);
+  if (!(mul > 0)) return 1;
+  const families = block.families || [];
+  if (families.length && !families.includes(crop?.family)) return 1;
+  return mul;
+}
+
+// 硬收获做完、田面已是收获后，才入仓一次。升数等于信息框产量值 round(yieldBase × 作业倍数 × 田块倍数)。
 // 旧薯田是 FIELD_HA × yieldL × yieldFactor，因为 yieldL 按公顷计。这里的 yieldBase 已是一整块田的产量，不再乘面积。
 // 品质用解耦后的田块品质，不写成熟度。烂地走自然边，不经过这里。
 function storePlantHarvest(farm, field, crop) {
@@ -1011,7 +1040,7 @@ function storePlantHarvest(farm, field, crop) {
   if (!plant || plant.stored || !crop) return;
   const stage = stageOf(crop, plant.stageId);
   if (stage?.role !== 'tail' || field.look !== 'harvested') return;
-  const yieldMul = plant.yieldMul || 1;
+  const yieldMul = (plant.yieldMul || 1) * groundYieldMul(field, crop);
   const liters = Math.round((crop.yieldBase || 0) * yieldMul);
   if (!(liters > 0)) return;
   const quality = qualityNow(crop, field);
@@ -1135,6 +1164,24 @@ function finishOrder(farm, order) {
   const field = farm.fields.get(order.fieldId);
   const job = JOBS[order.jobId];
   const machine = orderMachine(farm, order);
+  if (field?.prep && order.lane === 'prep') {
+    const recipe = PREP_RECIPES[field.prep.recipeId];
+    releaseOrder(farm, order);
+    pushEvent(farm, { type: 'job-complete', fieldId: field.id, jobId: job?.id, look: job?.look, lane: 'prep' });
+    if (job) applyLook(field, job);
+    field.prep.step += 1;
+    const nextId = recipe?.steps[field.prep.step];
+    if (!nextId) {
+      field.ground = recipe?.target || field.ground;
+      field.prep = null;
+      pushEvent(farm, { type: 'ground', fieldId: field.id, ground: field.ground });
+    } else {
+      const next = JOBS[nextId];
+      if (next) farm.queue.push({ id: farm.seq++, fieldId: field.id, jobId: next.id, caps: next.caps.slice(), lane: 'prep' });
+    }
+    maybeStandby(farm, machine);
+    return;
+  }
   if (job?.kind === 'soft') {
     const row = field?.plant?.soft?.[order.jobId];
     let painted = null;
@@ -1165,19 +1212,6 @@ function finishOrder(farm, order) {
   releaseOrder(farm, order);
   pushEvent(farm, { type: 'job-complete', fieldId: field?.id, jobId: job.id, look: job.look, lane: order.lane });
   if (field) applyLook(field, job);
-  if (field?.prep && order.lane === 'prep') {
-    const recipe = PREP_RECIPES[field.prep.recipeId];
-    field.prep.step += 1;
-    const nextId = recipe.steps[field.prep.step];
-    if (!nextId) {
-      field.ground = recipe.target;
-      field.prep = null;
-      pushEvent(farm, { type: 'ground', fieldId: field.id, ground: field.ground });
-    } else {
-      const next = JOBS[nextId];
-      farm.queue.push({ id: farm.seq++, fieldId: field.id, jobId: next.id, caps: next.caps.slice(), lane: 'prep' });
-    }
-  }
   if (field?.plant && order.lane === 'plant') {
     const crop = cropOfPlant(field);
     const entry = crop?.graph?.entry;
@@ -1468,7 +1502,7 @@ export function fieldFloat(farm, fieldId) {
     const name = stage?.name || (field.plant.stageId === crop.graph?.entry?.job ? '播种' : '');
     return name ? `${crop.name} · ${name}` : crop.name;
   }
-  if (field.ground === 'general') return '一般田地 · 可以种植拉斯提卡';
+  if (field.ground && field.ground !== 'raw' && GROUNDS[field.ground]) return `田块 · ${GROUNDS[field.ground].name}`;
   return '未整地';
 }
 
@@ -1481,10 +1515,14 @@ export function describeField(farm, fieldId) {
   const machine = work ? farm.machines.find(m => m.id === work.machineId) : null;
   const crop = field.plant ? PLANT_CROPS[field.plant.cropId] : null;
   let stat = GROUNDS[field.ground]?.name || field.ground;
-  if (field.look === 'raw' && !work) stat = '未整地 · 整地后成为一般田地';
-  else if (field.ground === 'general' && !field.plant && !work) stat = '一般田地 · 可以种植拉斯提卡';
+  if (field.look === 'raw' && !work) stat = '未整地 · 整地后成为田块';
+  else if (field.ground && field.ground !== 'raw' && !field.plant && !work) {
+    const crops = Object.values(PLANT_CROPS).filter(crop => (crop.grounds || []).includes(field.ground)).map(crop => crop.name);
+    stat = `田块 · ${GROUNDS[field.ground]?.name || field.ground}${crops.length ? ' · 可以种植' + crops.join('、') : ''}`;
+  }
   if (work && job) {
-    const name = crop ? crop.name + ' · ' : (work.lane === 'prep' ? '清地 · ' : '');
+    const prepName = work.lane === 'prep' ? (PREP_RECIPES[field.prep?.recipeId]?.name || '清地') : '';
+    const name = crop ? crop.name + ' · ' : (prepName ? prepName + ' · ' : '');
     const who = machine ? machine.name + ' · ' : '';
     const where = work.phase === 'cruise' ? '正在开来' : work.phase === 'turn' ? '地头转弯' : `${job.name} ${pct}%`;
     stat = `${name}${who}${where}`;
@@ -1551,13 +1589,13 @@ export function describeField(farm, fieldId) {
   }));
   const rotten = stage?.role === 'rot';
   const maturity = !crop || rotten ? null : maturityPercent(crop, Math.min(age, cycle || age));
-  const yieldValue = crop ? Math.round((crop.yieldBase || 0) * (field.plant?.yieldMul || 1)) : 0;
+  const yieldValue = crop ? Math.round((crop.yieldBase || 0) * (field.plant?.yieldMul || 1) * groundYieldMul(field, crop)) : 0;
   const quality = crop && field.plant ? qualityNow(crop, field) : null;
   const locked = fieldLocked(farm, field);
   const next = field.nextCrop ? PLANT_CROPS[field.nextCrop] : null;
   const actions = [
     { id: 'prep', name: '整地', enabled: !locked },
-    { id: 'plant', name: '种植', enabled: !locked && !field.plant && field.ground === 'general' },
+    { id: 'plant', name: '种植', enabled: !locked && !field.plant && !!FIELD_BLOCKS[field.ground] },
   ];
   const chips = barStages.map(item => ({ name: item.name, on: item.on }));
   const bar = work ? work.progress : (field.plant?.clock && field.plant.need ? field.plant.grow / field.plant.need : 0);
@@ -1583,7 +1621,7 @@ export function describeField(farm, fieldId) {
     barStages,
     actions,
     canPrep: !locked && (field.ground !== 'general' || !!field.plant),
-    canPlant: !field.plant && !locked && field.ground === 'general',
+    canPlant: !field.plant && !locked && !!FIELD_BLOCKS[field.ground],
     crop: crop ? crop.name : null,
     nextCrop: next?.id || null,
     nextName: next?.name || null,

@@ -1,7 +1,7 @@
 // 把框架 B 接到环面上的一块田。旧的垄扫不读这里的工单。
 import {
   OMNI, TRACTOR, PLOW, JOBS, TURN_SECONDS, createFarm, addField, addMachine, mountHitch,
-  requestPrep, requestPlant, setNextCrop, stepFarm, describeField, plotAddress, growthAge, workSweepLook, PLANT_CROPS,
+  requestPrep, requestPlant, setNextCrop, stepFarm, describeField, plotAddress, growthAge, workSweepLook, PLANT_CROPS, FIELD_BLOCKS,
   cycleDays, installPlayerMachine, removePlayerMachine, recallMachine, releaseStandby, standbyClock,
 } from './framework-b.js';
 import { roadRoute } from './_shared.js';
@@ -317,6 +317,8 @@ function syncFields() {
       label: desc?.float || '',
       ground: unit.ground,
       plot: unit.plot,
+      cropId: unit.plant?.cropId || '',
+      ridgeWidth: FIELD_BLOCKS[unit.ground]?.ridgeWidth || 0,
     };
     const jobDef = order ? JOBS[order.jobId] : null;
     const spec = jobDef && stage ? (stage.jobs || []).find(item => item.job === order.jobId) : null;
