@@ -16,6 +16,7 @@ const jobs = [
   ['src/main.js', 'src/template.html', 'index.html'],
   ['src/lab.js', 'src/lab-template.html', 'asset-lab.html', { loader: { '.glb': 'dataurl', '.png': 'dataurl' } }],
   ['src/flow.js', 'src/flow-template.html', 'flow.html'],
+  ['src/market.js', 'src/market-template.html', 'market.html'],
 ];
 const only = process.argv.slice(2);
 for (const [entry, template, out, extra] of jobs) {

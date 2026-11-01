@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>环穗 · 市场</title>
+<style>
+@font-face{font-family:"BarlowSC";font-weight:400;src:url(data:font/woff;base64,__FONT_R__) format("woff")}
+@font-face{font-family:"BarlowSC";font-weight:500;src:url(data:font/woff;base64,__FONT_M__) format("woff")}
+:root{--void:#0a0c14;--line:rgba(188,195,196,.4);--fg:#e8d8d0;--mut:#a2998a;--sig:#d8693c;--data:#85eed9;
+  --font:"BarlowSC","PingFang SC","Microsoft YaHei","Noto Sans CJK SC","Noto Sans SC","WenQuanYi Micro Hei","Droid Sans Fallback",sans-serif}
+html,body{margin:0;min-height:100%;background:var(--void);color:var(--fg);font-family:var(--font);-webkit-font-smoothing:antialiased}
+body{display:grid;grid-template-rows:64px 1fr;min-height:100vh}
+header{display:flex;align-items:center;gap:18px;padding:0 18px;border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:center;gap:10px}
+.brand i{width:16px;height:16px;border:1px solid var(--fg);position:relative;display:block}
+.brand i:after{content:"";position:absolute;left:3px;top:3px;width:8px;height:8px;background:var(--sig)}
+.brand b{display:block;font-weight:500;font-size:14px;letter-spacing:.18em}
+.brand small{display:block;margin-top:2px;font-size:10px;letter-spacing:.14em;color:var(--mut)}
+.clock{display:flex;gap:16px;margin-left:12px}
+.clock div{min-width:72px}
+.clock small{display:block;font-size:10px;letter-spacing:.16em;color:var(--mut)}
+.clock b{font-weight:400;font-size:18px;font-variant-numeric:tabular-nums}
+.tools{margin-left:auto;display:flex;gap:6px}
+button{font:inherit;color:var(--fg);background:transparent;border:1px solid var(--line);padding:6px 10px;letter-spacing:.08em;cursor:pointer;font-size:12px}
+button.on,button:hover{border-color:var(--sig);color:var(--sig)}
+main{display:grid;grid-template-columns:minmax(420px,1.3fr) minmax(280px,.8fr) minmax(280px,.9fr);min-height:0}
+section,aside{min-height:0;overflow:auto;border-right:1px solid var(--line);padding:14px 16px 28px}
+aside{border-right:0}
+h2{margin:0 0 10px;font-size:11px;font-weight:500;letter-spacing:.18em;color:var(--mut)}
+.head,.row{display:grid;grid-template-columns:1.2fr .8fr .7fr .7fr .8fr .6fr;gap:6px;align-items:center}
+.head{font-size:10px;letter-spacing:.12em;color:var(--mut);padding:0 8px 6px}
+.row{width:100%;text-align:left;padding:8px;margin:0 0 4px;background:transparent}
+.row.on{border-color:var(--sig)}
+.row b{font-weight:500;letter-spacing:.06em}
+.row span,.row em{font-style:normal;font-variant-numeric:tabular-nums;font-size:13px}
+.row em{color:var(--mut);font-size:12px}
+.up{color:var(--sig)}
+.down{color:var(--data)}
+#detail{border:1px solid var(--line);padding:12px;margin-bottom:12px}
+#detail b{font-size:18px;font-weight:500;letter-spacing:.12em}
+#detail p{margin:4px 0 10px;color:var(--mut);font-size:12px;letter-spacing:.06em}
+#factors{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
+#factors div{border-top:1px solid var(--line);padding-top:6px}
+#factors small{display:block;color:var(--mut);font-size:10px;letter-spacing:.08em}
+#factors b{font-size:14px;font-weight:400;letter-spacing:0}
+canvas{width:100%;height:160px;background:#10131c;border:1px solid var(--line);display:block;margin-top:8px}
+#chart-cap{margin:6px 0 0;color:var(--mut);font-size:11px;letter-spacing:.06em}
+article{border-top:1px solid var(--line);padding:8px 0}
+article b{display:block;font-weight:500;letter-spacing:.08em;font-size:13px}
+article small,article em{display:block;font-style:normal;color:var(--mut);font-size:12px;letter-spacing:.04em;margin-top:2px;line-height:1.45}
+.muted{color:var(--mut);font-size:12px}
+#log{list-style:none;margin:0;padding:0}
+#log li{padding:6px 0;border-top:1px solid var(--line);font-size:12px;line-height:1.45;letter-spacing:.03em}
+#log span{display:block;color:var(--mut);font-size:10px;letter-spacing:.12em}
+footer{grid-column:1 / -1;padding:8px 16px 16px;color:var(--mut);font-size:11px;letter-spacing:.04em;line-height:1.5}
+@media (max-width:980px){
+  main{grid-template-columns:1fr}
+  section,aside{border-right:0;border-bottom:1px solid var(--line)}
+}
+</style></head><body>
+<header>
+  <div class="brand"><i></i><div><b>环穗 · 市场</b><small id="rev">market-v0.1</small></div></div>
+  <div class="clock">
+    <div><small>日</small><b id="day">0</b></div>
+    <div><small>季节</small><b id="season">春播</b></div>
+    <div><small>刻</small><b id="tick">1/4</b></div>
+  </div>
+  <div class="tools">
+    <button type="button" id="tick-btn">一刻</button>
+    <button type="button" id="day-btn">一日</button>
+    <button type="button" id="season-btn">换季</button>
+    <button type="button" id="auto">自动</button>
+  </div>
+</header>
+<main>
+  <section>
+    <h2>商品</h2>
+    <div class="head"><span>名称</span><span>现价</span><span>涨跌</span><span>仓储</span><span>缺口</span><span>季节</span></div>
+    <div id="goods"></div>
+  </section>
+  <section>
+    <h2>定价</h2>
+    <div id="detail">
+      <b id="detail-name">短季薯</b>
+      <p id="detail-meta"></p>
+      <div id="factors"></div>
+      <canvas id="chart" width="640" height="200"></canvas>
+      <p id="chart-cap"></p>
+    </div>
+    <p class="muted">现价朝目标价靠。目标价 = 基准 × 季节供需 × 仓储缺口 × 买卖者兴趣。事件改供需，或把账面存货打折。未接入主游戏。</p>
+  </section>
+  <aside>
+    <h2>虚拟买卖者</h2>
+    <div id="traders"></div>
+    <h2 style="margin-top:18px">宏观事件</h2>
+    <div id="events"></div>
+    <h2 style="margin-top:18px">日志</h2>
+    <ul id="log"></ul>
+  </aside>
+  <footer>独立原型页 market.html。主进程以后用 quoteFromMarket 读现价，用 applyWarehouseDelta 把收获和出售写成库存影子。成交本身仍走仓库。</footer>
+</main>
+<script>__BUNDLE__</script>
+</body></html>
