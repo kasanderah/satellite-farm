@@ -6,63 +6,68 @@
 @font-face{font-family:"BarlowSC";font-weight:500;src:url(data:font/woff;base64,__FONT_M__) format("woff")}
 :root{--void:#0a0c14;--line:rgba(188,195,196,.4);--fg:#e8d8d0;--mut:#a2998a;--sig:#d8693c;--data:#85eed9;
   --font:"BarlowSC","PingFang SC","Microsoft YaHei","Noto Sans CJK SC","Noto Sans SC","WenQuanYi Micro Hei","Droid Sans Fallback",sans-serif}
-html,body{margin:0;min-height:100%;background:var(--void);color:var(--fg);font-family:var(--font);-webkit-font-smoothing:antialiased}
-body{display:grid;grid-template-rows:64px 1fr;min-height:100vh}
-header{display:flex;align-items:center;gap:18px;padding:0 18px;border-bottom:1px solid var(--line)}
+html,body{margin:0;min-height:100%;background:var(--void);color:var(--fg);font-family:var(--font)}
+body{display:flex;flex-direction:column;min-height:100vh}
+header{display:flex;align-items:center;gap:16px;padding:10px 16px;border-bottom:1px solid var(--line);flex:none}
 .brand{display:flex;align-items:center;gap:10px}
 .brand i{width:16px;height:16px;border:1px solid var(--fg);position:relative;display:block}
 .brand i:after{content:"";position:absolute;left:3px;top:3px;width:8px;height:8px;background:var(--sig)}
-.brand b{display:block;font-weight:500;font-size:14px;letter-spacing:.18em}
-.brand small{display:block;margin-top:2px;font-size:10px;letter-spacing:.14em;color:var(--mut)}
-.clock{display:flex;gap:16px;margin-left:12px}
-.clock div{min-width:72px}
-.clock small{display:block;font-size:10px;letter-spacing:.16em;color:var(--mut)}
-.clock b{font-weight:400;font-size:18px;font-variant-numeric:tabular-nums}
-.tools{margin-left:auto;display:flex;gap:6px}
-button{font:inherit;color:var(--fg);background:transparent;border:1px solid var(--line);padding:6px 10px;letter-spacing:.08em;cursor:pointer;font-size:12px}
+.brand b{display:block;font-weight:500;font-size:14px;letter-spacing:.16em}
+.brand small{display:block;margin-top:2px;font-size:10px;letter-spacing:.12em;color:var(--mut)}
+.clock{display:flex;gap:14px}
+.clock small{display:block;font-size:10px;letter-spacing:.14em;color:var(--mut)}
+.clock b{font-weight:400;font-size:16px;font-variant-numeric:tabular-nums}
+label.dock{font-size:10px;letter-spacing:.12em;color:var(--mut);display:flex;flex-direction:column;gap:4px}
+select,input{font:inherit;color:var(--fg);background:#0a0c14;border:1px solid var(--line);padding:4px 6px;font-size:13px}
+.tools{margin-left:auto;display:flex;gap:6px;align-items:center}
+button{font:inherit;color:var(--fg);background:transparent;border:1px solid var(--line);padding:6px 10px;letter-spacing:.06em;cursor:pointer;font-size:12px}
 button.on,button:hover{border-color:var(--sig);color:var(--sig)}
-main{display:grid;grid-template-columns:minmax(420px,1.3fr) minmax(280px,.8fr) minmax(280px,.9fr);min-height:0}
-section,aside{min-height:0;overflow:auto;border-right:1px solid var(--line);padding:14px 16px 28px}
+main{flex:1;display:grid;grid-template-columns:280px minmax(360px,1fr) 320px;min-height:0}
+section,aside{min-height:0;overflow:auto;padding:12px 14px 24px;border-right:1px solid var(--line)}
 aside{border-right:0}
-h2{margin:0 0 10px;font-size:11px;font-weight:500;letter-spacing:.18em;color:var(--mut)}
-.head,.row{display:grid;grid-template-columns:1.2fr .8fr .7fr .7fr .8fr .6fr;gap:6px;align-items:center}
+h2{margin:14px 0 8px;font-size:11px;font-weight:500;letter-spacing:.16em;color:var(--mut)}
+h2:first-child{margin-top:0}
+.head,.row{display:grid;grid-template-columns:1.3fr .8fr .7fr .7fr;gap:6px;align-items:center}
 .head{font-size:10px;letter-spacing:.12em;color:var(--mut);padding:0 8px 6px}
-.row{width:100%;text-align:left;padding:8px;margin:0 0 4px;background:transparent}
+.row{width:100%;text-align:left;margin:0 0 4px}
 .row.on{border-color:var(--sig)}
-.row b{font-weight:500;letter-spacing:.06em}
-.row span,.row em{font-style:normal;font-variant-numeric:tabular-nums;font-size:13px}
-.row em{color:var(--mut);font-size:12px}
-.up{color:var(--sig)}
-.down{color:var(--data)}
-#detail{border:1px solid var(--line);padding:12px;margin-bottom:12px}
-#detail b{font-size:18px;font-weight:500;letter-spacing:.12em}
-#detail p{margin:4px 0 10px;color:var(--mut);font-size:12px;letter-spacing:.06em}
-#factors{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
-#factors div{border-top:1px solid var(--line);padding-top:6px}
-#factors small{display:block;color:var(--mut);font-size:10px;letter-spacing:.08em}
-#factors b{font-size:14px;font-weight:400;letter-spacing:0}
-canvas{width:100%;height:160px;background:#10131c;border:1px solid var(--line);display:block;margin-top:8px}
-#chart-cap{margin:6px 0 0;color:var(--mut);font-size:11px;letter-spacing:.06em}
-article{border-top:1px solid var(--line);padding:8px 0}
-article b{display:block;font-weight:500;letter-spacing:.08em;font-size:13px}
-article small,article em{display:block;font-style:normal;color:var(--mut);font-size:12px;letter-spacing:.04em;margin-top:2px;line-height:1.45}
-.muted{color:var(--mut);font-size:12px}
+.row b{font-weight:500}
+.px{font-variant-numeric:tabular-nums}
+.up{color:var(--sig)}.down{color:var(--data)}
+.book{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.lvl{position:relative;display:flex;justify-content:space-between;gap:8px;padding:3px 6px;font-variant-numeric:tabular-nums;font-size:13px}
+.lvl i{position:absolute;inset:1px auto 1px 0;background:rgba(216,105,60,.28)}
+.lvl.bid i{background:rgba(133,238,217,.2)}
+.lvl span,.lvl em{position:relative;font-style:normal}
+#spread,#last{font-variant-numeric:tabular-nums}
+canvas{width:100%;height:150px;background:#10131c;border:1px solid var(--line);display:block;margin-top:8px}
+.muted{color:var(--mut);font-size:12px;line-height:1.45}
+.gaps{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:8px}
+.gaps small{display:block;color:var(--mut);font-size:10px;letter-spacing:.08em}
+.gaps em{font-style:normal;font-size:11px}
+.trade{display:flex;flex-direction:column;gap:8px;border:1px solid var(--line);padding:10px}
+.trade .row2{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+#mine{display:flex;flex-direction:column;gap:4px}
+#mine button{text-align:left}
+article{border-top:1px solid var(--line);padding:7px 0}
+article b{display:block;font-weight:500;font-size:13px;letter-spacing:.06em}
+article small,article em{display:block;font-style:normal;color:var(--mut);font-size:12px;margin-top:2px;line-height:1.4}
 #log{list-style:none;margin:0;padding:0}
-#log li{padding:6px 0;border-top:1px solid var(--line);font-size:12px;line-height:1.45;letter-spacing:.03em}
-#log span{display:block;color:var(--mut);font-size:10px;letter-spacing:.12em}
-footer{grid-column:1 / -1;padding:8px 16px 16px;color:var(--mut);font-size:11px;letter-spacing:.04em;line-height:1.5}
-@media (max-width:980px){
-  main{grid-template-columns:1fr}
-  section,aside{border-right:0;border-bottom:1px solid var(--line)}
-}
+#log li{border-top:1px solid var(--line);padding:6px 0;font-size:12px;line-height:1.4}
+#log span{display:block;color:var(--mut);font-size:10px;letter-spacing:.1em}
+footer{padding:8px 16px 14px;color:var(--mut);font-size:11px;letter-spacing:.03em}
+@media (max-width:980px){main{grid-template-columns:1fr}section,aside{border-right:0;border-bottom:1px solid var(--line)}}
 </style></head><body>
 <header>
-  <div class="brand"><i></i><div><b>环穗 · 市场</b><small id="rev">market-v0.1</small></div></div>
+  <div class="brand"><i></i><div><b>环穗 · 市场</b><small id="rev">market-v0.2</small></div></div>
   <div class="clock">
+    <div><small>现金</small><b id="cash">0</b></div>
+    <div><small>库存</small><b id="held">0</b></div>
     <div><small>日</small><b id="day">0</b></div>
     <div><small>季节</small><b id="season">春播</b></div>
     <div><small>刻</small><b id="tick">1/4</b></div>
   </div>
+  <label class="dock">对接<select id="dock"><option value="orbit">轨道站</option><option value="luna">月面城</option><option value="colony">殖民地合约池</option></select></label>
   <div class="tools">
     <button type="button" id="tick-btn">一刻</button>
     <button type="button" id="day-btn">一日</button>
@@ -73,29 +78,42 @@ footer{grid-column:1 / -1;padding:8px 16px 16px;color:var(--mut);font-size:11px;
 <main>
   <section>
     <h2>商品</h2>
-    <div class="head"><span>名称</span><span>现价</span><span>涨跌</span><span>仓储</span><span>缺口</span><span>季节</span></div>
+    <div class="head"><span>名称</span><span>成交</span><span>涨跌</span><span>持仓</span></div>
     <div id="goods"></div>
   </section>
   <section>
-    <h2>定价</h2>
-    <div id="detail">
-      <b id="detail-name">短季薯</b>
-      <p id="detail-meta"></p>
-      <div id="factors"></div>
-      <canvas id="chart" width="640" height="200"></canvas>
-      <p id="chart-cap"></p>
-    </div>
-    <p class="muted">现价朝目标价靠。目标价 = 基准 × 季节供需 × 仓储缺口 × 买卖者兴趣。事件改供需，或把账面存货打折。未接入主游戏。</p>
+    <h2>订单簿 · 最近成交 <b id="last">—</b> · <span id="spread"></span></h2>
+    <div class="book"><div><h2>卖盘</h2><div id="asks"></div></div><div><h2>买盘</h2><div id="bids"></div></div></div>
+    <canvas id="chart" width="720" height="200"></canvas>
+    <p id="chart-cap" class="muted"></p>
+    <h2>域价差</h2>
+    <div id="gaps" class="gaps"></div>
   </section>
   <aside>
+    <h2>买卖</h2>
+    <div class="trade">
+      <div class="row2">
+        <label>数量<input id="qty" type="number" min="1" step="1" value="5"></label>
+        <label>限价<input id="px" type="number" min="0.1" step="0.1" value="80"></label>
+      </div>
+      <div class="row2">
+        <button type="button" id="buy-take">吃单买入</button>
+        <button type="button" id="sell-take">吃单卖出</button>
+        <button type="button" id="buy-limit">挂买</button>
+        <button type="button" id="sell-limit">挂卖</button>
+      </div>
+      <p id="trade-note" class="muted"></p>
+      <div id="mine"></div>
+      <p id="ships" class="muted"></p>
+    </div>
     <h2>虚拟买卖者</h2>
     <div id="traders"></div>
-    <h2 style="margin-top:18px">宏观事件</h2>
+    <h2>宏观事件</h2>
     <div id="events"></div>
-    <h2 style="margin-top:18px">日志</h2>
+    <h2>日志</h2>
     <ul id="log"></ul>
   </aside>
-  <footer>独立原型页 market.html。主进程以后用 quoteFromMarket 读现价，用 applyWarehouseDelta 把收获和出售写成库存影子。成交本身仍走仓库。</footer>
 </main>
+<footer>market-v0.2。成交价来自限价盘撮合。三个域之间由货运配额、到货延迟和损耗连着，玩家只对接一个域。未接入主游戏。</footer>
 <script>__BUNDLE__</script>
 </body></html>
