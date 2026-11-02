@@ -2319,9 +2319,19 @@ function tipAttr(text) {
   const safe = String(text || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
   return safe ? ` data-tip="${safe}"` : '';
 }
+let tipHost = null;
+let tipPtr = null;
+function hideTip() {
+  tipHost = null;
+  const tip = document.getElementById('tip');
+  if (!tip) return;
+  tip.classList.remove('on');
+  tip.textContent = '';
+}
 function placeTip(host) {
   const tip = document.getElementById('tip');
-  if (!tip || !host) return;
+  if (!tip || !host || !host.isConnected) { hideTip(); return; }
+  tipHost = host;
   tip.textContent = host.dataset.tip || '';
   tip.classList.add('on');
   const box = host.getBoundingClientRect();
@@ -2331,6 +2341,14 @@ function placeTip(host) {
   if (top < 8) top = box.bottom + 8;
   tip.style.left = left + 'px';
   tip.style.top = top + 'px';
+}
+function syncTip() {
+  if (tipHost && !tipHost.isConnected) hideTip();
+  if (!tipPtr) { hideTip(); return; }
+  const el = document.elementFromPoint(tipPtr.x, tipPtr.y);
+  const host = el && el.closest ? el.closest('[data-tip]') : null;
+  if (!host || !host.isConnected) { hideTip(); return; }
+  placeTip(host);
 }
 function openContext(x, y) {
   ctxAt = { x, y };
@@ -2361,6 +2379,7 @@ function paintContext() {
     }
     return head;
   }).join('');
+  syncTip();
 }
 function onRightClick(cx, cy) {
   if (viewLayer !== 'surface' || mode === 'build') return;
@@ -2555,14 +2574,17 @@ function paintSubbar() {
   if (subTool !== 'prep' && subTool !== 'plant') {
     host.classList.remove('on');
     host.innerHTML = '';
+    syncTip();
     return;
   }
   host.classList.add('on');
   if (subTool === 'prep') {
     host.innerHTML = Object.values(PREP_RECIPES).map(recipe => `<button type="button" data-recipe="${recipe.id}"${tipAttr(recipe.tip)}><b>${recipe.targetName}</b><small>${recipe.steps.length} 趟</small></button>`).join('');
+    syncTip();
     return;
   }
   host.innerHTML = Object.values(PLANT_CROPS).map(crop => `<button type="button" data-crop="${crop.id}"${tipAttr(crop.tip)}><b>${crop.name}</b></button>`).join('');
+  syncTip();
 }
 function closeSubTool() {
   subTool = null;
@@ -2578,9 +2600,10 @@ function closePlanMenu() {
   const menu = $('planmenu');
   ctxAt = null;
   ctxOpen = null;
-  if (!menu) return;
+  if (!menu) { syncTip(); return; }
   menu.classList.remove('on');
   menu.innerHTML = '';
+  syncTip();
 }
 function applyFieldPick(list, shift) {
   if (!shift) pickedFields.clear();
@@ -3958,6 +3981,7 @@ function updateDock() {
     if (sig !== dockOpsSig) {
       dockOpsSig = sig;
       ops.innerHTML = actions.map(act => `<button type="button" data-act="${act.id}"${tipAttr(ACT_TIP[act.id] || '')}${act.enabled ? '' : ' disabled'}><b>${act.name}</b></button>`).join('');
+      syncTip();
     }
     ops.querySelectorAll('[data-act]').forEach(btn => btn.classList.toggle('on', btn.dataset.act === subTool));
   }
@@ -4077,18 +4101,21 @@ $('unit-name').addEventListener('keydown', (e) => {
   }
 });
 $('unit-name').addEventListener('blur', () => { if (unitEdit != null) commitUnitName(); });
+document.addEventListener('pointermove', (e) => { tipPtr = { x: e.clientX, y: e.clientY }; }, true);
 document.addEventListener('pointerover', (e) => {
+  tipPtr = { x: e.clientX, y: e.clientY };
   const host = e.target.closest && e.target.closest('[data-tip]');
   if (host) placeTip(host);
 });
 document.addEventListener('pointerout', (e) => {
   const host = e.target.closest && e.target.closest('[data-tip]');
-  if (!host) return;
+  if (!host || host !== tipHost) return;
   const next = e.relatedTarget && e.relatedTarget.closest && e.relatedTarget.closest('[data-tip]');
-  if (next === host) return;
-  const tip = document.getElementById('tip');
-  if (tip) tip.classList.remove('on');
+  if (next && next.isConnected && next === host) return;
+  hideTip();
 });
+document.addEventListener('click', () => requestAnimationFrame(syncTip), true);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') requestAnimationFrame(syncTip); }, true);
 $('dock').addEventListener('pointerdown', (e) => {
   const recipe = e.target.closest('[data-recipe]');
   const cropBtn = e.target.closest('[data-crop]');
