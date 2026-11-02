@@ -29,12 +29,12 @@ import { PLANT_CROPS, PREP_RECIPES, FIELD_BLOCKS, JOBS, stageDisplayStops } from
 import { HUD_VERSION } from './version.js';
 import {
   UNIT, PLOT as PLOT_M, SECTOR, CELL, legacyView, GROUND_PAD,
-  hubGridSegments, fieldCellSegments,
+  inHubWedge,
 } from './modulus.js';
 import { overlayCells } from './land-buy.js';
 import { BUILDINGS, ROADS as BUILD_ROADS } from './build/catalog.js';
 import { placeWork, eraseWork, listWorks, previewWork } from './build/works.js';
-import { createWorkMesh, ghostMaterial } from './build/meshes.js';
+import { createWorkMesh, ghostMaterial, applyGhostTint } from './build/meshes.js';
 import { footprint, worldCell, cellOrigin } from './build/placement.js';
 import { DAY_SECONDS } from './world-clock.js';
 import { SOIL_STORE, defaultSoilCurves, normalizeSoilCurves, freshSoil, stepSoil, soilDrivers, soilText } from './soil.js';
@@ -1465,48 +1465,65 @@ function paintLandOverlay(force) {
     mesh.instanceMatrix.needsUpdate = true;
   }
 }
-function segsGeometry(segs, y) {
-  const pos = [];
-  for (const [x1, z1, x2, z2] of segs) pos.push(x1, y, z1, x2, y, z2);
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  return geo;
-}
-const hubRoot = new THREE.Group();
-hubRoot.name = 'hub-wedge';
-scene.add(hubRoot);
-const gridLineMat = () => {
-  const mat = curved(new THREE.LineBasicMaterial({ color: 0xa39e94, transparent: true, opacity: 0.45, depthWrite: false }));
-  mat.polygonOffset = true;
-  mat.polygonOffsetFactor = -1;
-  mat.polygonOffsetUnits = -2;
-  return mat;
-};
-const hubLines = new THREE.LineSegments(
-  segsGeometry(hubGridSegments(0), 0.08),
-  gridLineMat(),
-);
-hubLines.frustumCulled = false;
-hubLines.renderOrder = 3;
-hubRoot.add(hubLines);
-hubRoot.visible = false;
-const equipRoot = new THREE.Group();
-equipRoot.name = 'equip-grid';
-equipRoot.visible = false;
-scene.add(equipRoot);
-const equipMat = gridLineMat();
-function refreshEquipGrids() {
-  while (equipRoot.children.length) {
-    const child = equipRoot.children.pop();
-    child.geometry.dispose();
+function takenCells() {
+  const taken = new Set();
+  for (const piece of listWorks()) {
+    for (const [gx, gz] of piece.cells || []) taken.add(gx + ',' + gz);
   }
+  return taken;
+}
+function collectGridCells(taken) {
+  const cells = [];
+  const seen = new Set();
+  const n = Math.round(PLOT_M / CELL);
+  const consider = (gx, gz) => {
+    const key = gx + ',' + gz;
+    if (taken.has(key) || seen.has(key)) return;
+    seen.add(key);
+    cells.push(gx, gz);
+  };
+  for (let gx = 0; gx < n; gx++) {
+    for (let gz = 0; gz < n; gz++) {
+      const o = cellOrigin(gx, gz);
+      if (!inHubWedge(o.x + CELL / 2, o.z + CELL / 2, 0)) continue;
+      consider(gx, gz);
+    }
+  }
+  const span = Math.round(L.FIELD / CELL);
   for (const f of fields) {
     if (!f.equip) continue;
-    const line = new THREE.LineSegments(segsGeometry(fieldCellSegments(f.x0, f.z0, L.FIELD), 0.08), equipMat);
-    line.frustumCulled = false;
-    line.renderOrder = 3;
-    equipRoot.add(line);
+    const org = worldCell(f.x0 + CELL * 0.25, f.z0 + CELL * 0.25);
+    for (let dx = 0; dx < span; dx++) {
+      for (let dz = 0; dz < span; dz++) consider(org.gx + dx, org.gz + dz);
+    }
   }
+  return cells;
+}
+const gridMat = curved(new THREE.MeshBasicMaterial({
+  color: 0xe7e1d6, transparent: true, opacity: 0.32, depthWrite: false, side: THREE.DoubleSide,
+  polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -3,
+}));
+const gridMesh = new THREE.Mesh(new THREE.BufferGeometry(), gridMat);
+gridMesh.name = 'build-grid';
+gridMesh.frustumCulled = false;
+gridMesh.renderOrder = 2;
+gridMesh.visible = false;
+scene.add(gridMesh);
+function refreshBuildGrid() {
+  const cells = collectGridCells(takenCells());
+  const y = 0.045;
+  const inset = 0.16;
+  const pos = [];
+  for (let i = 0; i < cells.length; i += 2) {
+    const o = cellOrigin(cells[i], cells[i + 1]);
+    const x0 = o.x + inset, x1 = o.x + CELL - inset;
+    const z0 = o.z + inset, z1 = o.z + CELL - inset;
+    pos.push(x0, y, z0, x0, y, z1, x1, y, z1, x0, y, z0, x1, y, z1, x1, y, z0);
+  }
+  gridMesh.geometry.dispose();
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  gridMesh.geometry = geo;
 }
 function convertEquip() {
   const f = selected;
@@ -1514,7 +1531,7 @@ function convertEquip() {
   const r = toggleEquip(f);
   if (!r.ok) { toast(r.reason === 'busy' ? '这块正在作业' : '这块不能改成设备单元'); return; }
   syncOwnedFields();
-  refreshEquipGrids();
+  refreshBuildGrid();
   toast(r.equip ? '已转为建造区 · 再按 F4 转回田面' : '已转回田面');
   updateDock();
   saveSoon();
@@ -1529,41 +1546,75 @@ const ghostRoot = new THREE.Group();
 ghostRoot.name = 'build-ghost';
 ghostRoot.visible = false;
 scene.add(ghostRoot);
-function footMat(color) {
-  const mat = curved(new THREE.MeshBasicMaterial({
-    color, transparent: true, opacity: 0.5, depthWrite: false, toneMapped: false,
-    polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
-  }));
-  return mat;
-}
-const footOk = footMat(0x6f9a86);
-const footBad = footMat(0xb5523a);
-const footMesh = new THREE.Mesh(new THREE.BufferGeometry(), footOk);
+const footMat = curved(new THREE.MeshBasicMaterial({
+  vertexColors: true, transparent: true, opacity: 0.62, depthWrite: false, side: THREE.DoubleSide,
+  polygonOffset: true, polygonOffsetFactor: -8, polygonOffsetUnits: -8,
+}));
+const footMesh = new THREE.Mesh(new THREE.BufferGeometry(), footMat);
 footMesh.frustumCulled = false;
-footMesh.renderOrder = 2;
+footMesh.renderOrder = 3;
 footMesh.visible = false;
 scene.add(footMesh);
+const FOOT_OK = new THREE.Color(0x8ea35a);
+const FOOT_BAD = new THREE.Color(0xb54432);
+const FOOT_EDGE = new THREE.Color(0xc6a85a);
+const FOOT_EDGE_BAD = new THREE.Color(0xd8693c);
 function hideFootprint() {
   footMesh.visible = false;
+}
+function pushColored(pos, col, verts, color) {
+  pos.push(...verts);
+  const c = [color.r, color.g, color.b];
+  for (let i = 0; i < verts.length / 3; i++) col.push(...c);
 }
 function paintFootprint(preview) {
   const cells = preview?.cells || [];
   if (!cells.length) { hideFootprint(); return; }
-  const y = 0.05;
-  const s = CELL * 0.9;
+  const bad = new Set((preview.bad || []).map(cell => cell[0] + ',' + cell[1]));
+  const y = 0.06;
   const pos = [];
+  const col = [];
+  let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity;
   for (const [gx, gz] of cells) {
     const o = cellOrigin(gx, gz);
-    const x = o.x + CELL / 2;
-    const z = o.z + CELL / 2;
-    const x0 = x - s / 2, x1 = x + s / 2, z0 = z - s / 2, z1 = z + s / 2;
-    pos.push(x0, y, z0, x1, y, z0, x1, y, z1, x0, y, z0, x1, y, z1, x0, y, z1);
+    minX = Math.min(minX, o.x);
+    minZ = Math.min(minZ, o.z);
+    maxX = Math.max(maxX, o.x + CELL);
+    maxZ = Math.max(maxZ, o.z + CELL);
+    const fill = bad.has(gx + ',' + gz) ? FOOT_BAD : FOOT_OK;
+    const x0 = o.x + 0.2, x1 = o.x + CELL - 0.2, z0 = o.z + 0.2, z1 = o.z + CELL - 0.2;
+    pushColored(pos, col, [x0, y, z0, x0, y, z1, x1, y, z1, x0, y, z0, x1, y, z1, x1, y, z0], fill);
   }
+  const edge = preview.ok ? FOOT_EDGE : FOOT_EDGE_BAD;
+  const t = 0.16;
+  const ye = 0.07;
+  const band = (x0, z0, x1, z1) => {
+    pushColored(pos, col, [x0, ye, z0, x0, ye, z1, x1, ye, z1, x0, ye, z0, x1, ye, z1, x1, ye, z0], edge);
+  };
+  band(minX, minZ, maxX, minZ + t);
+  band(minX, maxZ - t, maxX, maxZ);
+  band(minX, minZ, minX + t, maxZ);
+  band(maxX - t, minZ, maxX, maxZ);
+  const mark = (x, z, dx, dz) => {
+    const len = 0.95 / Math.hypot(dx, dz);
+    const ox = -dz * len, oz = dx * len;
+    const tipx = x + dx * len * 0.85, tipz = z + dz * len * 0.85;
+    const bx = x + dx * len * 0.12, bz = z + dz * len * 0.12;
+    pushColored(pos, col, [
+      tipx, ye, tipz,
+      bx + ox * 0.36, ye, bz + oz * 0.36,
+      bx - ox * 0.36, ye, bz - oz * 0.36,
+    ], edge);
+  };
+  mark(minX, minZ, -1, -1);
+  mark(maxX, minZ, 1, -1);
+  mark(minX, maxZ, -1, 1);
+  mark(maxX, maxZ, 1, 1);
   footMesh.geometry.dispose();
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
   footMesh.geometry = geo;
-  footMesh.material = preview.ok ? footOk : footBad;
   footMesh.visible = true;
 }
 function rebuildWorks() {
@@ -1572,6 +1623,7 @@ function rebuildWorks() {
     child.traverse(obj => { if (obj.geometry) obj.geometry.dispose(); });
   }
   for (const piece of listWorks()) mountWork(piece);
+  refreshBuildGrid();
 }
 function mountWork(piece) {
   const mesh = createWorkMesh(piece.kind);
@@ -1607,6 +1659,7 @@ function updateGhost(cx, cy) {
   ghostRoot.position.set(origin.x + box.w * CELL / 2, 0, origin.z + box.h * CELL / 2);
   ghostRoot.rotation.y = buildRot * Math.PI / 2;
   ghostRoot.visible = true;
+  applyGhostTint(ghostRoot, !!preview.ok);
   paintFootprint(preview);
 }
 function paintBuildBar() {
@@ -1618,9 +1671,8 @@ function paintBuildBar() {
 }
 function syncBuildView() {
   const on = mode === 'build';
-  hubRoot.visible = on;
-  if (on) refreshEquipGrids();
-  equipRoot.visible = on;
+  if (on) refreshBuildGrid();
+  gridMesh.visible = on;
   if (!on) { buildTool = null; buildRot = 0; hideGhost(); }
   paintBuildBar();
 }
@@ -1648,6 +1700,7 @@ function layAt(x, z, quiet) {
     return;
   }
   mountWork(placed.piece);
+  refreshBuildGrid();
   saveSoon();
 }
 const buildingSets = {
@@ -4707,7 +4760,6 @@ function bindSlice() {
   });
 }
 bindSlice();
-refreshEquipGrids();
 rebuildWorks();
 {
   const opening = fieldAt(focus.i, focus.j);

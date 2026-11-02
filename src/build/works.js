@@ -1,6 +1,7 @@
 // 已放下的建筑和道路。存档只记格子坐标。调度不读这里。
+import { CELL } from '../modulus.js';
 import { workSpec } from './catalog.js';
-import { tryPlace, pieceRecord, pieceAt, worldCell } from './placement.js';
+import { tryPlace, pieceRecord, pieceAt, worldCell, cellOrigin, takenKeys } from './placement.js';
 
 let pieces = [];
 let nextId = 1;
@@ -42,10 +43,27 @@ export function loadWorks(raw) {
   }
 }
 
+function conflictCells(cells) {
+  const taken = takenKeys(pieces);
+  const bad = [];
+  for (const [cx, cz] of cells || []) {
+    const at = cellOrigin(cx, cz);
+    const inside = zoneFn(at.x + CELL / 2, at.z + CELL / 2);
+    if (!inside || taken.has(cx + ',' + cz)) bad.push([cx, cz]);
+  }
+  return bad;
+}
+
 export function previewWork(kind, x, z, rot) {
   const spec = workSpec(kind);
   const cell = worldCell(x, z);
-  return { ...tryPlace(pieces, spec, cell.gx, cell.gz, rot, zoneFn), gx: cell.gx, gz: cell.gz };
+  const placed = tryPlace(pieces, spec, cell.gx, cell.gz, rot, zoneFn);
+  return {
+    ...placed,
+    gx: cell.gx,
+    gz: cell.gz,
+    bad: placed.ok ? [] : conflictCells(placed.cells),
+  };
 }
 
 export function placeWork(kind, x, z, rot) {
