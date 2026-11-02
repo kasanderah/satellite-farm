@@ -1300,7 +1300,8 @@ test('drones scout and treat from a base, not the machine garage', () => {
 
 test('sector mirrors sweep a 180 degree day around the ring', () => {
   assert.ok(Math.abs(RING.R - 10618.8) < 1, RING.R);
-  assert.equal(RING_RPM, 0.29);
+  const spin = Math.sqrt(9.80665 / RING.R) * 60 / (2 * Math.PI);
+  assert.ok(Math.abs(RING_RPM - spin) < 1e-9);
   assert.equal(DAY_SECTOR, Math.PI);
   assert.ok(Math.abs(PENUMBRA - 8 * Math.PI / 180) < 1e-9);
   assert.ok(sectorLight(0, 0) > 0.99);

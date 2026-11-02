@@ -8,6 +8,11 @@ import { fieldShader, PLANT_CROPS, setHarvestSink } from './framework-b.js';
 import { WORLD_MIN_PER_REAL_MIN, DAY_SECONDS } from './world-clock.js';
 export { WORLD_MIN_PER_REAL_MIN, DAY_SECONDS };
 import {
+  UNIT as MOD_UNIT, ROAD as MOD_ROAD, PLOT_UNITS, SECTOR_PLOTS, PLOTS_ALONG, WORK_LANE, SHELL,
+  RING_CIRC as MOD_CIRC, RING_R as MOD_R, MODULUS_ID, CELL, cellsFromLegacyMps,
+} from './modulus.js';
+export { MODULUS_ID };
+import {
   bindGrid as bindLand, inspect as inspectLand, buy as commitLandBuy, sell as commitLandSell,
   price as landPrice, sellPrice as landSellPrice, canSell as canSellLand, buyReason as landBuyReason,
   reset as resetLand, exportState as exportLand, loadState as loadLand, isLocalHub, LOCAL_PLAYER,
@@ -66,8 +71,11 @@ export function oklabL(hex) {
 // 第一块可耕地是一颗「环带殖民卫星」：农田铺在一条旋转环带的内表面上。
 // 平面坐标约定：x = 沿环方向（周向，首尾相接），z = 跨环方向（环带宽度，两侧是环壁），y = 指向环轴的「上」。
 // 渲染时顶点着色器把平面坐标卷成圆柱面（见 glsl.js 的 curveWorld），所以模拟和数据完全是平面的、好写好改。
-// 田块 128 m，4×4 块组成一个「区」(sector)，区内 6 m 田间路，区之间 26 m 主干走廊（输送带 + 服务路）
-export const L = { FIELD: 128, ROAD: 6, PER: 4, TRUNK: 26, NBX: 120, NBZ: 7, LANE: 12.8 };
+// 田面、道路、地块数都从 modulus 来。地块之间的路和单元之间的路是同一条 12.6 m。
+export const L = {
+  FIELD: MOD_UNIT, ROAD: MOD_ROAD, PER: PLOT_UNITS, TRUNK: MOD_ROAD,
+  NBX: PLOTS_ALONG, NBZ: SECTOR_PLOTS, LANE: WORK_LANE,
+};
 L.LANES = Math.round(L.FIELD / L.LANE);
 L.BLOCK = L.PER * L.FIELD + (L.PER - 1) * L.ROAD;
 L.BP = L.BLOCK + L.TRUNK;
@@ -78,20 +86,21 @@ L.X0 = -L.HUBX * L.BP - L.BLOCK / 2;
 L.Z0 = -L.HUBZ * L.BP - L.BLOCK / 2;
 // 环带几何
 export const RING = {
-  CIRC: L.NBX * L.BP,                  // 周长 66.7 km（田网格正好绕一圈首尾相接）
-  R: L.NBX * L.BP / (2 * Math.PI),     // 半径约 10.6 km：从地面看，环带在前后两个方向升起，在头顶合拢
-  APRON: 90,                           // 最外侧主干走廊到环壁之间的检修带
-  WALL_H: 520,                         // 环壁高度（挡住大气）
-  LIP: 70,                             // 环壁顶端向内悬挑
-  HULL: 64,                            // 环带结构厚度（地下各层都在这里面）
+  CIRC: MOD_CIRC,                      // 16 个区段拼一周，共用边界路，网格闭合
+  R: MOD_R,
+  APRON: SHELL.apron,
+  WALL_H: SHELL.wall,
+  LIP: SHELL.lip,
+  HULL: SHELL.hull,
 };
 RING.Z_IN = L.Z0 - L.TRUNK;                              // 农田区 z 下界
 RING.Z_OUT = L.Z0 + L.NBZ * L.BP;                         // 农田区 z 上界
 RING.WALL_A = RING.Z_IN - RING.APRON; RING.WALL_B = RING.Z_OUT + RING.APRON;   // 两侧环壁内表面
 RING.W = RING.WALL_B - RING.WALL_A;
-// 1g 自旋。镜头钉在环架上，所以转的是星空和轴端太阳，不是脚下的田。
-// ω²R ≈ g：0.29 rpm × RING.R。一天的日照不靠这次自旋，靠下面的扇区镜。
-export const RING_RPM = 0.29;
+// 视觉自旋按新半径维持约 1g。镜头钉在环架上，转的是星空，不是脚下的田。
+// 经营日是 world-clock，不跟这次自旋。日照仍靠扇区镜。
+const SPIN_G = 9.80665;
+export const RING_RPM = Math.sqrt(SPIN_G / RING.R) * 60 / (2 * Math.PI);
 export const RING_OMEGA = RING_RPM * 2 * Math.PI / 60;
 // 南极轴端镜组相对环带一天扫一圈。昼区 180°，晨昏各 8°（落在 5–10° 半影里）。
 export const DAY_SECTOR = Math.PI;
@@ -115,7 +124,7 @@ PLOT.along = PLOT.x1 - PLOT.x0;
 PLOT.across = L.NBZ * L.BP - L.TRUNK;
 export const FIELD_HA = (L.FIELD * L.FIELD) / 10000;
 export function inPlotBlock(bi, bj) { return bi >= PLOT.bi0 && bi <= PLOT.bi1 && bj >= PLOT.bj0 && bj <= PLOT.bj1; }
-// 每个玩家一块 7 区宽的田，中枢在正中。环上隔 7 个区再立一座中枢。120 区不能整除，最后一隙是 8 区。
+// 每个玩家一块 7 地块宽的田，中枢在正中。环上 16 个区段，每段一座中枢，正好排完。
 export const HUB_SITES = (() => {
   const span = 7;
   const n = Math.floor(L.NBX / span);
@@ -216,8 +225,9 @@ export const toWorld = (f, u, v) => f.dir === 0 ? [f.x0 + u, f.z0 + v] : [f.x0 +
 // ---------- ⑦ 玩家田区：一口世界钟上的中熟商品薯 ----------
 // 1×：一真实分钟 = 120 世界分钟（2 世界时）。一世界日 = 12 真实分钟。一真实日约 120 世界日。
 // 倍率仍同时加快这口钟和农机。暂停把两者都停住。
-// 农机按田里约 3 km/h，乘上这口钟的 120 倍，再 ÷10，画面上约 10 m/s。不要按 1440 去乘。
-export const MACHINE_MPS = (3000 / 3600) * WORLD_MIN_PER_REAL_MIN / 10;
+// 农机按田里约 3 km/h，乘上这口钟的 120 倍，再 ÷10。标定在格/秒，米/秒只是格乘格子边长。
+export const MACHINE_CELLS = cellsFromLegacyMps((3000 / 3600) * WORLD_MIN_PER_REAL_MIN / 10);
+export const MACHINE_MPS = MACHINE_CELLS * CELL;
 export const SIM = { CUT: MACHINE_MPS, MOVE: MACHINE_MPS, STUBBLE: 8, TILL: 0 };
 const potatoDef = cropDef('potato');
 export const POTATO_DAYS = potatoDef.maturity;
@@ -1953,7 +1963,7 @@ function dispatch(h) {
   {
     for (let j = Math.max(0, cj - R); j <= Math.min(L.NFZ - 1, cj + R); j++) for (let i = Math.max(0, ci - R); i <= Math.min(L.NFX - 1, ci + R); i++) {
       const f = fields[j * L.NFX + i];
-      if (!f.owned || !f.live || f.hold || f.state !== 2 || f.claimed) continue;
+      if (!f.owned || f.equip || !f.live || f.hold || f.state !== 2 || f.claimed) continue;
       const pri = f.plantedAt ? 0 : 1;
       const d = pri * 1e7 + Math.abs(f.x0 - h.x) + Math.abs(f.z0 - h.z) + rnd() * 30;
       if (d < bd) { bd = d; best = f; }
@@ -2275,6 +2285,7 @@ function restoreDecor(f, src, live) {
   delete f.penalized;
   delete f.queued;
   delete f.bUnit;
+  f.equip = false;
 }
 export function resetGame() {
   resetLand();
@@ -2471,9 +2482,20 @@ export function sellStack(cropId, fraction = 1) {
   log.push({ type: 'sale', pay, crop: cropId, name, i: null, j: null, t: worldDay });
   return { crop: cropId, name, listPrice: pay, liters };
 }
+export function toggleEquip(f) {
+  if (!f?.owned || f.crop < 0 || f.landZone === 'hub') return { ok: false, reason: 'plot' };
+  if (f.live || (f.bUnit && f.bUnit.look && f.bUnit.look !== 'hold' && f.bUnit.look !== 'raw')) return { ok: false, reason: 'busy' };
+  f.equip = !f.equip;
+  if (f.equip) {
+    f.live = false;
+    f.hold = true;
+    delete f.bUnit;
+  }
+  return { ok: true, equip: !!f.equip };
+}
 export function plantField(f, cropId, opts = {}) {
   if (f?.bUnit) return { ok: false, reason: 'ground' };
-  if (!f?.owned) return { ok: false, reason: 'plot' };
+  if (!f?.owned || f.equip) return { ok: false, reason: f?.equip ? 'equip' : 'plot' };
   if (!seasonAllowsSow(f)) return { ok: false, reason: 'season' };
   if (f.state === 3 || f.live) return { ok: false, reason: 'busy' };
   const crop = typeof cropId === 'number' ? cropId : CROPS.findIndex(c => c.id === cropId);
@@ -2516,6 +2538,7 @@ export function exportSnapshot() {
     simTime: worldDay,
     worldDay,
     revenue: economy.revenue,
+    modulus: MODULUS_ID,
     land: exportLand(),
     timeScale: economy.timeScale,
     stores: { seed: stores.seed, fertilizer: stores.fertilizer, spray: stores.spray, feed: stores.feed, peel: stores.peel, frass: stores.frass, seed_soy: stores.seed_soy || 0, seed_barley: stores.seed_barley || 0, seedling_cabbage: stores.seedling_cabbage || 0 },
@@ -2539,6 +2562,7 @@ export function exportSnapshot() {
       cycle: !!f.cycle, autoBuy: !!f.autoBuy, failed: f.failed || null,
       harvested: !!f.harvested, stored: !!f.stored, yieldFactor: f.yieldFactor == null ? 1 : f.yieldFactor,
       unitName: f.unitName ? String(f.unitName).slice(0, 16) : undefined,
+      equip: f.equip ? true : undefined,
       jobs: f.jobS ? Object.fromEntries(Object.entries(f.jobS).map(([k, v]) => [k, +v || 0])) : undefined,
       laneW: f.laneW ? Object.fromEntries(Object.entries(f.laneW).map(([k, v]) => [k, +v || 0])) : undefined,
     })),
@@ -2612,8 +2636,11 @@ export function sellLandAt(i, j) {
 }
 export function applySnapshot(data) {
   if (!data || data.schema !== 2 || data.plotId !== PLOT.id || !Array.isArray(data.fields)) return false;
+  // 没有模数或模数不是这一版：世界尺度对不上，拒绝读入，调用方清档。
+  if (data.modulus !== MODULUS_ID) return false;
   loadLand(data.land);
   for (const f of fields) {
+    f.equip = false;
     stampLand(f);
     if (!f.owned) delete f.bUnit;
   }
@@ -2633,6 +2660,7 @@ export function applySnapshot(data) {
     f.harvested = !!s.harvested; f.stored = !!s.stored;
     f.yieldFactor = Number.isFinite(+s.yieldFactor) ? +s.yieldFactor : 1;
     f.claimed = false; f.frozen = false; f.owned = true;
+    f.equip = !!s.equip;
     f.unitName = typeof s.unitName === 'string' ? s.unitName.trim().slice(0, 16) : '';
     if (s.jobs && typeof s.jobs === 'object') {
       f.jobS = {};

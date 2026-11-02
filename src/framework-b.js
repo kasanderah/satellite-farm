@@ -8,6 +8,7 @@
 // 生长和软窗记世界日。stepFarm 仍收真实秒，只在钟的边界换算。
 
 import { DAY_SECONDS } from './world-clock.js';
+import { cellsFromLegacyMps, mpsFromCells } from './modulus.js';
 import { FIELD_BLOCK_LIST, prepSteps } from './field-blocks.js';
 
 export const HUB_PLOT = 'C0';
@@ -176,8 +177,10 @@ export const OMNI = {
   caps: ['犁田', '播种', '收割', '收拾', '追肥', '培土'],
   origin: 3.2,
   width: 16,
-  workSpeed: 18,
-  cruiseSpeed: 28,
+  workCells: cellsFromLegacyMps(18),
+  cruiseCells: cellsFromLegacyMps(28),
+  workSpeed: mpsFromCells(cellsFromLegacyMps(18)),
+  cruiseSpeed: mpsFromCells(cellsFromLegacyMps(28)),
   powerOutKw: 80,
   energy: 'electric',
   energyKwh: 180,
@@ -193,8 +196,10 @@ export const TRACTOR = {
   caps: [],
   origin: 2.4,
   width: 3,
-  workSpeed: 12,
-  cruiseSpeed: 20,
+  workCells: cellsFromLegacyMps(12),
+  cruiseCells: cellsFromLegacyMps(20),
+  workSpeed: mpsFromCells(cellsFromLegacyMps(12)),
+  cruiseSpeed: mpsFromCells(cellsFromLegacyMps(20)),
   powerOutKw: 55,
   energy: 'electric',
   energyKwh: 140,
@@ -388,8 +393,10 @@ export function addMachine(farm, spec) {
     caps: spec.caps.slice(),
     origin: spec.origin || 0,
     width: spec.width,
-    workSpeed: spec.workSpeed,
-    cruiseSpeed: spec.cruiseSpeed || spec.workSpeed,
+    workCells: spec.workCells != null ? spec.workCells : (spec.workSpeed != null ? cellsFromLegacyMps(spec.workSpeed) : 0),
+    cruiseCells: spec.cruiseCells != null ? spec.cruiseCells : cellsFromLegacyMps(spec.cruiseSpeed || spec.workSpeed || 0),
+    workSpeed: spec.workCells != null ? mpsFromCells(spec.workCells) : spec.workSpeed,
+    cruiseSpeed: spec.cruiseCells != null ? mpsFromCells(spec.cruiseCells) : (spec.cruiseSpeed || spec.workSpeed),
     powerOutKw: spec.powerOutKw || 0,
     powerNeedKw: spec.powerNeedKw || 0,
     energy: spec.energy || null,

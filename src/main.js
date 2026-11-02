@@ -11,7 +11,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { HorizontalTiltShiftShader } from 'three/addons/shaders/HorizontalTiltShiftShader.js';
 import { VerticalTiltShiftShader } from 'three/addons/shaders/VerticalTiltShiftShader.js';
-import { PALETTE, CROPS, TEX_ID, L, fields, harvesters, haulers, drones, step, TRUNKS_X, TRUNKS_Z, depots, inCrater, ROADS, RING, LAYERS, CUT, wrapX, PLOT, economy, focus, signals, log, plantField, abandonField, quote, setTimeScale, setPaused, paused, exportSnapshot, applySnapshot, fieldAtWorld, fieldAt, toWorld, onAfterStep, fieldOrigin, simTime, worldDay, stores, rigs, fieldVisual, cropWatch, stageBoard, POTATO_DAYS, POTATO_STAGES, warehouse, buildings, sellLot, sellStack, warehouseStacks, warehouseCapacity, placeBuilding, removeBuilding, rigReadout, SHOP, buySeed, buyItem, SEED_PER_FIELD, FERT_PER_FIELD, resetGame, CULTURES, DECK_CLIMATE, tanks, cultureWatch, startCulture, tendCulture, harvestCulture, BUILDING_KINDS, CULTURE_CELLS, tankSite, devices, potatoStock, fertPlan, cultureFeedPlan, millWatch, startMill, removeMill, orderProcess, HUB_SITES, cropDossier, MACHINE_SHOP, buyMachine, cropDef, boomWatch, rigProfile, DRONE_SHOP, workDrones, buyDrone, sectorLight, sectorWord, dayCenter, buyLandAt, sellLandAt, fieldAtWorldAny, landCard, setWorldDay, RING_OMEGA, bindPotatoClock, bindSurfaceClock, formatTimeScale, sellRig, machineSellPrice, rigIsWorking } from './_shared.js';
+import { PALETTE, CROPS, TEX_ID, L, fields, harvesters, haulers, drones, step, TRUNKS_X, TRUNKS_Z, depots, inCrater, ROADS, RING, LAYERS, CUT, wrapX, PLOT, economy, focus, signals, log, plantField, abandonField, quote, setTimeScale, setPaused, paused, exportSnapshot, applySnapshot, fieldAtWorld, fieldAt, toWorld, onAfterStep, fieldOrigin, simTime, worldDay, stores, rigs, fieldVisual, cropWatch, stageBoard, POTATO_DAYS, POTATO_STAGES, warehouse, buildings, sellLot, sellStack, warehouseStacks, warehouseCapacity, placeBuilding, removeBuilding, rigReadout, SHOP, buySeed, buyItem, SEED_PER_FIELD, FERT_PER_FIELD, resetGame, CULTURES, DECK_CLIMATE, tanks, cultureWatch, startCulture, tendCulture, harvestCulture, BUILDING_KINDS, CULTURE_CELLS, tankSite, devices, potatoStock, fertPlan, cultureFeedPlan, millWatch, startMill, removeMill, orderProcess, HUB_SITES, cropDossier, MACHINE_SHOP, buyMachine, cropDef, boomWatch, rigProfile, DRONE_SHOP, workDrones, buyDrone, sectorLight, sectorWord, dayCenter, buyLandAt, sellLandAt, fieldAtWorldAny, landCard, toggleEquip, setWorldDay, RING_OMEGA, bindPotatoClock, bindSurfaceClock, formatTimeScale, sellRig, machineSellPrice, rigIsWorking } from './_shared.js';
 import { applyStagePayload, bootFieldStageSource, writeStageStore, suspendLastikaStage, resumeLastikaStage, stageBadge, bootFieldBlocks } from './field-stage-live.js';
 import { bootWorkshopMachines } from './machine-live.js';
 import { potatoDrawLooks, POTATO_PAINT_SLOTS, workWidthOf } from './surface-crops.js';
@@ -27,6 +27,10 @@ import { makeColony } from './colony-art.js';
 import { bootSlice, tickSlice, prepField, plantCrop, dockOf, dropDrive, adoptBought, recallRig, resumeRig, rigStandby, dispatchBoard, syncOwnedFields } from './b-bind.js';
 import { PLANT_CROPS, PREP_RECIPES, FIELD_BLOCKS, JOBS, stageDisplayStops } from './framework-b.js';
 import { HUD_VERSION } from './version.js';
+import {
+  UNIT, PLOT as PLOT_M, SECTOR, CELL, legacyView, GROUND_PAD,
+  hubWedgePolygon, hubGridSegments, fieldCellSegments,
+} from './modulus.js';
 import { overlayCells } from './land-buy.js';
 import { DAY_SECONDS } from './world-clock.js';
 import { SOIL_STORE, defaultSoilCurves, normalizeSoilCurves, freshSoil, stepSoil, soilDrivers, soilText } from './soil.js';
@@ -46,7 +50,7 @@ R.toneMapping = THREE.AgXToneMapping; R.toneMappingExposure = 1.85; R.outputColo
 R.shadowMap.enabled = true; R.shadowMap.type = THREE.PCFShadowMap;
 document.getElementById('app').appendChild(R.domElement);
 const scene = new THREE.Scene();
-const cam = new THREE.PerspectiveCamera(30, innerWidth / innerHeight, 1, 30000);
+const cam = new THREE.PerspectiveCamera(30, innerWidth / innerHeight, 1, RING.R * 3);
 
 // ---------------- 共享 uniform ----------------
 const NFX = L.NFX, NFZ = L.NFZ;
@@ -381,7 +385,7 @@ const hemi = new THREE.HemisphereLight('#5f7480', '#2a2622', 0.42); scene.add(he
 
 // ---------------- 地面（巨大平面，跟随镜头移动；田块全部在着色器里画） ----------------
 // 环带内表面：一条整圈长（周长 + 重叠）、环壁到环壁宽的长条，沿环向跟随镜头；卷曲在顶点着色器里做
-const ground = new THREE.Mesh(new THREE.PlaneGeometry(RING.CIRC + 400, RING.W, 760, 8).rotateX(-Math.PI / 2), MAT.ground);
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(RING.CIRC + GROUND_PAD, RING.W, 760, 8).rotateX(-Math.PI / 2), MAT.ground);
 ground.receiveShadow = true; ground.frustumCulled = false; scene.add(ground);
 // 培育层地板：和地表同一套模数（跨环 7 个大格，每格 4×4 = 16 个小格）。只在下到培育层时露出来。
 const deckMat = new THREE.MeshStandardMaterial({ roughness: 0.58, metalness: 0.42, color: PALETTE.haze });
@@ -1014,7 +1018,7 @@ vec3 farmAlbedo(vec2 p){
 // 截面轮廓 (o = 向环外的偏移, y)：墙脚斜坡 → 内立面 → 悬挑底面 → 悬挑端面 → 顶面 → 外立面（一直到环带结构底部）
 const WALL_PROFILE = [[-38, 0], [0, 64], [0, RING.WALL_H], [-RING.LIP, RING.WALL_H + 8], [-RING.LIP, RING.WALL_H + 28], [34, RING.WALL_H + 28], [34, -RING.HULL]];
 const walls = (() => {
-  const pos = [], nor = [], fid = [], NXs = 760, X = RING.CIRC + 400;
+  const pos = [], nor = [], fid = [], NXs = 760, X = RING.CIRC + GROUND_PAD;
   for (const side of [-1, 1]) {
     const zw = side > 0 ? RING.WALL_B : RING.WALL_A;
     for (let k = 0; k < WALL_PROFILE.length - 1; k++) {
@@ -1445,6 +1449,69 @@ function paintLandOverlay(force) {
     mesh.count = n[kind];
     mesh.instanceMatrix.needsUpdate = true;
   }
+}
+function segsGeometry(segs, y) {
+  const pos = [];
+  for (const [x1, z1, x2, z2] of segs) pos.push(x1, y, z1, x2, y, z2);
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  return geo;
+}
+function wedgeMesh(player, color, opacity) {
+  const poly = hubWedgePolygon(player);
+  const y = 1.6;
+  const pos = [];
+  const push = (p) => pos.push(p[0], y, p[1]);
+  const [a, b, c, d] = poly;
+  push(a); push(b); push(c); push(a); push(c); push(d);
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  const mat = curved(new THREE.MeshBasicMaterial({
+    color, transparent: true, opacity, depthWrite: false, side: THREE.DoubleSide, toneMapped: false,
+  }));
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.frustumCulled = false;
+  mesh.renderOrder = 2;
+  return mesh;
+}
+const hubRoot = new THREE.Group();
+hubRoot.name = 'hub-wedge';
+scene.add(hubRoot);
+for (let player = 0; player < 4; player++) hubRoot.add(wedgeMesh(player, player === 0 ? 0x85eed9 : 0x5c584f, player === 0 ? 0.28 : 0.42));
+const hubLines = new THREE.LineSegments(
+  segsGeometry(hubGridSegments(0), 2.4),
+  curved(new THREE.LineBasicMaterial({ color: 0xe7eef2, transparent: true, opacity: 0.9, depthWrite: false })),
+);
+hubLines.frustumCulled = false;
+hubLines.renderOrder = 3;
+hubRoot.add(hubLines);
+const equipRoot = new THREE.Group();
+equipRoot.name = 'equip-grid';
+scene.add(equipRoot);
+const equipMat = curved(new THREE.LineBasicMaterial({ color: 0x85eed9, transparent: true, opacity: 0.92, depthWrite: false }));
+function refreshEquipGrids() {
+  while (equipRoot.children.length) {
+    const child = equipRoot.children.pop();
+    child.geometry.dispose();
+  }
+  for (const f of fields) {
+    if (!f.equip) continue;
+    const line = new THREE.LineSegments(segsGeometry(fieldCellSegments(f.x0, f.z0, L.FIELD), 2.2), equipMat);
+    line.frustumCulled = false;
+    line.renderOrder = 3;
+    equipRoot.add(line);
+  }
+}
+function convertEquip() {
+  const f = selected;
+  if (!f?.owned) { toast('先选一块自己的田'); return; }
+  const r = toggleEquip(f);
+  if (!r.ok) { toast(r.reason === 'busy' ? '这块正在作业' : '这块不能改成设备单元'); return; }
+  syncOwnedFields();
+  refreshEquipGrids();
+  toast(r.equip ? '已转为设备单元 · 再按 F4 转回' : '已转回田面');
+  updateDock();
+  saveSoon();
 }
 const buildingSets = {
   warehouse: instanced(warehouseKit(), 8),
@@ -1972,7 +2039,7 @@ function pitchOf(d) {
   for (let i = 0; i < PITCH.length - 1; i++) { const [d0, p0] = PITCH[i], [d1, p1] = PITCH[i + 1]; if (d <= d1) { const t = Math.min(1, Math.max(0, (ld - Math.log(d0)) / (Math.log(d1) - Math.log(d0)))); const s = t * t * (3 - 2 * t); return (p0 + (p1 - p0) * s) * DEG; } }
   return PITCH[PITCH.length - 1][1] * DEG;
 }
-const camS = { x: HUBC, z: HUBC, y: 0, d: 4200, yaw: 0, pOff: 0, lookUp: 0, fovAdd: 0, deck: false }, camT = { ...camS };
+const camS = { x: HUBC, z: HUBC, y: 0, d: legacyView(4200), yaw: 0, pOff: 0, lookUp: 0, fovAdd: 0, deck: false }, camT = { ...camS };
 let viewLayer = 'surface';
 let poseLock = null;
 let followLock = null;
@@ -2541,7 +2608,7 @@ function closeToolMenus() {
   prepOpen = false;
 }
 function doPrep(recipeId = 'clear_general') {
-  if (!selected?.owned) { toast('不能整地'); return { ok: false, reason: 'plot' }; }
+  if (!selected?.owned || selected?.equip) { toast(selected?.equip ? '设备单元不整地' : '不能整地'); return { ok: false, reason: 'plot' }; }
   const recipe = PREP_RECIPES[recipeId];
   if (!recipe) { toast(prepWhy('recipe')); return { ok: false, reason: 'recipe' }; }
   const r = prepField(selected, recipe.id);
@@ -2553,7 +2620,7 @@ function doPrep(recipeId = 'clear_general') {
   return r;
 }
 function doPlant(cropId = 'lastika') {
-  if (!selected?.owned) { toast('不能播种'); return { ok: false, reason: 'plot' }; }
+  if (!selected?.owned || selected?.equip) { toast(selected?.equip ? '设备单元不播种' : '不能播种'); return { ok: false, reason: 'plot' }; }
   const r = plantCrop(selected, cropId);
   if (!r.ok) { toast(plantWhy(r.reason)); return r; }
   closeToolMenus();
@@ -2802,6 +2869,7 @@ addEventListener('keydown', e => {
   if (e.key === 'h' || e.key === 'H') document.body.classList.toggle('nohud');
   if (e.key === 'c' || e.key === 'C') visitDeck(!camS.deck);
   if (e.key === 'F2' || e.key === '\\') { e.preventDefault(); toggleAdmin(); }
+  if (e.key === 'F4') { e.preventDefault(); convertEquip(); }
   if (e.key === 'v' || e.key === 'V') toggleViewer();
   if (e.key === 'Escape') {
     if (subTool) { closeSubTool(); return; }
@@ -3688,7 +3756,7 @@ function updateLabels(d) {
     want.push({ x: cut.x + 58, z: cut.z, y: LAYERS[1].floor + 2, pr: -2, a, html: `<b>${LAYERS[1].name}</b><small>${DECK_CLIMATE.temp}°C · 湿度 ${DECK_CLIMATE.rh}% · 蛴螬 / 黑水虻</small>`, cls: 'hub deck' });
     want.push({ x: (I.x0 + I.x1) / 2, z: I.z0 + 20, y: LAYERS[2].floor, pr: -2, a, html: `<b>${LAYERS[2].name} · ${LAYERS[2].en}</b><small>${LAYERS[2].floor} m · 储液 / 泵站 / 管廊</small>`, cls: 'hub deck' });
   }
-  if (!camS.deck) want.push({ x: HUBC, z: HUBC, pr: -1, a: (d > 260 && d <= 1500) ? 1 : 0, html: `<b>中枢 · CENTRAL HUB</b><small>试验卫星 · 农神VIII</small>`, cls: 'hub' });
+  if (!camS.deck) want.push({ x: HUBC, z: HUBC, pr: -1, a: (d > 260 && d <= 1500) ? 1 : 0, html: `<b>中枢 · CENTRAL HUB</b><small>地块 ${PLOT_M} m · 区段 ${SECTOR} m</small>`, cls: 'hub' });
   // 屏幕上贪心去重：间距不足就不显示
   const placed = []; let n = 0;
   want.sort((a, b) => a.pr - b.pr);
@@ -3719,15 +3787,15 @@ function pickHarvester(minD = 400, maxD = 2500, want = 'maize') {
   }
   return best || (maxD < 9000 ? pickHarvester(minD, maxD * 1.6, want) : want ? pickHarvester(400, 2500, null) : harvesters[0]);
 }
-if (VIEW === 'near') { const h = pickHarvester(); Object.assign(camS, { x: h.x + Math.cos(h.ang) * 6, z: h.z + Math.sin(h.ang) * 6, d: 48, yaw: Math.atan2(-Math.cos(h.ang), -Math.sin(h.ang)) + (+Q.get("ny") || 2.45) }); camS.follow = h; }
-else if (VIEW === 'mid') Object.assign(camS, { x: HUBC - 260, z: HUBC + 60, d: 1300, yaw: 95 * DEG, pOff: -27 * DEG, lookUp: 21, fovAdd: 19 });
-else if (VIEW === 'sector') Object.assign(camS, { x: HUBC + 240, z: HUBC - 260, d: 820, yaw: -20 * DEG });
-else if (VIEW === 'cut') Object.assign(camS, { x: HUBC + 880, z: HUBC - 400, d: 560, yaw: 222 * DEG, pOff: -24 * DEG });
-else if (VIEW === 'up') Object.assign(camS, { x: HUBC + 2600, z: HUBC - 700, d: 700, yaw: 104 * DEG, pOff: -30 * DEG, lookUp: 58, fovAdd: 34 });
-else if (VIEW === 'ops') { const h = pickHarvester(); Object.assign(camS, { x: h.x, z: h.z - 40, d: 560, yaw: -0.3 }); }
-else if (VIEW === 'hub') Object.assign(camS, { x: HUBC - 20, z: HUBC, d: 620, yaw: 0.5 });
-else if (VIEW === 'far') Object.assign(camS, { x: HUBC + 500, z: HUBC + 250, d: 4800, yaw: 96 * DEG });
-else Object.assign(camS, { x: focus.x, z: focus.z, d: 720, yaw: 118 * DEG, pOff: -8 * DEG, lookUp: 0, fovAdd: 6 });
+if (VIEW === 'near') { const h = pickHarvester(); Object.assign(camS, { x: h.x + Math.cos(h.ang) * 6, z: h.z + Math.sin(h.ang) * 6, d: legacyView(48), yaw: Math.atan2(-Math.cos(h.ang), -Math.sin(h.ang)) + (+Q.get("ny") || 2.45) }); camS.follow = h; }
+else if (VIEW === 'mid') Object.assign(camS, { x: HUBC - legacyView(260), z: HUBC + legacyView(60), d: legacyView(1300), yaw: 95 * DEG, pOff: -27 * DEG, lookUp: 21, fovAdd: 19 });
+else if (VIEW === 'sector') Object.assign(camS, { x: HUBC + legacyView(240), z: HUBC - legacyView(260), d: legacyView(820), yaw: -20 * DEG });
+else if (VIEW === 'cut') Object.assign(camS, { x: HUBC + legacyView(880), z: HUBC - legacyView(400), d: legacyView(560), yaw: 222 * DEG, pOff: -24 * DEG });
+else if (VIEW === 'up') Object.assign(camS, { x: HUBC + legacyView(2600), z: HUBC - legacyView(700), d: legacyView(700), yaw: 104 * DEG, pOff: -30 * DEG, lookUp: 58, fovAdd: 34 });
+else if (VIEW === 'ops') { const h = pickHarvester(); Object.assign(camS, { x: h.x, z: h.z - legacyView(40), d: legacyView(560), yaw: -0.3 }); }
+else if (VIEW === 'hub') Object.assign(camS, { x: HUBC - legacyView(20), z: HUBC, d: legacyView(620), yaw: 0.5 });
+else if (VIEW === 'far') Object.assign(camS, { x: HUBC + legacyView(500), z: HUBC + legacyView(250), d: legacyView(4800), yaw: 96 * DEG });
+else Object.assign(camS, { x: focus.x, z: focus.z, d: legacyView(720), yaw: 118 * DEG, pOff: -8 * DEG, lookUp: 0, fovAdd: 6 });
 Object.assign(camT, camS); followLock = camS.follow || null; delete camT.follow;
 if (Q.get('cx')) { camS.x = camT.x = HUBC + +Q.get('cx'); camS.z = camT.z = HUBC + +(Q.get('cz') || 0); camS.follow = camT.follow = null; }
 if (Q.get('d')) camS.d = camT.d = +Q.get('d');
@@ -3943,7 +4011,7 @@ function updateDock() {
     if (!fieldOne) { meta.hidden = true; meta.textContent = ''; }
     else {
       meta.hidden = false;
-      meta.innerHTML = `田地类型 ${desc?.groundName || '—'}<br>${soilText(f.soil)}`;
+      meta.innerHTML = `田地类型 ${desc?.groundName || '—'}<br>${f.equip ? '设备单元' : '田面单元'} ${UNIT} m · 格 ${CELL} m<br>${soilText(f.soil)}`;
     }
   }
   const workEl = $('selwork');
@@ -3956,6 +4024,7 @@ function updateDock() {
   if (sum) {
     if (rigOnly) sum.textContent = rigLine(selectedRig);
     else if (many) sum.textContent = '操作取这些田都能做的';
+    else if (f?.equip) sum.textContent = `设备单元 · 建筑格 ${CELL} m。不整地、不播种。再按 F4 转回田面。`;
     else if (!f?.owned) sum.textContent = selNote || '邻区快照 · 只读';
     else if (!desc?.crop) sum.textContent = '还没有作物';
     else {
@@ -4482,6 +4551,7 @@ function bindSlice() {
   });
 }
 bindSlice();
+refreshEquipGrids();
 {
   const opening = fieldAt(focus.i, focus.j);
   if (opening?.owned) selectField(opening, '');
@@ -4765,6 +4835,7 @@ function frame(now) {
 }
 if (SHOWFPS) document.body.classList.add('showfps');
 { const rev = document.getElementById('buildrev'); if (rev) rev.textContent = HUD_VERSION; }
+{ const mod = document.getElementById('modread'); if (mod) mod.textContent = `单元 ${UNIT} m · 地块 ${PLOT_M} m · 区段 ${SECTOR} m`; }
 window.__scene = scene;
 if (Q.has('nohud')) document.body.classList.add('nohud');
 requestAnimationFrame(frame);
@@ -4779,6 +4850,7 @@ window.__farm = {
   get onDeck() { return !!camS.deck; },
   snapshot: exportSnapshot, plant: () => doPlant(), prep: () => doPrep(), select: (i, j) => selectField(fieldAt(i, j)),
   buyLand: (i, j) => { const r = buyLandAt(i, j); if (r.ok) { syncOwnedFields(); paintLandOverlay(true); } return r; },
+  toggleEquip: () => { convertEquip(); return !!selected?.equip; },
   sellLand: (i, j) => { const r = sellLandAt(i, j); if (r.ok) { syncOwnedFields(); paintLandOverlay(true); } return r; },
   land: (i, j) => landCard(i, j),
   b() {

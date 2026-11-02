@@ -268,7 +268,7 @@ export function bootSlice(next) {
     }
   }
   for (const f of ctx.fields) {
-    if (!f.owned) continue;
+    if (!f.owned || f.equip) continue;
     const addr = plotAddress(f.i, f.j, ctx.originI, ctx.originJ);
     const focus = f.i === ctx.focus.i && f.j === ctx.focus.j;
     addField(farm, {
@@ -296,7 +296,7 @@ export function syncOwnedFields() {
   if (!farm || !ctx) return;
   for (const f of ctx.fields) {
     const id = fieldKey(f);
-    if (f.owned && !farm.fields.has(id)) {
+    if (f.owned && !f.equip && !farm.fields.has(id)) {
       const addr = plotAddress(f.i, f.j, ctx.originI, ctx.originJ);
       addField(farm, {
         id,
@@ -312,7 +312,7 @@ export function syncOwnedFields() {
       f.s = 0;
       delete f.jobS;
       delete f.laneW;
-    } else if (!f.owned && farm.fields.has(id)) {
+    } else if ((!f.owned || f.equip) && farm.fields.has(id)) {
       farm.queue = farm.queue.filter(item => item.fieldId !== id);
       for (const order of [...farm.orders]) if (order.fieldId === id) farm.orders.splice(farm.orders.indexOf(order), 1);
       farm.fields.delete(id);
