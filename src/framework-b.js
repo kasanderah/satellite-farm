@@ -679,7 +679,19 @@ export function chooseMachine(farm, caps, travelOf = null) {
   return best;
 }
 
+// 作业耗电，一整块田大约 43 度。180 度电够四单，第五单用剩余的电做完就归零。
+// 空闲、没有工单时回库补满，再参与下一轮分配。没有单数配额，也不再耗尽后永远停接。
+function rechargeIdle(farm) {
+  for (const machine of farm.machines) {
+    if (!machine.energy || !(machine.energyKwh > 0)) continue;
+    if (machine.busy) continue;
+    if (farm.orders.some(order => order.machineId === machine.id || order.hitchId === machine.id)) continue;
+    if (machine.energyLeft < machine.energyKwh) machine.energyLeft = machine.energyKwh;
+  }
+}
+
 function dispatch(farm, env = null) {
+  rechargeIdle(farm);
   // 调度只派队列里已有的工单，不决定下一种什么。下一轮作物由种植计划写成播种工单后再进这里。
   // 队列只放各田的下一刀。每轮按能做的机越少越先配，不再按入队先后挑车。
   const live = [];

@@ -579,6 +579,9 @@ export function dispatchBoard() {
     } else if (order) {
       state = '作业中';
       tone = 'run';
+    } else if (machine?.energy && machine.energyLeft <= 0) {
+      state = '没电';
+      tone = 'wait';
     } else if (rig.bRead?.doing === '返回机库') {
       state = '回库中';
       tone = 'home';
