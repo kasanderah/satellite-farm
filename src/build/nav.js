@@ -1,4 +1,6 @@
 // 路线碰到建筑占地时，在这一段周围绕开。绕不过去就停在挡住之前。
+// 只有已经停下的车才按这个间隔重试，行驶中不刷新路线。
+export const NAV_RETRY_S = 5;
 const RES = 4.2;
 const WINDOW = 52;
 

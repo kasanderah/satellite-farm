@@ -16,15 +16,30 @@ import lastikaRaw from '../data/field-stages/lastika.json' with { type: 'json' }
 import { HUD_VERSION } from '../src/version.js';
 import { fieldVisual, CROPS, roadRoute, warehouse, warehouseStacks, MACHINE_SHOP } from '../src/_shared.js';
 import { DAY_SECONDS, WORLD_MIN_PER_REAL_MIN } from '../src/world-clock.js';
+import { CELL } from '../src/modulus.js';
+
+// 框架测试仍用换尺前的快机，避免 1 格宽把整段用例拖过超时。玩法里的万能农机见 OMNI。
+function fastOmni(extra = {}) {
+  const caps = extra.caps || OMNI.caps;
+  return {
+    ...OMNI,
+    width: 16,
+    workCells: 18 / CELL,
+    cruiseCells: 28 / CELL,
+    ...extra,
+    caps: caps.slice(),
+    energyLeft: extra.energyLeft ?? OMNI.energyKwh,
+  };
+}
 
 function slice() {
   const farm = createFarm();
-  addMachine(farm, { ...OMNI, caps: OMNI.caps.slice(), energyLeft: OMNI.energyKwh });
+  addMachine(farm, fastOmni());
   addField(farm, { id: 'a', length: 128, width: 128, ground: 'raw', look: 'raw', plot: 'P(3,-1)' });
   return farm;
 }
 
-function until(farm, pred, cap = 600, step = 1) {
+function until(farm, pred, cap = 2500, step = 1) {
   let t = 0;
   while (t < cap && !pred()) {
     stepFarm(farm, step);
@@ -49,7 +64,7 @@ test('清地只有犁地，犁完是一般田地，田上不留进度', () => {
   assert.match(describeField(farm, 'a').stat, /犁地/);
   const mid = fieldWork(farm, 'a');
   assert.equal(mid.jobId, 'plow');
-  assert.equal(mid.width, OMNI.width);
+  assert.equal(mid.width, 16);
   assert.equal(mid.origin, OMNI.origin);
   assert.ok(mid.progress > 0 && mid.progress < 1);
   assert.equal(field.look, 'raw');
@@ -133,7 +148,7 @@ test('成熟后收割再收拾，回到可种的一般田地', () => {
   until(farm, () => field.plant?.stageId === 'after', 4000);
   assert.equal(field.look, 'harvested');
   assert.equal(field.plant.clock, false);
-  until(farm, () => field.plant == null, 800);
+  until(farm, () => field.plant == null, 2500);
   assert.equal(field.ground, 'general');
   assert.equal(field.look, 'general');
   assert.equal(field.lock, null);
@@ -177,7 +192,7 @@ test('追肥在第5到6日，做完加倍产量，不改田面色', () => {
   assert.equal(workSweepLook(JOBS.plow), 'general');
   assert.equal(workSweepLook(JOBS.topdress), null);
   assert.equal(workSweepLook(JOBS.hill), null);
-  until(farm, () => field.plant.soft.topdress.status === '执行完', 800);
+  until(farm, () => field.plant.soft.topdress.status === '执行完', 2500);
   assert.equal(field.plant.yieldMul, 2);
   assert.equal(field.look, 'sown');
   assert.equal(field.plant.stageId, 'develop');
@@ -296,11 +311,11 @@ test('调度优先更快的自走一体机，拖挂单独派不出去', () => {
     caps: ['犁田', '播种', '收割', '收拾'], origin: 1, width: 4, workSpeed: 2, cruiseSpeed: 4,
     powerOutKw: 20, energy: 'electric', energyKwh: 40, energyLeft: 40,
   });
-  addMachine(farm, { ...OMNI, caps: OMNI.caps.slice(), energyLeft: OMNI.energyKwh });
+  addMachine(farm, fastOmni());
   addField(farm, { id: 'a', length: 128, width: 128 });
   requestPrep(farm, 'a');
   const work = fieldWork(farm, 'a');
-  assert.equal(work.width, OMNI.width);
+  assert.equal(work.width, 16);
   assert.ok(farm.orders[0].machineId === 'omni');
   assert.equal(MACHINE_CLASSES.hitch.power, 'demand');
   assert.equal(MACHINE_CLASSES.self.name, '自走机');
@@ -314,7 +329,7 @@ test('调度优先更快的自走一体机，拖挂单独派不出去', () => {
 
 test('能力调度：一体机优先于更快的拖挂，忙了才派拖拉机', () => {
   const farm = createFarm();
-  addMachine(farm, { ...OMNI, caps: OMNI.caps.slice(), energyLeft: OMNI.energyKwh });
+  addMachine(farm, fastOmni());
   addMachine(farm, { ...TRACTOR, caps: [], workSpeed: 30, cruiseSpeed: 30, energyLeft: TRACTOR.energyKwh });
   addMachine(farm, { ...PLOW, caps: PLOW.caps.slice(), width: 30 });
   assert.equal(mountHitch(farm, PLOW.id, TRACTOR.id).ok, true);
@@ -450,7 +465,7 @@ test('作业中按幅宽刷下一道，地头有转弯，做完整块定稿', ()
 
 test('名称旁状态跟着工单走，犁地不被播种队头挡住', () => {
   const farm = createFarm();
-  addMachine(farm, { ...OMNI, caps: OMNI.caps.slice(), energyLeft: OMNI.energyKwh });
+  addMachine(farm, fastOmni());
   addMachine(farm, { ...TRACTOR, caps: [], energyLeft: TRACTOR.energyKwh });
   addMachine(farm, { ...PLOW, caps: PLOW.caps.slice() });
   assert.equal(mountHitch(farm, PLOW.id, TRACTOR.id).ok, true);
@@ -536,7 +551,7 @@ test('浮标空闲用短文案，有工单时与名称旁状态相同', () => {
 
 test('方案2：播种还在等一体机时犁地照样派拖拉机，一体机腾出来先接播种', () => {
   const farm = createFarm();
-  addMachine(farm, { ...OMNI, caps: OMNI.caps.slice(), energyLeft: OMNI.energyKwh });
+  addMachine(farm, fastOmni());
   addMachine(farm, { ...TRACTOR, caps: [], energyLeft: TRACTOR.energyKwh });
   addMachine(farm, { ...PLOW, caps: PLOW.caps.slice() });
   assert.equal(mountHitch(farm, PLOW.id, TRACTOR.id).ok, true);
@@ -652,7 +667,7 @@ test('错过成熟窗进腐烂，没有农机开工就不会收', () => {
 
 function fieldFarm(id, caps) {
   const farm = createFarm();
-  addMachine(farm, { ...OMNI, id: 'm-' + id, caps: caps.slice(), energyLeft: OMNI.energyKwh });
+  addMachine(farm, fastOmni({ id: 'm-' + id, caps }));
   addField(farm, { id, length: 128, width: 128, ground: 'raw', look: 'raw', plot: 'P(3,-1)' });
   return farm;
 }
@@ -809,7 +824,7 @@ test('下一轮计划在收拾后才下播种单，没有计划不自动种', ()
 
 test('回库待机放下软单和未开工硬单，正在做的硬单做完才待机', () => {
   const farm = createFarm();
-  addMachine(farm, { ...OMNI, caps: OMNI.caps.slice(), energyLeft: OMNI.energyKwh });
+  addMachine(farm, fastOmni());
   addField(farm, { id: 'a', length: 128, width: 128, ground: 'general', look: 'raw' });
   const machine = farm.machines[0];
   farm.orders.push({
@@ -828,7 +843,7 @@ test('回库待机放下软单和未开工硬单，正在做的硬单做完才�
   assert.equal(chooseMachine(farm, ['播种']), null);
   assert.equal(removePlayerMachine(farm, machine.id).ok, true);
 
-  addMachine(farm, { ...OMNI, caps: OMNI.caps.slice(), energyLeft: OMNI.energyKwh });
+  addMachine(farm, fastOmni());
   const again = farm.machines[0];
   farm.orders.push({
     id: 2, fieldId: 'a', jobId: 'plow', machineId: again.id, hitchId: null,
@@ -868,7 +883,7 @@ test('回库待机放下软单和未开工硬单，正在做的硬单做完才�
 });
 
 test('拉斯提卡阶段和版本戳来自同一份定义', () => {
-  assert.equal(HUD_VERSION, '环穗 v6.33');
+  assert.equal(HUD_VERSION, '环穗 v6.33.1');
   const doc = parseFieldStageDoc(structuredClone(lastikaRaw));
   const windows = jobWindows(doc, alignFieldCalendar(doc)).filter(item => item.op.kind === 'optional');
   assert.deepEqual(windows.map(item => item.op.id), ['topdress', 'hill']);

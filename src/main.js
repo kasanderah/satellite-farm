@@ -36,6 +36,7 @@ import { BUILDINGS, ROADS as BUILD_ROADS } from './build/catalog.js';
 import { placeWork, eraseWork, listWorks, previewWork, roadMask, pieceUnder } from './build/works.js';
 import { createWorkMesh, ghostMaterial, applyGhostTint, createRoadMesh } from './build/meshes.js';
 import { footprint, worldCell, cellOrigin } from './build/placement.js';
+import { trussSlots, buyTruss, TRUSS_PRICE } from './truss.js';
 import { DAY_SECONDS } from './world-clock.js';
 import { SOIL_STORE, defaultSoilCurves, normalizeSoilCurves, freshSoil, stepSoil, soilDrivers, soilText } from './soil.js';
 
@@ -1617,6 +1618,38 @@ function paintFootprint(preview) {
   footMesh.geometry = geo;
   footMesh.visible = true;
 }
+const trussRoot = new THREE.Group();
+trussRoot.name = 'trusses';
+scene.add(trussRoot);
+function syncTruss() {
+  while (trussRoot.children.length) {
+    const child = trussRoot.children.pop();
+    child.traverse(obj => { if (obj.geometry) obj.geometry.dispose(); });
+  }
+  const bi = Math.floor(focus.i / L.PER);
+  const bj = Math.floor(focus.j / L.PER);
+  const metal = new THREE.MeshStandardMaterial({ color: 0x6f6a61, roughness: 0.58, metalness: 0.42 });
+  const dark = new THREE.MeshStandardMaterial({ color: 0x3a3834, roughness: 0.7, metalness: 0.28 });
+  for (const slot of trussSlots(fields, bi, bj, L.PER, L.FIELD)) {
+    const group = new THREE.Group();
+    const pad = new THREE.Mesh(new THREE.BoxGeometry(6.2, 0.14, 2.4), slot.bought ? metal : dark);
+    pad.position.y = 0.1;
+    group.add(pad);
+    if (slot.bought) {
+      for (const x of [-2.5, 2.5]) {
+        const post = new THREE.Mesh(new THREE.BoxGeometry(0.3, 3.4, 0.3), metal);
+        post.position.set(x, 1.8, 0);
+        group.add(post);
+      }
+      const beam = new THREE.Mesh(new THREE.BoxGeometry(5.6, 0.24, 0.28), dark);
+      beam.position.y = 3.45;
+      group.add(beam);
+    }
+    stickToRing(group);
+    group.position.set(slot.x, 0, slot.z);
+    trussRoot.add(group);
+  }
+}
 function rebuildWorks() {
   while (workRoot.children.length) {
     const child = workRoot.children.pop();
@@ -1624,6 +1657,7 @@ function rebuildWorks() {
   }
   for (const piece of listWorks()) mountWork(piece);
   refreshBuildGrid();
+  syncTruss();
 }
 function mountWork(piece) {
   const mesh = piece.kind === 'service' ? createRoadMesh(roadMask(piece.gx, piece.gz)) : createWorkMesh(piece.kind);
@@ -2542,6 +2576,28 @@ function hitSelected(cx, cy) {
 function onLeftClick(cx, cy, shift) {
   closePlanMenu();
   if (viewLayer !== 'surface' || mode === 'build') { onMapClick(cx, cy); return; }
+  const ground = pickFlat(cx, cy);
+  if (ground && mode === 'look') {
+    const bi = Math.floor(focus.i / L.PER);
+    const bj = Math.floor(focus.j / L.PER);
+    const slot = trussSlots(fields, bi, bj, L.PER, L.FIELD).find(item => Math.hypot(item.x - ground.x, item.z - ground.z) < 8);
+    if (slot) {
+      if (slot.bought) { toast('这行已经有桁架。喷灌和打药还没接到作业链。'); return; }
+      const paid = buyTruss(slot.key, () => {
+        if (!(economy.revenue >= TRUSS_PRICE)) return false;
+        economy.revenue -= TRUSS_PRICE;
+        return true;
+      });
+      if (!paid.ok) toast('营收不够买桁架');
+      else {
+        toast(`<b>−${fmt(TRUSS_PRICE)}</b>第 ${slot.row + 1} 行桁架。本行软作业还没接线。`);
+        syncTruss();
+        paintKpi();
+        saveSoon();
+      }
+      return;
+    }
+  }
   const rig = pickRigScreen(cx, cy);
   if (rig) {
     if (shift) toggleRig(rig);
@@ -3183,6 +3239,7 @@ function rigTitle(r) {
   return `${r.label} ${same.indexOf(r) + 1}`;
 }
 function fleetWidth(r) {
+  if (r.kind === 'omni' || r.machineId === 'omni') return ' · 1 格宽 · 32 格/分';
   if (r.bDrive) {
     const w = r.bWidth || 16;
     const text = Math.abs(w - Math.round(w)) < 0.05 ? String(Math.round(w)) : String(Math.round(w * 10) / 10);
@@ -3986,7 +4043,8 @@ function updateLabels(d) {
   if (!camS.deck && labelMode !== 3) for (const r of rigs) {
     if (r.kind === 'plow') continue;
     const st = r.bDrive ? rigStandby(r) : null;
-    const mark = r.navFail ? r.navFail : st?.standby ? `待机剩余: ${st.clock}` : st?.waiting ? '完成当前作业后待机' : '';
+    const pace = (r.kind === 'omni' || r.machineId === 'omni') && r.busy ? '1 格宽 · 32 格/分' : '';
+    const mark = r.navFail ? r.navFail : st?.standby ? `待机剩余: ${st.clock}` : st?.waiting ? '完成当前作业后待机' : pace;
     if (!showRigs && !mark) continue;
     const html = mark ? `<b>${r.label}</b><span>${mark}</span>` : `<b>${r.label}</b>`;
     const near = Math.min(1, Math.max(0.35, (1600 - d) / 700));

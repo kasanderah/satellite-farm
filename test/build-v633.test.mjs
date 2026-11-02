@@ -3,8 +3,11 @@ import assert from 'node:assert/strict';
 import { roadMaskAt, roadShape, ROAD_E, ROAD_N, ROAD_W, ROAD_S } from '../src/build/roads.js';
 import { planRoute } from '../src/build/nav.js';
 import { placeWork, eraseWork, clearWorks, roadMask } from '../src/build/works.js';
-import { buyMachine, economy, resetGame, sellRig, garageBoard } from '../src/_shared.js';
-import { inHubWedge } from '../src/modulus.js';
+import { buyMachine, economy, resetGame, sellRig, garageBoard, sendRigHome, step, rigs } from '../src/_shared.js';
+import { inHubWedge, CELL } from '../src/modulus.js';
+import { OMNI } from '../src/framework-b.js';
+import { NAV_RETRY_S } from '../src/build/nav.js';
+import { trussSlots, buyTruss, clearTruss, TRUSS_PRICE } from '../src/truss.js';
 
 test('道路按上下左右拼出直线、转角、丁字和十字', () => {
   const has = (cells) => (x, z) => cells.has(x + ',' + z);
@@ -25,6 +28,52 @@ test('挡住的直线会绕开，封死就停在外面', () => {
   assert.equal(around.pts.some(p => Math.abs(p[1]) < 1.6 && p[0] < 14), false);
   const sealed = planRoute(0, -12, 0, 12, [[0, 12]], () => true);
   assert.equal(sealed.blocked, true);
+});
+
+test('万能农机是 1 格宽、每分钟 32 格', () => {
+  assert.equal(OMNI.width, CELL);
+  assert.equal(OMNI.workCells, 32 / 60);
+  const minutes = (32 * 32) / 32;
+  assert.equal(minutes, 32);
+});
+
+test('挡住后先停下，到点才重新出发', () => {
+  resetGame();
+  clearWorks();
+  economy.revenue = 200000;
+  assert.equal(placeWork('garage', 220, 0, 0).ok, true);
+  const bought = buyMachine('tractor');
+  assert.equal(bought.ok, true, bought.reason);
+  const rig = rigs.find(r => r.id === bought.id);
+  rig.bDrive = false;
+  rig.x = 220;
+  rig.z = -36;
+  rig.mode = 'stuck';
+  rig.busy = true;
+  rig.intent = 'home';
+  rig.routeGoal = { x: rig.parkX, z: rig.parkZ };
+  rig.navFail = '路被建筑挡住，绕不过去';
+  rig.navRetry = 0;
+  const held = rig.z;
+  step(2);
+  assert.equal(rig.mode, 'stuck');
+  assert.equal(rig.z, held);
+  step(NAV_RETRY_S);
+  assert.notEqual(rig.mode, 'stuck');
+  assert.equal(rig.navFail, '');
+});
+
+test('一行只能买一台桁架', () => {
+  clearTruss();
+  const fields = [{ i: 0, j: 0, x0: 0, z0: 0 }, { i: 0, j: 1, x0: 0, z0: 10 }];
+  const slots = trussSlots(fields, 0, 0, 4, 20);
+  assert.equal(slots.length, 2);
+  assert.equal(slots[0].bought, false);
+  let cash = TRUSS_PRICE;
+  assert.equal(buyTruss(slots[0].key, () => { cash -= TRUSS_PRICE; return true; }).ok, true);
+  assert.equal(buyTruss(slots[0].key, () => true).reason, 'have');
+  assert.equal(trussSlots(fields, 0, 0, 4, 20)[0].bought, true);
+  clearTruss();
 });
 
 test('车库车位不够不能买，有农机不能拆', () => {

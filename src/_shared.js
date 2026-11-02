@@ -13,7 +13,8 @@ import {
 } from './modulus.js';
 import { bindBuildZone, bindOccupy, exportWorks, loadWorks, clearWorks, listWorks } from './build/works.js';
 import { claimStall, stallTotal } from './build/garage.js';
-import { planRoute } from './build/nav.js';
+import { planRoute, NAV_RETRY_S } from './build/nav.js';
+import { exportTruss, loadTruss, clearTruss } from './truss.js';
 import { worldCell } from './build/placement.js';
 export { MODULUS_ID };
 import {
@@ -1150,7 +1151,7 @@ function deliverTrailer(r) {
 function assignIdleRigs() {
   for (const r of rigs) {
     if (r.bDrive) continue;
-    if (r.mode === 'work' || r.mode === 'turn' || r.mode === 'travel' || r.mode === 'need_unload' || r.mode === 'unload' || r.mode === 'service' || r.mode === 'switch') continue;
+    if (r.mode === 'work' || r.mode === 'turn' || r.mode === 'travel' || r.mode === 'need_unload' || r.mode === 'unload' || r.mode === 'service' || r.mode === 'switch' || r.mode === 'stuck') continue;
     const home = atGarage(r);
     if (home && (r.charge ?? 1) < BATT_LEAVE) {
       r.mode = 'charge'; r.busy = false; r.f = null; r.intent = null;
@@ -1335,17 +1336,32 @@ function crowded(r) {
   }
   return false;
 }
+function markStuck(r) {
+  const fresh = r.mode !== 'stuck';
+  r.mode = 'stuck';
+  r.busy = true;
+  r.route = null;
+  r.routeBlocked = false;
+  r.navFail = '路被建筑挡住，绕不过去';
+  if (fresh) r.navRetry = 0;
+}
+function retryStuck(r) {
+  r.navRetry = 0;
+  const goal = r.routeGoal;
+  if (r.intent === 'job' && r.f && r.job) {
+    const job = cropOf(r.f)?.jobs.find(item => item.id === r.job);
+    if (job) { routeToJob(r, r.f, job); return; }
+  }
+  if (!goal || r.intent === 'home' || !r.intent) { goHome(r); return; }
+  routeTo(r, goal.x, goal.z, r.intent, r.f);
+}
 function arriveTravel(r) {
   if (r.routeBlocked && r.routeGoal && Math.hypot(r.x - r.routeGoal.x, r.z - r.routeGoal.z) > 6) {
-    r.mode = 'stuck';
-    r.busy = false;
-    r.intent = null;
-    r.route = null;
-    r.routeBlocked = false;
-    r.navFail = '路被建筑挡住，绕不过去';
+    markStuck(r);
     return;
   }
   r.routeBlocked = false;
+  r.navFail = '';
   if (r.intent === 'home') { parkRig(r, false); return; }
   if (r.intent === 'deliver') { r.cargo = 0; parkRig(r, false); return; }
   if (r.intent === 'service') {
@@ -1709,6 +1725,10 @@ function stepRigs(dt) {
   }
   assignIdleRigs();
   for (const r of rigs) {
+    if (r.mode === 'stuck') {
+      r.navRetry = (r.navRetry || 0) + dt;
+      if (r.navRetry >= NAV_RETRY_S) retryStuck(r);
+    }
     if (r.bDrive) continue;
     if (r.mode === 'work') stepWork(r, dt);
     else if (r.mode === 'turn') stepTurn(r, dt);
@@ -1951,7 +1971,7 @@ export function rigReadout(r) {
   const garageAt = hubPad(3, 2);
   garageOrigin = { x: garageAt.x, z: garageAt.z };
   const stalls = [
-    { id: 0, kind: 'omni', machineId: 'omni', label: '万能农机', role: '自走一体', caps: ['犁田', '播种', '收割', '收拾', '追肥', '培土'], width: 16, buyPrice: 24000, z: garageAt.z + 14 },
+    { id: 0, kind: 'omni', machineId: 'omni', label: '万能农机', role: '自走一体', caps: ['犁田', '播种', '收割', '收拾', '追肥', '培土'], width: CELL, buyPrice: 24000, z: garageAt.z + 14 },
     { id: 1, kind: 'tractor', machineId: 'tractor', label: '拖拉机', role: '拖拉机+犁', caps: ['犁田'], width: 12, impl: 'impl_subsoiler', buyPrice: 12000, z: garageAt.z + 32 },
     { id: 2, kind: 'plow', machineId: 'plow', label: '犁', role: '挂在拖拉机上', caps: ['犁田'], width: 12, buyPrice: 8000, z: garageAt.z + 50 },
   ];
@@ -2353,6 +2373,7 @@ function restoreDecor(f, src, live) {
 export function resetGame() {
   resetLand();
   clearWorks();
+  clearTruss();
   const by = new Map(openingFields.map(s => [s.idx, s]));
   for (const f of fields) {
     const s = by.get(f.idx);
@@ -2629,6 +2650,7 @@ export function exportSnapshot() {
     modulus: MODULUS_ID,
     land: exportLand(),
     works: exportWorks(),
+    trusses: exportTruss(),
     timeScale: economy.timeScale,
     stores: { seed: stores.seed, fertilizer: stores.fertilizer, spray: stores.spray, feed: stores.feed, peel: stores.peel, frass: stores.frass, seed_soy: stores.seed_soy || 0, seed_barley: stores.seed_barley || 0, seedling_cabbage: stores.seedling_cabbage || 0 },
     warehouse: warehouse.map(lot => ({ ...lot })),
@@ -2729,6 +2751,7 @@ export function applySnapshot(data) {
   if (data.modulus !== MODULUS_ID) return false;
   loadLand(data.land);
   loadWorks(data.works);
+  loadTruss(data.trusses);
   for (const f of fields) {
     f.equip = false;
     stampLand(f);

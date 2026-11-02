@@ -5,6 +5,7 @@ import {
   cycleDays, installPlayerMachine, removePlayerMachine, recallMachine, releaseStandby, standbyClock,
 } from './framework-b.js';
 import { roadRoute } from './_shared.js';
+import { NAV_RETRY_S } from './build/nav.js';
 
 let farm = null;
 let ctx = null;
@@ -66,8 +67,16 @@ function ensureRoad(unit, x, z) {
 }
 
 function followRoad(unit, x, z, ang, speed, slice) {
+  if (unit.navFail && !unit.navRetryDue) return;
+  if (unit.navRetryDue) {
+    unit.routeKey = '';
+    unit.route = null;
+    unit.ri = 0;
+    unit.navRetryDue = false;
+  }
   ensureRoad(unit, x, z);
   const pts = unit.route || [[x, z]];
+  if (!pts.blocked) unit.navFail = '';
   let left = speed * slice;
   while (unit.ri < pts.length && left > 0) {
     const [px, pz] = pts[unit.ri];
@@ -85,8 +94,10 @@ function followRoad(unit, x, z, ang, speed, slice) {
     return;
   }
   unit.ang = ang;
-  if (unit.ri >= pts.length && pts.blocked && Math.hypot(unit.x - x, unit.z - z) > 6) unit.navFail = '路被建筑挡住，绕不过去';
-  else if (unit.ri < pts.length) unit.navFail = '';
+  if (unit.ri >= pts.length && pts.blocked && Math.hypot(unit.x - x, unit.z - z) > 6) {
+    if (!unit.navFail) unit.navRetry = 0;
+    unit.navFail = '路被建筑挡住，绕不过去';
+  } else if (!(unit.navFail && unit.ri >= pts.length)) unit.navFail = '';
 }
 
 function roadLeft(unit, x, z) {
@@ -372,6 +383,14 @@ function syncFields() {
 
 export function tickSlice(dt) {
   if (!farm || !ctx || !(dt > 0)) return;
+  for (const unit of driveRigs()) {
+    if (!unit.navFail) continue;
+    unit.navRetry = (unit.navRetry || 0) + dt;
+    if (unit.navRetry >= NAV_RETRY_S) {
+      unit.navRetry = 0;
+      unit.navRetryDue = true;
+    }
+  }
   stepFarm(farm, dt, {
     eta(_farm, order) {
       const f = meshOf(order.fieldId);

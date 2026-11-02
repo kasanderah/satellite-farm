@@ -8,7 +8,7 @@
 // 生长和软窗记世界日。stepFarm 仍收真实秒，只在钟的边界换算。
 
 import { DAY_SECONDS } from './world-clock.js';
-import { cellsFromLegacyMps, mpsFromCells } from './modulus.js';
+import { CELL, cellsFromLegacyMps, mpsFromCells } from './modulus.js';
 import { FIELD_BLOCK_LIST, prepSteps } from './field-blocks.js';
 
 export const HUB_PLOT = 'C0';
@@ -176,10 +176,11 @@ export const OMNI = {
   name: '万能农机',
   caps: ['犁田', '播种', '收割', '收拾', '追肥', '培土'],
   origin: 3.2,
-  width: 16,
-  workCells: cellsFromLegacyMps(18),
+  // 1 格宽。1× 下 32 格/现实分钟：32 趟走完 32 格的田，大约半小时。
+  width: CELL,
+  workCells: 32 / 60,
   cruiseCells: cellsFromLegacyMps(28),
-  workSpeed: mpsFromCells(cellsFromLegacyMps(18)),
+  workSpeed: mpsFromCells(32 / 60),
   cruiseSpeed: mpsFromCells(cellsFromLegacyMps(28)),
   powerOutKw: 80,
   energy: 'electric',
