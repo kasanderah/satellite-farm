@@ -42,6 +42,12 @@ export function loadWorks(raw) {
   }
 }
 
+export function previewWork(kind, x, z, rot) {
+  const spec = workSpec(kind);
+  const cell = worldCell(x, z);
+  return { ...tryPlace(pieces, spec, cell.gx, cell.gz, rot, zoneFn), gx: cell.gx, gz: cell.gz };
+}
+
 export function placeWork(kind, x, z, rot) {
   const spec = workSpec(kind);
   const cell = worldCell(x, z);

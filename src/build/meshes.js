@@ -68,8 +68,17 @@ export function createWorkMesh(kind) {
     add(group, box(W, 0.16, D * 0.8, 0, 2.6, 0, DARK));
     add(group, box(W * 0.8, 0.06, 0.06, 0, 1.5, D * 0.28, WARM));
   } else if (kind === 'service') {
-    add(group, box(W * 0.92, 0.08, D * 0.92, 0, 0.06, 0, DARK));
-    add(group, box(W * 0.18, 0.04, D * 0.7, 0, 0.12, 0, HAZE));
+    // 路面底面离地约 8 cm，顶面约 20 cm，避免和地表共面闪烁。相对 4.2 m 格仍贴地。
+    const deck = box(W * 0.9, 0.12, D * 0.9, 0, 0.14, 0, DARK);
+    deck.material.polygonOffset = true;
+    deck.material.polygonOffsetFactor = -2;
+    deck.material.polygonOffsetUnits = -4;
+    deck.renderOrder = 2;
+    const stripe = box(W * 0.16, 0.03, D * 0.68, 0, 0.215, 0, HAZE);
+    stripe.material.polygonOffset = true;
+    stripe.material.polygonOffsetFactor = -3;
+    stripe.material.polygonOffsetUnits = -4;
+    stripe.renderOrder = 3;
   }
   return group;
 }

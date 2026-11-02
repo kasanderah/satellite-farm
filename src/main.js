@@ -29,11 +29,11 @@ import { PLANT_CROPS, PREP_RECIPES, FIELD_BLOCKS, JOBS, stageDisplayStops } from
 import { HUD_VERSION } from './version.js';
 import {
   UNIT, PLOT as PLOT_M, SECTOR, CELL, legacyView, GROUND_PAD,
-  hubWedgePolygon, hubGridSegments, fieldCellSegments,
+  hubGridSegments, fieldCellSegments,
 } from './modulus.js';
 import { overlayCells } from './land-buy.js';
 import { BUILDINGS, ROADS as BUILD_ROADS } from './build/catalog.js';
-import { placeWork, eraseWork, listWorks } from './build/works.js';
+import { placeWork, eraseWork, listWorks, previewWork } from './build/works.js';
 import { createWorkMesh, ghostMaterial } from './build/meshes.js';
 import { footprint, worldCell, cellOrigin } from './build/placement.js';
 import { DAY_SECONDS } from './world-clock.js';
@@ -275,6 +275,17 @@ function curved(mat, extra) {
     if (extra) extra(s);
   };
   return mat;
+}
+function stickToRing(root) {
+  root.traverse(obj => {
+    if (!obj.isMesh || !obj.material) return;
+    const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+    for (const mat of mats) {
+      if (!mat || mat.userData.ringStuck) continue;
+      mat.userData.ringStuck = true;
+      curved(mat);
+    }
+  });
 }
 
 // ---------------- 6 种世界材质（IXION 式材质纪律） ----------------
@@ -1461,30 +1472,19 @@ function segsGeometry(segs, y) {
   geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   return geo;
 }
-function wedgeMesh(player, color, opacity) {
-  const poly = hubWedgePolygon(player);
-  const y = 1.6;
-  const pos = [];
-  const push = (p) => pos.push(p[0], y, p[1]);
-  const [a, b, c, d] = poly;
-  push(a); push(b); push(c); push(a); push(c); push(d);
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  const mat = curved(new THREE.MeshBasicMaterial({
-    color, transparent: true, opacity, depthWrite: false, side: THREE.DoubleSide, toneMapped: false,
-  }));
-  const mesh = new THREE.Mesh(geo, mat);
-  mesh.frustumCulled = false;
-  mesh.renderOrder = 2;
-  return mesh;
-}
 const hubRoot = new THREE.Group();
 hubRoot.name = 'hub-wedge';
 scene.add(hubRoot);
-for (let player = 0; player < 4; player++) hubRoot.add(wedgeMesh(player, player === 0 ? 0x9aa8a4 : 0x6a655c, player === 0 ? 0.1 : 0.14));
+const gridLineMat = () => {
+  const mat = curved(new THREE.LineBasicMaterial({ color: 0xa39e94, transparent: true, opacity: 0.45, depthWrite: false }));
+  mat.polygonOffset = true;
+  mat.polygonOffsetFactor = -1;
+  mat.polygonOffsetUnits = -2;
+  return mat;
+};
 const hubLines = new THREE.LineSegments(
-  segsGeometry(hubGridSegments(0), 0.35),
-  curved(new THREE.LineBasicMaterial({ color: 0xb7b1a6, transparent: true, opacity: 0.32, depthWrite: false })),
+  segsGeometry(hubGridSegments(0), 0.08),
+  gridLineMat(),
 );
 hubLines.frustumCulled = false;
 hubLines.renderOrder = 3;
@@ -1494,7 +1494,7 @@ const equipRoot = new THREE.Group();
 equipRoot.name = 'equip-grid';
 equipRoot.visible = false;
 scene.add(equipRoot);
-const equipMat = curved(new THREE.LineBasicMaterial({ color: 0xb7b1a6, transparent: true, opacity: 0.32, depthWrite: false }));
+const equipMat = gridLineMat();
 function refreshEquipGrids() {
   while (equipRoot.children.length) {
     const child = equipRoot.children.pop();
@@ -1502,7 +1502,7 @@ function refreshEquipGrids() {
   }
   for (const f of fields) {
     if (!f.equip) continue;
-    const line = new THREE.LineSegments(segsGeometry(fieldCellSegments(f.x0, f.z0, L.FIELD), 0.4), equipMat);
+    const line = new THREE.LineSegments(segsGeometry(fieldCellSegments(f.x0, f.z0, L.FIELD), 0.08), equipMat);
     line.frustumCulled = false;
     line.renderOrder = 3;
     equipRoot.add(line);
@@ -1529,6 +1529,43 @@ const ghostRoot = new THREE.Group();
 ghostRoot.name = 'build-ghost';
 ghostRoot.visible = false;
 scene.add(ghostRoot);
+function footMat(color) {
+  const mat = curved(new THREE.MeshBasicMaterial({
+    color, transparent: true, opacity: 0.5, depthWrite: false, toneMapped: false,
+    polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
+  }));
+  return mat;
+}
+const footOk = footMat(0x6f9a86);
+const footBad = footMat(0xb5523a);
+const footMesh = new THREE.Mesh(new THREE.BufferGeometry(), footOk);
+footMesh.frustumCulled = false;
+footMesh.renderOrder = 2;
+footMesh.visible = false;
+scene.add(footMesh);
+function hideFootprint() {
+  footMesh.visible = false;
+}
+function paintFootprint(preview) {
+  const cells = preview?.cells || [];
+  if (!cells.length) { hideFootprint(); return; }
+  const y = 0.05;
+  const s = CELL * 0.9;
+  const pos = [];
+  for (const [gx, gz] of cells) {
+    const o = cellOrigin(gx, gz);
+    const x = o.x + CELL / 2;
+    const z = o.z + CELL / 2;
+    const x0 = x - s / 2, x1 = x + s / 2, z0 = z - s / 2, z1 = z + s / 2;
+    pos.push(x0, y, z0, x1, y, z0, x1, y, z1, x0, y, z0, x1, y, z1, x0, y, z1);
+  }
+  footMesh.geometry.dispose();
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  footMesh.geometry = geo;
+  footMesh.material = preview.ok ? footOk : footBad;
+  footMesh.visible = true;
+}
 function rebuildWorks() {
   while (workRoot.children.length) {
     const child = workRoot.children.pop();
@@ -1538,6 +1575,7 @@ function rebuildWorks() {
 }
 function mountWork(piece) {
   const mesh = createWorkMesh(piece.kind);
+  stickToRing(mesh);
   mesh.position.set(piece.x, 0, piece.z);
   mesh.rotation.y = piece.rot * Math.PI / 2;
   mesh.userData.workId = piece.id;
@@ -1546,25 +1584,30 @@ function mountWork(piece) {
 function hideGhost() {
   ghostRoot.visible = false;
   while (ghostRoot.children.length) ghostRoot.children.pop();
+  hideFootprint();
 }
 function showGhost(kind) {
   hideGhost();
   if (!kind || kind === 'erase') return;
-  ghostRoot.add(ghostMaterial(createWorkMesh(kind)));
+  const ghost = ghostMaterial(createWorkMesh(kind));
+  stickToRing(ghost);
+  ghostRoot.add(ghost);
   ghostRoot.visible = true;
 }
 function updateGhost(cx, cy) {
-  if (mode !== 'build' || !buildTool || buildTool === 'erase') { ghostRoot.visible = false; return; }
+  if (mode !== 'build' || !buildTool || buildTool === 'erase') { ghostRoot.visible = false; hideFootprint(); return; }
   const p = pickFlat(cx, cy);
-  if (!p) { ghostRoot.visible = false; return; }
+  if (!p) { ghostRoot.visible = false; hideFootprint(); return; }
   const spec = [...BUILDINGS, ...BUILD_ROADS].find(item => item.id === buildTool);
   if (!spec) return;
+  const preview = previewWork(buildTool, p.x, p.z, buildRot);
   const cell = worldCell(p.x, p.z);
   const box = footprint(spec.w, spec.h, buildRot);
   const origin = cellOrigin(cell.gx, cell.gz);
   ghostRoot.position.set(origin.x + box.w * CELL / 2, 0, origin.z + box.h * CELL / 2);
   ghostRoot.rotation.y = buildRot * Math.PI / 2;
   ghostRoot.visible = true;
+  paintFootprint(preview);
 }
 function paintBuildBar() {
   const el = $('buildbar');
