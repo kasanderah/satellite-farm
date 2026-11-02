@@ -66,6 +66,7 @@ export const JOBS = {
   harvest: { id: 'harvest', name: '收割', kind: 'hard', caps: ['收割'], look: 'harvested', brush: { ...BRUSH_OFF, look: 'harvested' } },
   tidy: { id: 'tidy', name: '收拾', kind: 'hard', caps: ['收拾'], look: 'general', brush: { ...BRUSH_OFF, look: 'general' } },
   topdress: { id: 'topdress', name: '追肥', kind: 'soft', caps: ['追肥'], look: '不影响', brush: { ...BRUSH_OFF, look: 'mature' } },
+  spray: { id: 'spray', name: '撒药', kind: 'soft', caps: ['撒药'], look: '不影响', brush: { ...BRUSH_OFF, look: 'mature' } },
   hill: { id: 'hill', name: '培土', kind: 'soft', caps: ['培土'], look: '不影响', brush: { ...BRUSH_OFF, look: 'mature' } },
 };
 
@@ -84,7 +85,7 @@ export const PLANT_CROPS = {
     id: 'lastika',
     name: '拉斯提卡',
     family: 'potato',
-    tip: '12 世界日。追肥把产量翻倍，培土加 1 点品质，第 11–12 日收获。错过收获就进烂地。深垄田块上产量再 ×1.2。',
+    tip: '12 世界日。第 4–6 日撒药，第 5–6 日追肥把产量翻倍，培土加 1 点品质，第 11–12 日收获。错过收获就进烂地。深垄田块上产量再 ×1.2。',
     grounds: ['general', 'deepridge'],
     growDays: GROW_DAYS,
     growSeconds: GROW_SECONDS,
@@ -108,6 +109,7 @@ export const PLANT_CROPS = {
       { id: 'seedling', name: '青苗', role: 'head', kind: 'time', look: 'sown', days: 2, color: '#51542c', display: { from: { color: '#4a4844', cover: 0.16 }, to: { color: '#51542c', cover: 0.42 } }, jobs: [] },
       { id: 'develop', name: '发育', role: 'node', kind: 'time', look: 'sown', days: 6, color: '#6a7340', display: { from: { color: '#51542c', cover: 0.42 }, to: { color: '#6a7340', cover: 0.72 } }, jobs: [
         { job: 'topdress', kind: 'soft', name: '追肥', from: 5, to: 6, yieldMul: 2 },
+        { job: 'spray', kind: 'soft', name: '撒药', from: 4, to: 6 },
       ] },
       { id: 'mature', name: '成熟', role: 'node', kind: 'time', look: 'mature', days: 4, color: '#787c32', display: { from: { color: '#6a7340', cover: 0.72 }, to: { color: '#787c32', cover: 0.95 } }, jobs: [
         { job: 'hill', kind: 'soft', name: '培土', from: 8, to: 10, qualityAdd: 1 },
@@ -1275,6 +1277,24 @@ function bindSoft(field) {
   }
 }
 
+export function settleSoft(farm, fieldId, jobId, progress) {
+  const field = farm.fields.get(fieldId);
+  const row = field?.plant?.soft?.[jobId];
+  if (!row || row.status === '过期' || row.status === '执行完') return false;
+  const done = progress >= 1 - 1e-6;
+  row.progress = done ? 1 : Math.max(0, progress);
+  row.status = done ? '执行完' : '执行中';
+  if (!done) return true;
+  if (row.yieldMul > 1) field.plant.yieldMul = Math.max(field.plant.yieldMul || 1, row.yieldMul);
+  if (row.qualityAdd) {
+    const base = field.plant.quality ?? cropOfPlant(field)?.qualityBase ?? 1;
+    field.plant.quality = base + row.qualityAdd;
+  }
+  farm.queue = farm.queue.filter(item => !(item.fieldId === fieldId && item.jobId === jobId));
+  pushEvent(farm, { type: 'job-complete', fieldId, jobId, look: '不影响', lane: 'soft', progress: 1 });
+  return true;
+}
+
 function expireSoft(farm, field, jobId, row) {
   if (row.status === '执行完' || row.status === '过期') return;
   const order = farm.orders.find(item => item.fieldId === field.id && item.jobId === jobId);
@@ -1306,24 +1326,28 @@ function touchSoft(farm) {
   }
 }
 
-function queueSoft(farm) {
+function queueSoft(farm, env) {
   for (const field of farm.fields.values()) {
     const book = field.plant?.soft;
     if (!book || !field.plant.clock || field.lock) continue;
     if (farm.orders.some(item => item.fieldId === field.id)) continue;
     if (farm.queue.some(item => item.fieldId === field.id)) continue;
     const age = growthAge(field);
-    const open = Object.entries(book).find(([, row]) => row.status === '未执行' && windowOpen(row, age));
-    if (!open) continue;
-    const job = JOBS[open[0]];
-    if (!job) continue;
-    farm.queue.push({
-      id: farm.seq++,
-      fieldId: field.id,
-      jobId: job.id,
-      caps: job.caps.slice(),
-      lane: 'soft',
-    });
+    const open = Object.entries(book).filter(([, row]) => row.status === '未执行' && windowOpen(row, age));
+    for (const [jobId] of open) {
+      const job = JOBS[jobId];
+      if (!job) continue;
+      if (env?.claimSoft?.(farm, field, job)) break;
+      if (!chooseMachine(farm, job.caps)) continue;
+      farm.queue.push({
+        id: farm.seq++,
+        fieldId: field.id,
+        jobId: job.id,
+        caps: job.caps.slice(),
+        lane: 'soft',
+      });
+      break;
+    }
   }
 }
 
@@ -1390,7 +1414,7 @@ export function stepFarm(farm, dt, env = null) {
   for (let guard = 0; guard < 48 && left > 1e-6; guard++) {
     applyPlans(farm);
     touchSoft(farm);
-    queueSoft(farm);
+    queueSoft(farm, env);
     openHard(farm);
     dispatch(farm, env);
     touchSoft(farm);
@@ -1453,7 +1477,7 @@ export function stepFarm(farm, dt, env = null) {
   }
   applyPlans(farm);
   touchSoft(farm);
-  queueSoft(farm);
+  queueSoft(farm, env);
   openHard(farm);
   dispatch(farm, env);
   return farm;

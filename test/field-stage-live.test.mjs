@@ -43,6 +43,7 @@ test('editor lastika replaces the playable stages, windows, and paints', () => {
     assert.equal(crop.stages.find(s => s.id === 'seedling').name, '青苗');
     assert.equal(crop.stages.find(s => s.id === 'mature').name, '成熟');
     assert.deepEqual(crop.stages.find(s => s.id === 'develop').jobs[0], { job: 'topdress', kind: 'soft', name: '追肥', from: 5, to: 6, yieldMul: 2 });
+    assert.equal(crop.stages.find(s => s.id === 'develop').jobs.some(job => job.job === 'spray'), true);
     assert.equal(crop.paints.ripe, doc.plant.ripe);
     assert.equal(crop.paints.raw, doc.stages.find(s => s.group === 'O').color);
     assert.equal(cropDef('potato').profile, potatoProfile);

@@ -7,7 +7,7 @@ import { buyMachine, economy, resetGame, sellRig, garageBoard, sendRigHome, step
 import { inHubWedge, CELL } from '../src/modulus.js';
 import { OMNI } from '../src/framework-b.js';
 import { NAV_RETRY_S } from '../src/build/nav.js';
-import { trussSlots, buyTruss, clearTruss, TRUSS_PRICE } from '../src/truss.js';
+import { trussSlots, buyTruss, clearTruss, TRUSS_PRICE, syncSlots, claimJob, tickTrusses, listRigs } from '../src/truss.js';
 
 test('道路按上下左右拼出直线、转角、丁字和十字', () => {
   const has = (cells) => (x, z) => cells.has(x + ',' + z);
@@ -61,6 +61,33 @@ test('挡住后先停下，到点才重新出发', () => {
   step(NAV_RETRY_S);
   assert.notEqual(rig.mode, 'stuck');
   assert.equal(rig.navFail, '');
+});
+
+test('桁架扫完停回地头，不再自己漂', () => {
+  clearTruss();
+  const fields = [{ i: 0, j: 0, x0: 100, z0: 20 }];
+  assert.equal(buyTruss('0:0:0', () => true).ok, true);
+  syncSlots(trussSlots(fields, 0, 0, 4, 40));
+  const rig = listRigs()[0];
+  assert.equal(rig.phase, 'park');
+  assert.ok(Math.abs(rig.x - 92) < 0.2);
+  const parked = rig.x;
+  tickTrusses(3);
+  assert.equal(rig.x, parked);
+  assert.equal(claimJob(rig.key, { fieldId: 'a', jobId: 'spray', goalU: 0, len: 40 }), true);
+  let sawSweep = false;
+  let finished = false;
+  for (let n = 0; n < 40 && rig.phase !== 'park'; n++) {
+    if (rig.phase === 'sweep' && rig.x > 100 && rig.x < 140) sawSweep = true;
+    if (tickTrusses(1).some(item => item.jobId === 'spray')) finished = true;
+  }
+  assert.equal(sawSweep, true);
+  assert.equal(finished, true);
+  assert.equal(rig.phase, 'park');
+  assert.ok(Math.abs(rig.x - parked) < 0.5);
+  tickTrusses(4);
+  assert.equal(rig.x, parked);
+  clearTruss();
 });
 
 test('一行只能买一台桁架', () => {

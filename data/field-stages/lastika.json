@@ -1,7 +1,7 @@
 {
   "schema": "ringsheaf.field-stage/1",
   "profile": "lastika",
-  "readme": "拉斯提卡测试作物。主游戏只读 graph。前段合计 12 世界日：青苗 2、发育 6、成熟 4。烂地和收获后无限，不计入。追肥在第 5–6 日，收获在第 11–12 日。没开工就进烂地。收获做完改画收获后。",
+  "readme": "拉斯提卡测试作物。主游戏只读 graph。前段合计 12 世界日：青苗 2、发育 6、成熟 4。烂地和收获后无限，不计入。撒药在第 4–6 日，追肥在第 5–6 日，收获在第 11–12 日。没开工就进烂地。收获做完改画收获后。",
   "cycle": 38,
   "yieldBase": 100,
   "qualityBase": 1,
@@ -31,7 +31,8 @@
     "stages": [
       { "id": "seedling", "name": "青苗", "role": "head", "kind": "time", "look": "sown", "days": 2, "color": "#51542c", "display": { "from": { "color": "#4a4844", "cover": 0.16 }, "to": { "color": "#51542c", "cover": 0.42 } }, "jobs": [] },
       { "id": "develop", "name": "发育", "role": "node", "kind": "time", "look": "sown", "days": 6, "color": "#6a7340", "display": { "from": { "color": "#51542c", "cover": 0.42 }, "to": { "color": "#6a7340", "cover": 0.72 } }, "jobs": [
-        { "job": "topdress", "kind": "soft", "name": "追肥", "from": 5, "to": 6, "yieldMul": 2 }
+        { "job": "topdress", "kind": "soft", "name": "追肥", "from": 5, "to": 6, "yieldMul": 2 },
+        { "job": "spray", "kind": "soft", "name": "撒药", "from": 4, "to": 6 }
       ] },
       { "id": "mature", "name": "成熟", "role": "node", "kind": "time", "look": "mature", "days": 4, "color": "#787c32", "display": { "from": { "color": "#6a7340", "cover": 0.72 }, "to": { "color": "#787c32", "cover": 0.95 } }, "jobs": [
         { "job": "hill", "kind": "soft", "name": "培土", "from": 8, "to": 10, "qualityAdd": 1 },
@@ -62,6 +63,7 @@
         "after": { "x": 680, "y": 148 },
         "exit": { "x": 860, "y": 78 },
         "job:develop:0": { "x": 292, "y": 196 },
+        "job:develop:1": { "x": 360, "y": 248 },
         "job:mature:0": { "x": 448, "y": 188 },
         "job:mature:1": { "x": 560, "y": 268 },
         "job:rot:0": { "x": 680, "y": 196 },
@@ -79,6 +81,7 @@
   "ops": [
     { "id": "sow", "name": "播种", "kind": "required", "via": "sow", "stage": "O", "surface": "plant", "requiresMask": false, "requiresUnlocked": true, "writesMask": false, "locksUnswept": false, "sweepDays": 1, "machine": "impl_seeder" },
     { "id": "topdress", "name": "追肥", "kind": "optional", "via": "topdress", "stage": "B", "surface": "none", "requiresMask": false, "requiresUnlocked": false, "writesMask": false, "locksUnswept": false, "sweepDays": 1, "window": { "from": 4, "to": 30 } },
+    { "id": "spray", "name": "撒药", "kind": "optional", "via": "spray", "stage": "B", "surface": "none", "requiresMask": false, "requiresUnlocked": false, "writesMask": false, "locksUnswept": false, "sweepDays": 1, "window": { "from": 4, "to": 6 } },
     { "id": "hill", "name": "培土", "kind": "optional", "via": "hill", "stage": "B", "surface": "none", "requiresMask": false, "requiresUnlocked": false, "writesMask": false, "locksUnswept": false, "sweepDays": 1, "window": { "from": 20, "to": 26 } },
     { "id": "harvest", "name": "收割", "kind": "required", "via": "harvest", "stage": "D", "surface": "plant", "requiresMask": false, "requiresUnlocked": false, "writesMask": false, "locksUnswept": false, "sweepDays": 1, "machine": "harvester_potato" },
     { "id": "clear", "name": "收拾", "kind": "special", "via": "clear", "stage": "E", "surface": "color", "requiresMask": false, "requiresUnlocked": false, "writesMask": false, "locksUnswept": false, "breaksMask": false, "sweepDays": 1, "machine": "impl_cultivator" }

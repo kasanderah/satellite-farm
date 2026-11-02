@@ -3,9 +3,11 @@ import {
   OMNI, TRACTOR, PLOW, JOBS, TURN_SECONDS, createFarm, addField, addMachine, mountHitch,
   requestPrep, requestPlant, setNextCrop, stepFarm, describeField, plotAddress, growthAge, workSweepLook, PLANT_CROPS, FIELD_BLOCKS,
   cycleDays, installPlayerMachine, removePlayerMachine, recallMachine, releaseStandby, standbyClock,
+  settleSoft,
 } from './framework-b.js';
-import { roadRoute } from './_shared.js';
+import { roadRoute, L, stores, economy } from './_shared.js';
 import { NAV_RETRY_S } from './build/nav.js';
+import { slotKey, claimJob, tickTrusses, syncSlots, trussSlots, tipOnce, listRigs, SPRAY_NEED, FERT_NEED, TRUSS_POWER } from './truss.js';
 
 let farm = null;
 let ctx = null;
@@ -381,6 +383,45 @@ function syncFields() {
   }
 }
 
+function stockFor(jobId) {
+  if (jobId === 'spray') {
+    if (stores.spray < SPRAY_NEED) return { ok: false, tip: '药不够，桁架不能撒药' };
+    return { ok: true, take() { stores.spray -= SPRAY_NEED; } };
+  }
+  if (stores.fertilizer < FERT_NEED) return { ok: false, tip: '肥料不够，桁架不能追肥' };
+  return { ok: true, take() { stores.fertilizer -= FERT_NEED; } };
+}
+
+function claimSoft(_farm, field, job) {
+  if (job.id !== 'spray' && job.id !== 'topdress') return false;
+  const mesh = meshOf(field.id);
+  if (!mesh) return job.id === 'spray';
+  const key = slotKey(mesh.i, mesh.j, L.PER);
+  const slots = trussSlots(ctx.fields, Math.floor(mesh.i / L.PER), Math.floor(mesh.j / L.PER), L.PER, ctx.length);
+  syncSlots(slots);
+  const slot = slots.find(item => item.key === key);
+  if (!slot?.bought) {
+    if (job.id === 'spray') tipOnce(key + ':none', '这行没有喷灌桁架，撒药派不出去');
+    return job.id === 'spray';
+  }
+  const stock = stockFor(job.id);
+  if (!stock.ok) {
+    tipOnce(key + ':' + job.id, stock.tip);
+    return true;
+  }
+  if (economy.revenue < TRUSS_POWER) {
+    tipOnce(key + ':power', '电不够，桁架停在地头');
+    return true;
+  }
+  const head = ctx.fields.find(item => item.i === Math.floor(mesh.i / L.PER) * L.PER && item.j === mesh.j);
+  const goalU = head ? (mesh.x0 - head.x0) : 0;
+  if (!claimJob(key, { fieldId: field.id, jobId: job.id, goalU, len: ctx.length })) return true;
+  stock.take();
+  economy.revenue -= TRUSS_POWER;
+  settleSoft(_farm, field.id, job.id, 0);
+  return true;
+}
+
 export function tickSlice(dt) {
   if (!farm || !ctx || !(dt > 0)) return;
   for (const unit of driveRigs()) {
@@ -410,6 +451,7 @@ export function tickSlice(dt) {
       const at = worldPose(f, order.pose);
       followRoad(unit, at.x, at.z, at.ang, machine.cruiseSpeed, slice);
     },
+    claimSoft,
     travel(_farm, fieldId, machineId) {
       const f = meshOf(fieldId);
       const unit = rigFor(machineId);
@@ -430,6 +472,21 @@ export function tickSlice(dt) {
     }
     paintRig(order, unit);
   }
+  const plots = new Set();
+  for (const rig of listRigs()) {
+    const [bi, bj] = rig.key.split(':');
+    plots.add(bi + ':' + bj);
+  }
+  if (ctx.focus) plots.add(`${Math.floor(ctx.focus.i / L.PER)}:${Math.floor(ctx.focus.j / L.PER)}`);
+  for (const id of plots) {
+    const [bi, bj] = id.split(':').map(Number);
+    syncSlots(trussSlots(ctx.fields, bi, bj, L.PER, ctx.length));
+  }
+  const finished = tickTrusses(dt);
+  for (const rig of listRigs()) {
+    if (rig.phase === 'sweep' && rig.job) settleSoft(farm, rig.job.fieldId, rig.job.jobId, rig.progress || 0);
+  }
+  for (const item of finished) settleSoft(farm, item.fieldId, item.jobId, 1);
 }
 
 export function prepField(f, recipeId = 'clear_general') {

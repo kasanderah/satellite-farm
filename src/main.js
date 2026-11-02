@@ -36,7 +36,7 @@ import { BUILDINGS, ROADS as BUILD_ROADS } from './build/catalog.js';
 import { placeWork, eraseWork, listWorks, previewWork, roadMask, pieceUnder } from './build/works.js';
 import { createWorkMesh, ghostMaterial, applyGhostTint, createRoadMesh } from './build/meshes.js';
 import { footprint, worldCell, cellOrigin } from './build/placement.js';
-import { trussSlots, buyTruss, TRUSS_PRICE } from './truss.js';
+import { trussSlots, buyTruss, TRUSS_PRICE, listRigs, drainTips, syncSlots, slotKey } from './truss.js';
 import { DAY_SECONDS } from './world-clock.js';
 import { SOIL_STORE, defaultSoilCurves, normalizeSoilCurves, freshSoil, stepSoil, soilDrivers, soilText } from './soil.js';
 
@@ -1621,33 +1621,54 @@ function paintFootprint(preview) {
 const trussRoot = new THREE.Group();
 trussRoot.name = 'trusses';
 scene.add(trussRoot);
+let trussKit = null;
+function longTruss() {
+  if (!trussKit) trussKit = irrigatorKit();
+  const group = new THREE.Group();
+  for (const k of ['light', 'dark', 'glass', 'emis']) if (trussKit[k]) {
+    const mesh = new THREE.Mesh(trussKit[k], MAT[k]);
+    mesh.castShadow = k !== 'emis';
+    mesh.receiveShadow = k !== 'emis';
+    group.add(mesh);
+  }
+  group.scale.z = L.FIELD / 124;
+  return group;
+}
+function focusSlots() {
+  const bi = Math.floor(focus.i / L.PER);
+  const bj = Math.floor(focus.j / L.PER);
+  return trussSlots(fields, bi, bj, L.PER, L.FIELD);
+}
 function syncTruss() {
   while (trussRoot.children.length) {
     const child = trussRoot.children.pop();
-    child.traverse(obj => { if (obj.geometry) obj.geometry.dispose(); });
+    child.traverse(obj => { if (obj.userData.ownGeo && obj.geometry) obj.geometry.dispose(); });
   }
-  const bi = Math.floor(focus.i / L.PER);
-  const bj = Math.floor(focus.j / L.PER);
-  const metal = new THREE.MeshStandardMaterial({ color: 0x6f6a61, roughness: 0.58, metalness: 0.42 });
-  const dark = new THREE.MeshStandardMaterial({ color: 0x3a3834, roughness: 0.7, metalness: 0.28 });
-  for (const slot of trussSlots(fields, bi, bj, L.PER, L.FIELD)) {
-    const group = new THREE.Group();
-    const pad = new THREE.Mesh(new THREE.BoxGeometry(6.2, 0.14, 2.4), slot.bought ? metal : dark);
-    pad.position.y = 0.1;
-    group.add(pad);
+  const slots = focusSlots();
+  syncSlots(slots);
+  const padMat = new THREE.MeshStandardMaterial({ color: 0x3a3834, roughness: 0.8, metalness: 0.2 });
+  for (const slot of slots) {
     if (slot.bought) {
-      for (const x of [-2.5, 2.5]) {
-        const post = new THREE.Mesh(new THREE.BoxGeometry(0.3, 3.4, 0.3), metal);
-        post.position.set(x, 1.8, 0);
-        group.add(post);
-      }
-      const beam = new THREE.Mesh(new THREE.BoxGeometry(5.6, 0.24, 0.28), dark);
-      beam.position.y = 3.45;
-      group.add(beam);
+      const beam = longTruss();
+      beam.name = slot.key;
+      trussRoot.add(beam);
+      continue;
     }
-    stickToRing(group);
-    group.position.set(slot.x, 0, slot.z);
-    trussRoot.add(group);
+    const pad = new THREE.Mesh(new THREE.BoxGeometry(7, 0.12, 2.2), padMat);
+    pad.position.set(slot.x, 0.08, slot.z);
+    pad.name = 'pad-' + slot.key;
+    pad.userData.ownGeo = true;
+    stickToRing(pad);
+    trussRoot.add(pad);
+  }
+  poseTrusses();
+}
+function poseTrusses() {
+  for (const rig of listRigs()) {
+    const beam = trussRoot.getObjectByName(rig.key);
+    if (!beam) continue;
+    beam.position.set(rig.x, 0, rig.z);
+    beam.rotation.y = rig.rot || 0;
   }
 }
 function rebuildWorks() {
@@ -2582,7 +2603,7 @@ function onLeftClick(cx, cy, shift) {
     const bj = Math.floor(focus.j / L.PER);
     const slot = trussSlots(fields, bi, bj, L.PER, L.FIELD).find(item => Math.hypot(item.x - ground.x, item.z - ground.z) < 8);
     if (slot) {
-      if (slot.bought) { toast('这行已经有桁架。喷灌和打药还没接到作业链。'); return; }
+      if (slot.bought) { toast('这行的喷灌桁架停在地头。有撒药或追肥时它自己扫过去。'); return; }
       const paid = buyTruss(slot.key, () => {
         if (!(economy.revenue >= TRUSS_PRICE)) return false;
         economy.revenue -= TRUSS_PRICE;
@@ -2590,7 +2611,7 @@ function onLeftClick(cx, cy, shift) {
       });
       if (!paid.ok) toast('营收不够买桁架');
       else {
-        toast(`<b>−${fmt(TRUSS_PRICE)}</b>第 ${slot.row + 1} 行桁架。本行软作业还没接线。`);
+        toast(`<b>−${fmt(TRUSS_PRICE)}</b>第 ${slot.row + 1} 行喷灌桁架。没派活就停在地头。`);
         syncTruss();
         paintKpi();
         saveSoon();
@@ -4050,6 +4071,11 @@ function updateLabels(d) {
     const near = Math.min(1, Math.max(0.35, (1600 - d) / 700));
     want.push({ x: r.x, z: r.z, y: 6, pr: mark ? -1 : 1, a: mark ? 1 : near, html, cls: 'veh' });
   }
+  if (!camS.deck) for (const rig of listRigs()) {
+    if (rig.phase !== 'sweep' || !rig.job) continue;
+    const name = rig.job.jobId === 'spray' ? '撒药' : '追肥';
+    want.push({ x: rig.x, z: rig.z, y: 6, pr: -1, a: 1, html: `<b>喷灌桁架</b><span>${name}</span>`, cls: 'veh' });
+  }
   if (cut.on && d < 2200) {
     const I = cutInner(), a = 1 - Math.min(1, Math.max(0, (d - 1500) / 500));
     want.push({ x: cut.x + 58, z: cut.z, y: LAYERS[1].floor + 2, pr: -2, a, html: `<b>${LAYERS[1].name}</b><small>${DECK_CLIMATE.temp}°C · 湿度 ${DECK_CLIMATE.rh}% · 蛴螬 / 黑水虻</small>`, cls: 'hub deck' });
@@ -5019,8 +5045,19 @@ function frame(now) {
   // 剖面里的 AGV 小车与巡检人员
   deckCarts.forEach((c2, i) => { c2.p = (c2.p + c2.sp * dt) % 2; const u = c2.p < 1 ? c2.p : 2 - c2.p; setInst(cartSet, i, c2.x0 + (c2.x1 - c2.x0) * u, c2.y, c2.z, c2.p < 1 ? 0 : Math.PI, 0.32); }); setCount(cartSet, cut.on ? deckCarts.length : 0);
   deckCrew.forEach((p2, i) => { p2.a += Math.sin(t * 0.4 + i) * dt * 0.6; setInst(crewSet, i, p2.x, p2.y, p2.z, p2.a); }); setCount(crewSet, cut.on && d < 1200 ? deckCrew.length : 0);
-  irrigs.forEach((ir, i) => { const f = ir.f, u = 8 + (Math.sin(t * 0.02 + ir.ph * 6.283) * 0.5 + 0.5) * (L.FIELD - 16); const [x, z] = f.dir === 0 ? [f.x0 + u, f.z0 + 64] : [f.x0 + 64, f.z0 + u]; setInst(irrSet, i, x, 0, z, f.dir === 0 ? 0 : Math.PI / 2); });
-  setCount(irrSet, d < 2500 ? irrigs.length : 0);
+  const trussRows = new Set(listRigs().map(rig => rig.key));
+  let irrN = 0;
+  for (const ir of irrigs) {
+    if (trussRows.has(slotKey(ir.f.i, ir.f.j, L.PER))) continue;
+    const f = ir.f;
+    const u = 8 + (Math.sin(t * 0.02 + ir.ph * 6.283) * 0.5 + 0.5) * (L.FIELD - 16);
+    const [x, z] = f.dir === 0 ? [f.x0 + u, f.z0 + L.FIELD / 2] : [f.x0 + L.FIELD / 2, f.z0 + u];
+    setInst(irrSet, irrN, x, 0, z, f.dir === 0 ? 0 : Math.PI / 2);
+    irrN += 1;
+  }
+  poseTrusses();
+  for (const text of drainTips()) toast(text);
+  setCount(irrSet, d < 2500 ? irrN : 0);
   // 远景信号点
   harvesters.forEach((h, i) => { if ((i + 1) * 3 <= dotPos.length) dotPos.set([h.x, 4, h.z], i * 3); });
   drones.forEach((dr, i) => { const o = (harvesters.length + i) * 3; if (o + 3 <= dotPos.length) dotPos.set([dr.x, dr.y, dr.z], o); });

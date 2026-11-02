@@ -883,10 +883,10 @@ test('回库待机放下软单和未开工硬单，正在做的硬单做完才�
 });
 
 test('拉斯提卡阶段和版本戳来自同一份定义', () => {
-  assert.equal(HUD_VERSION, '环穗 v6.33.1');
+  assert.equal(HUD_VERSION, '环穗 v6.34');
   const doc = parseFieldStageDoc(structuredClone(lastikaRaw));
   const windows = jobWindows(doc, alignFieldCalendar(doc)).filter(item => item.op.kind === 'optional');
-  assert.deepEqual(windows.map(item => item.op.id), ['topdress', 'hill']);
+  assert.deepEqual(windows.map(item => item.op.id), ['topdress', 'spray', 'hill']);
   const crop = installShippedLastika();
   assert.equal(crop.name, '拉斯提卡');
   assert.equal(crop.graph.entry.job, 'sow');
@@ -910,6 +910,7 @@ test('拉斯提卡阶段和版本戳来自同一份定义', () => {
   assert.equal(crop.stages.find(stage => stage.id === 'after').days, undefined);
   assert.deepEqual(crop.stages.find(stage => stage.id === 'develop').jobs, [
     { job: 'topdress', kind: 'soft', name: '追肥', from: 5, to: 6, yieldMul: 2 },
+    { job: 'spray', kind: 'soft', name: '撒药', from: 4, to: 6 },
   ]);
   assert.equal(crop.growDays, 12);
   assert.equal(crop.qualityBase, 1);
