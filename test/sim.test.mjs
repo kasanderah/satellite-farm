@@ -23,7 +23,7 @@ test('one colonist plot is about 4 km on the ring', () => {
   assert.ok(PLOT.across > 3500 && PLOT.across < 4500, PLOT.across);
   assert.ok(RING.R > 9000, 'ring radius stays at colony scale');
   const owned = fields.filter(f => f.owned);
-  assert.ok(owned.length > 400 && owned.length < 900, owned.length);
+  assert.ok(owned.length > 8 && owned.length < 20, owned.length);
   assert.equal(fields.length, L.NFX * L.NFZ);
 });
 
@@ -1250,7 +1250,7 @@ test('drones scout and treat from a base, not the machine garage', () => {
   assert.equal(workDrones.length, 0);
   assert.equal(rigs.length, 4);
   economy.revenue = 0;
-  const hub = fieldAt(L.HUBX * L.PER + 2, L.HUBZ * L.PER + 2);
+  const hub = fieldAt(L.HUBX * L.PER + 2, L.HUBZ * L.PER);
   assert.equal(placeBuilding(hub.x0 + 40, hub.z0 + 40, 'drone_base').reason, 'money');
   economy.revenue = 8000 + 4500 + 5200;
   const placed = placeBuilding(hub.x0 + 40, hub.z0 + 40, 'drone_base');

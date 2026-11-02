@@ -291,6 +291,38 @@ export function bootSlice(next) {
   return farm;
 }
 
+// 买地之后把新拥有的田登记进农场。不在这里写购买规则。卖掉的空闲田从农场拿掉。
+export function syncOwnedFields() {
+  if (!farm || !ctx) return;
+  for (const f of ctx.fields) {
+    const id = fieldKey(f);
+    if (f.owned && !farm.fields.has(id)) {
+      const addr = plotAddress(f.i, f.j, ctx.originI, ctx.originJ);
+      addField(farm, {
+        id,
+        length: ctx.length,
+        width: ctx.width,
+        ground: 'raw',
+        look: 'hold',
+        plot: addr.code,
+      });
+      byKey.set(id, f);
+      f.live = false;
+      f.hold = true;
+      f.s = 0;
+      delete f.jobS;
+      delete f.laneW;
+    } else if (!f.owned && farm.fields.has(id)) {
+      farm.queue = farm.queue.filter(item => item.fieldId !== id);
+      for (const order of [...farm.orders]) if (order.fieldId === id) farm.orders.splice(farm.orders.indexOf(order), 1);
+      farm.fields.delete(id);
+      byKey.delete(id);
+      delete f.bUnit;
+    }
+  }
+  syncFields();
+}
+
 function syncFields() {
   for (const [id, f] of byKey) {
     const unit = farm.fields.get(id);

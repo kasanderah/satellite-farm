@@ -7,6 +7,11 @@ import { SAVE_VERSION } from './save-contract.js';
 import { fieldShader, PLANT_CROPS, setHarvestSink } from './framework-b.js';
 import { WORLD_MIN_PER_REAL_MIN, DAY_SECONDS } from './world-clock.js';
 export { WORLD_MIN_PER_REAL_MIN, DAY_SECONDS };
+import {
+  bindGrid as bindLand, inspect as inspectLand, buy as commitLandBuy, sell as commitLandSell,
+  price as landPrice, sellPrice as landSellPrice, canSell as canSellLand, buyReason as landBuyReason,
+  reset as resetLand, exportState as exportLand, loadState as loadLand, isLocalHub, LOCAL_PLAYER,
+} from './land-buy.js';
 import { cropDef, rigProfile, rigCan, rigHas, hitchPlan, hitchHasModes, droneCan, JOB_PENALTY, UNLOAD_WHILE_MOVING, BIN_LANES, UNLOAD_SECONDS, TRAILER_CARGO_CAP, HITCH_SWAP_S, RELOAD_S, MODE_SWITCH_S, SURFACE_CROPS, workWidthOf, lanesForWidth, binCapOf } from './surface-crops.js';
 export { cropDef, rigProfile, JOB_PENALTY, UNLOAD_WHILE_MOVING, BIN_LANES, SURFACE_CROPS, workWidthOf, lanesForWidth };
 
@@ -768,11 +773,20 @@ export function fieldOps() {
 // 与 v3.1 相同次数的随机数，好让后面的运输车 / 无人机还落在原来的位置上
 for (const f of fields) if (f.state === 3) { rnd(); rnd(); }
 
+// 可操作缓存只由买地模块写。种植、调度、农机工单只读 f.owned。
+bindLand(L);
+function stampLand(f) {
+  const info = inspectLand(f.i, f.j);
+  f.landPlayer = info.player;
+  f.landZone = info.zone;
+  f.landHub = info.hub;
+  f.owned = info.operable && f.crop >= 0;
+  f.frozen = !f.owned;
+}
 for (const f of fields) {
   const bi = Math.floor(f.i / L.PER), bj = Math.floor(f.j / L.PER);
   f.inPlot = inPlotBlock(bi, bj);
-  f.owned = f.inPlot && f.crop >= 0;
-  f.frozen = !f.owned;
+  stampLand(f);
   f.live = false;
   f.hold = true;
   f.plantedAt = 0;
@@ -1898,6 +1912,11 @@ const openingFields = fields.filter(f => f.owned).map(f => ({
   idx: f.idx, crop: f.crop, state: f.state, g: f.g, s: f.s, timer: f.timer || 0,
   live: !!f.live, hold: !!f.hold, frozen: !!f.frozen, paid: !!f.paid, sprayed: !!f.sprayed, claimed: !!f.claimed,
 }));
+const parcelDecor = new Map();
+for (const f of fields) {
+  if (!f.inPlot) continue;
+  parcelDecor.set(f.idx, { crop: f.crop, state: f.state, g: f.g, s: f.s, timer: f.timer || 0, dir: f.dir });
+}
 
 function fieldUnder(x, z, includeHub) {
   let qx = x - L.X0;
@@ -1916,6 +1935,9 @@ function fieldUnder(x, z, includeHub) {
 }
 export function fieldAtWorld(x, z) {
   return fieldUnder(x, z, false);
+}
+export function fieldAtWorldAny(x, z) {
+  return fieldUnder(x, z, true);
 }
 
 function manhattan(ax, az, aVert, ex, ez, eVert) {
@@ -2150,6 +2172,8 @@ function movedOntoHub(x, z) {
 export function placeBuilding(x, z, kind = 'process') {
   if (!inPlayerPlot(x, z)) return { ok: false, reason: 'plot' };
   if (!onHubParcel(x, z)) return { ok: false, reason: 'field' };
+  const pad = fieldUnder(x, z, true);
+  if (!pad || !isLocalHub(pad.i, pad.j)) return { ok: false, reason: 'hub' };
   const spec = BUILDING_KINDS[kind] || BUILDING_KINDS.process;
   const cost = spec.price || 0;
   if (cost && !(economy.revenue >= cost)) return { ok: false, reason: 'money', cost };
@@ -2229,26 +2253,37 @@ export function harvestCulture(tankId) {
   tank.bj = null;
   return { ok: true, lot };
 }
+function restoreDecor(f, src, live) {
+  f.crop = src.crop; f.state = src.state; f.g = src.g; f.s = src.s; f.timer = src.timer;
+  if (src.dir === 0 || src.dir === 1) f.dir = src.dir;
+  f.live = live ? src.live : false;
+  f.hold = live ? src.hold : true;
+  f.paid = live ? src.paid : false;
+  f.sprayed = live ? src.sprayed : false;
+  f.claimed = live ? src.claimed : false;
+  f.plantedAt = 0;
+  f.cycle = false;
+  f.autoBuy = false;
+  f.failed = null;
+  f.harvested = false;
+  f.stored = false;
+  f.yieldFactor = 1;
+  f.boomBusy = false;
+  delete f.jobS;
+  delete f.restTone;
+  delete f.laneW;
+  delete f.penalized;
+  delete f.queued;
+  delete f.bUnit;
+}
 export function resetGame() {
+  resetLand();
   const by = new Map(openingFields.map(s => [s.idx, s]));
   for (const f of fields) {
     const s = by.get(f.idx);
-    if (!s) continue;
-    f.crop = s.crop; f.state = s.state; f.g = s.g; f.s = s.s; f.timer = s.timer;
-    f.live = s.live; f.hold = s.hold; f.frozen = s.frozen; f.paid = s.paid; f.sprayed = s.sprayed; f.claimed = s.claimed;
-    f.plantedAt = 0;
-    f.cycle = false;
-    f.autoBuy = false;
-    f.failed = null;
-    f.harvested = false;
-    f.stored = false;
-    f.yieldFactor = 1;
-    f.boomBusy = false;
-    delete f.jobS;
-    delete f.restTone;
-    delete f.laneW;
-    delete f.penalized;
-    delete f.queued;
+    if (s) restoreDecor(f, s, true);
+    else if (parcelDecor.has(f.idx)) restoreDecor(f, parcelDecor.get(f.idx), false);
+    stampLand(f);
   }
   warehouse.length = 0;
   log.length = 0;
@@ -2481,6 +2516,7 @@ export function exportSnapshot() {
     simTime: worldDay,
     worldDay,
     revenue: economy.revenue,
+    land: exportLand(),
     timeScale: economy.timeScale,
     stores: { seed: stores.seed, fertilizer: stores.fertilizer, spray: stores.spray, feed: stores.feed, peel: stores.peel, frass: stores.frass, seed_soy: stores.seed_soy || 0, seed_barley: stores.seed_barley || 0, seedling_cabbage: stores.seedling_cabbage || 0 },
     warehouse: warehouse.map(lot => ({ ...lot })),
@@ -2524,8 +2560,63 @@ function rebuildDemo() {
     armCutter(f, 3, 48);
   }
 }
+export function landCard(i, j) {
+  const info = inspectLand(i, j);
+  const reason = info.zone === 'hub' || info.zone === 'out' ? info.zone : landBuyReason(info.dx, info.dz);
+  return {
+    ...info,
+    price: landPrice(info.dx, info.dz),
+    sell: landSellPrice(info.dx, info.dz),
+    reason,
+    canBuy: reason === '',
+    canSell: canSellLand(info.dx, info.dz),
+    local: info.player === LOCAL_PLAYER,
+  };
+}
+function blockFields(dx, dz) {
+  const bi = L.HUBX + dx, bj = L.HUBZ + dz;
+  const list = [];
+  for (const f of fields) if (Math.floor(f.i / L.PER) === bi && Math.floor(f.j / L.PER) === bj) list.push(f);
+  return list;
+}
+export function buyLandAt(i, j) {
+  const info = inspectLand(i, j);
+  const reason = landBuyReason(info.dx, info.dz);
+  if (reason) return { ok: false, reason };
+  const price = landPrice(info.dx, info.dz);
+  if (!(economy.revenue >= price)) return { ok: false, reason: 'money', price };
+  const gate = commitLandBuy(info.dx, info.dz);
+  if (!gate.ok) return gate;
+  economy.revenue -= price;
+  for (const f of blockFields(info.dx, info.dz)) stampLand(f);
+  log.push({ type: 'land', pay: price, t: worldDay });
+  return { ok: true, price, dx: info.dx, dz: info.dz };
+}
+export function sellLandAt(i, j) {
+  const info = inspectLand(i, j);
+  if (!canSellLand(info.dx, info.dz)) return { ok: false, reason: 'keep' };
+  const plots = blockFields(info.dx, info.dz);
+  if (plots.some(f => f.live || (f.bUnit && f.bUnit.look && f.bUnit.look !== 'hold' && f.bUnit.look !== 'raw'))) {
+    return { ok: false, reason: 'busy' };
+  }
+  const gate = commitLandSell(info.dx, info.dz);
+  if (!gate.ok) return gate;
+  economy.revenue += gate.price;
+  for (const f of plots) {
+    const decor = parcelDecor.get(f.idx);
+    if (decor) restoreDecor(f, decor, false);
+    stampLand(f);
+  }
+  log.push({ type: 'land-sell', pay: gate.price, t: worldDay });
+  return { ok: true, price: gate.price, dx: info.dx, dz: info.dz };
+}
 export function applySnapshot(data) {
   if (!data || data.schema !== 2 || data.plotId !== PLOT.id || !Array.isArray(data.fields)) return false;
+  loadLand(data.land);
+  for (const f of fields) {
+    stampLand(f);
+    if (!f.owned) delete f.bUnit;
+  }
   const by = new Map(data.fields.map(s => [s.i + ':' + s.j, s]));
   for (const f of fields) {
     if (!f.owned) continue;

@@ -11,7 +11,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { HorizontalTiltShiftShader } from 'three/addons/shaders/HorizontalTiltShiftShader.js';
 import { VerticalTiltShiftShader } from 'three/addons/shaders/VerticalTiltShiftShader.js';
-import { PALETTE, CROPS, TEX_ID, L, fields, harvesters, haulers, drones, step, TRUNKS_X, TRUNKS_Z, depots, inCrater, ROADS, RING, LAYERS, CUT, wrapX, PLOT, economy, focus, signals, log, plantField, abandonField, quote, setTimeScale, setPaused, paused, exportSnapshot, applySnapshot, fieldAtWorld, fieldAt, toWorld, onAfterStep, fieldOrigin, simTime, worldDay, stores, rigs, fieldVisual, cropWatch, stageBoard, POTATO_DAYS, POTATO_STAGES, warehouse, buildings, sellLot, sellStack, warehouseStacks, warehouseCapacity, placeBuilding, removeBuilding, rigReadout, SHOP, buySeed, buyItem, SEED_PER_FIELD, FERT_PER_FIELD, resetGame, CULTURES, DECK_CLIMATE, tanks, cultureWatch, startCulture, tendCulture, harvestCulture, BUILDING_KINDS, CULTURE_CELLS, tankSite, devices, potatoStock, fertPlan, cultureFeedPlan, millWatch, startMill, removeMill, orderProcess, HUB_SITES, cropDossier, MACHINE_SHOP, buyMachine, cropDef, boomWatch, rigProfile, DRONE_SHOP, workDrones, buyDrone, sectorLight, sectorWord, dayCenter, setWorldDay, RING_OMEGA, bindPotatoClock, bindSurfaceClock, formatTimeScale, sellRig, machineSellPrice, rigIsWorking } from './_shared.js';
+import { PALETTE, CROPS, TEX_ID, L, fields, harvesters, haulers, drones, step, TRUNKS_X, TRUNKS_Z, depots, inCrater, ROADS, RING, LAYERS, CUT, wrapX, PLOT, economy, focus, signals, log, plantField, abandonField, quote, setTimeScale, setPaused, paused, exportSnapshot, applySnapshot, fieldAtWorld, fieldAt, toWorld, onAfterStep, fieldOrigin, simTime, worldDay, stores, rigs, fieldVisual, cropWatch, stageBoard, POTATO_DAYS, POTATO_STAGES, warehouse, buildings, sellLot, sellStack, warehouseStacks, warehouseCapacity, placeBuilding, removeBuilding, rigReadout, SHOP, buySeed, buyItem, SEED_PER_FIELD, FERT_PER_FIELD, resetGame, CULTURES, DECK_CLIMATE, tanks, cultureWatch, startCulture, tendCulture, harvestCulture, BUILDING_KINDS, CULTURE_CELLS, tankSite, devices, potatoStock, fertPlan, cultureFeedPlan, millWatch, startMill, removeMill, orderProcess, HUB_SITES, cropDossier, MACHINE_SHOP, buyMachine, cropDef, boomWatch, rigProfile, DRONE_SHOP, workDrones, buyDrone, sectorLight, sectorWord, dayCenter, buyLandAt, sellLandAt, fieldAtWorldAny, landCard, setWorldDay, RING_OMEGA, bindPotatoClock, bindSurfaceClock, formatTimeScale, sellRig, machineSellPrice, rigIsWorking } from './_shared.js';
 import { applyStagePayload, bootFieldStageSource, writeStageStore, suspendLastikaStage, resumeLastikaStage, stageBadge, bootFieldBlocks } from './field-stage-live.js';
 import { bootWorkshopMachines } from './machine-live.js';
 import { potatoDrawLooks, POTATO_PAINT_SLOTS, workWidthOf } from './surface-crops.js';
@@ -24,9 +24,10 @@ import { surfaceKits, hitchOffset } from './surface-kits.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CULT_EMPTY } from './lab-catalog.js';
 import { makeColony } from './colony-art.js';
-import { bootSlice, tickSlice, prepField, plantCrop, dockOf, dropDrive, adoptBought, recallRig, resumeRig, rigStandby, dispatchBoard } from './b-bind.js';
+import { bootSlice, tickSlice, prepField, plantCrop, dockOf, dropDrive, adoptBought, recallRig, resumeRig, rigStandby, dispatchBoard, syncOwnedFields } from './b-bind.js';
 import { PLANT_CROPS, PREP_RECIPES, FIELD_BLOCKS, JOBS, stageDisplayStops } from './framework-b.js';
 import { HUD_VERSION } from './version.js';
+import { overlayCells } from './land-buy.js';
 import { DAY_SECONDS } from './world-clock.js';
 import { SOIL_STORE, defaultSoilCurves, normalizeSoilCurves, freshSoil, stepSoil, soilDrivers, soilText } from './soil.js';
 
@@ -1373,6 +1374,78 @@ hoverEdge.name = 'hover-edge';
 hoverEdge.count = 0; hoverEdge.frustumCulled = false; hoverEdge.castShadow = false; hoverEdge.receiveShadow = false;
 hoverEdge.renderOrder = 4;
 scene.add(hoverEdge);
+const LAND_TINT = {
+  owned: '#c4a15a',
+  blue: '#3d8fd4',
+  red: '#d4533a',
+  lock: '#6a655c',
+  foreignYellow: '#8a7044',
+  hub0: '#85eed9',
+  hub1: '#e49680',
+  hub2: '#6f93a0',
+  hub3: '#c4a15a',
+};
+const landLayers = {};
+for (const [kind, hex] of Object.entries(LAND_TINT)) {
+  const mat = curved(new THREE.MeshBasicMaterial({
+    color: new THREE.Color(hex), transparent: true, opacity: kind === 'lock' ? 0.34 : 0.72,
+    toneMapped: false, fog: false, depthWrite: false,
+  }));
+  const mesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), mat, 48);
+  mesh.count = 0;
+  mesh.frustumCulled = false;
+  mesh.renderOrder = 2;
+  mesh.name = 'land-' + kind;
+  scene.add(mesh);
+  landLayers[kind] = mesh;
+}
+function blockFillBox(dx, dz) {
+  const i = (L.HUBX + dx) * L.PER;
+  const j = (L.HUBZ + dz) * L.PER;
+  const [x0, z0] = fieldOrigin(i, j);
+  const [x1, z1] = fieldOrigin(i + L.PER - 1, j + L.PER - 1);
+  return { x0, z0, x1: x1 + L.FIELD, z1: z1 + L.FIELD, y: 8 };
+}
+function hubFillBox(player) {
+  const fi0 = player === 0 || player === 1 ? 2 : 0;
+  const fj0 = player === 1 || player === 2 ? 2 : 0;
+  const i = L.HUBX * L.PER + fi0;
+  const j = L.HUBZ * L.PER + fj0;
+  const [x0, z0] = fieldOrigin(i, j);
+  const [x1, z1] = fieldOrigin(i + 1, j + 1);
+  return { x0, z0, x1: x1 + L.FIELD, z1: z1 + L.FIELD, y: 22 };
+}
+let landSig = null;
+function paintLandOverlay(force) {
+  const on = mode === 'scheme' && viewLayer === 'surface';
+  for (const mesh of Object.values(landLayers)) mesh.visible = on;
+  if (!on) return;
+  const cells = overlayCells();
+  const sig = cells.map(c => c.kind + (c.hub ? 'h' + c.player : c.dx + ',' + c.dz)).join(';');
+  if (!force && sig === landSig) return;
+  landSig = sig;
+  const n = {};
+  for (const kind of Object.keys(landLayers)) n[kind] = 0;
+  const put = (kind, box) => {
+    const mesh = landLayers[kind];
+    if (!mesh || n[kind] >= 48) return;
+    const i = n[kind]++;
+    tmpM.compose(
+      tmpP.set((box.x0 + box.x1) / 2, box.y, (box.z0 + box.z1) / 2),
+      tmpQ.identity(),
+      tmpS.set(Math.abs(box.x1 - box.x0) * 0.92, 1.4, Math.abs(box.z1 - box.z0) * 0.92),
+    );
+    mesh.setMatrixAt(i, tmpM);
+  };
+  for (const cell of cells) {
+    if (!landLayers[cell.kind]) continue;
+    put(cell.kind, cell.hub ? hubFillBox(cell.player) : blockFillBox(cell.dx, cell.dz));
+  }
+  for (const [kind, mesh] of Object.entries(landLayers)) {
+    mesh.count = n[kind];
+    mesh.instanceMatrix.needsUpdate = true;
+  }
+}
 const buildingSets = {
   warehouse: instanced(warehouseKit(), 8),
   garage: instanced(garageKit(), 8),
@@ -2097,14 +2170,30 @@ function enterLock() {
   beginLock(focus);
   if (focus.kind === 'rig' && camT.d > 320) camT.d = 180;
 }
+function landWhy(f) {
+  if (!f || f.owned) return '';
+  if (f.crop === -3) return '蓄水池';
+  if (f.landPlayer > 0) return '他玩家地块 · 锁定';
+  if (f.landHub > 0) return '他玩家的中枢四分';
+  if (f.landHub === 0) return '';
+  if (f.landZone === 'blue' || f.landZone === 'red') return '还没买下';
+  if (f.inPlot) return '设施用地';
+  return '邻区快照 · 只读';
+}
 function selectOnlyField(f) {
   pickedRigs.clear();
   selectedRig = null;
   if (!camLock) watchRig = null;
   pickedFields.clear();
+  if (mode === 'scheme') {
+    if (f?.owned) pickedFields.add(f.idx);
+    selectField(f, landWhy(f));
+    paintSheet();
+    updateDock();
+    return;
+  }
   if (f?.owned) pickedFields.add(f.idx);
-  const why = !f ? '' : !f.owned ? (f.crop === -3 ? '蓄水池' : f.inPlot ? '设施用地' : '邻区快照 · 只读') : '';
-  selectField(f, why);
+  selectField(f, landWhy(f));
   updateDock();
 }
 function toggleField(f) {
@@ -2145,15 +2234,16 @@ function fieldBeside(x, z) {
   return best;
 }
 function fieldFromScreen(cx, cy) {
+  const at = mode === 'scheme' ? fieldAtWorldAny : fieldAtWorld;
   const p = pickFlat(cx, cy);
   if (p) {
-    const hit = fieldAtWorld(p.x, p.z) || fieldBeside(p.x, p.z);
+    const hit = at(p.x, p.z) || fieldBeside(p.x, p.z);
     if (hit) return hit;
   }
   for (const [dx, dy] of [[12, 0], [-12, 0], [0, 12], [0, -12]]) {
     const q = pickFlat(cx + dx, cy + dy);
     if (!q) continue;
-    const hit = fieldAtWorld(q.x, q.z);
+    const hit = at(q.x, q.z);
     if (hit) return hit;
   }
   return null;
@@ -2377,7 +2467,7 @@ function onMapClick(cx, cy) {
       buildPick = best.id; paintSheet(); return;
     }
     const r = placeBuilding(p.x, p.z, buildKind);
-    if (!r.ok) toast(r.reason === 'field' ? '房子建在中枢地块上' : r.reason === 'money' ? '营收不够' : '只能建在自己的田区里');
+    if (!r.ok) toast(r.reason === 'field' ? '房子建在中枢地块上' : r.reason === 'hub' ? '这四分中枢是别的玩家的' : r.reason === 'money' ? '营收不够' : '只能建在自己的田区里');
     else { toast(r.cost ? `<b>−${fmt(r.cost)}</b>${r.building.name}` : `${r.building.name}已放下`); saveSoon(); paintSheet(); }
     return;
   }
@@ -2564,17 +2654,6 @@ R.domElement.addEventListener('contextmenu', e => e.preventDefault());
 document.addEventListener('contextmenu', e => e.preventDefault(), true);
 R.domElement.addEventListener('pointerdown', e => {
   ptr = { x: e.clientX, y: e.clientY, b: e.button, shift: e.shiftKey };
-  if (mode === 'scheme' && viewLayer === 'surface' && e.button === 0) {
-    drag = { b: 'box', x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, shift: e.shiftKey };
-    closePlanMenu();
-    R.domElement.setPointerCapture(e.pointerId);
-    return;
-  }
-  if (mode === 'scheme' && viewLayer === 'surface' && e.button === 2) {
-    drag = { b: 'rmb', x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY };
-    R.domElement.setPointerCapture(e.pointerId);
-    return;
-  }
   if (e.button === 2 && viewLayer === 'surface' && mode !== 'build') {
     rightArm = { x: e.clientX, y: e.clientY, t: performance.now() };
     return;
@@ -2931,6 +3010,67 @@ function paintDispatch(force) {
     : '<p class="note">没有可派的农机。</p>';
   host.innerHTML = `<div class="sched head"><span>作物</span><span>作业</span><span>软硬</span><span>田</span><span>农机</span><span>状态</span></div>${jobs}<p class="note">农机</p><div class="sched head mach"><span>农机</span><span>状态</span><span>当前作业</span></div>${machines}`;
 }
+const ZONE_WORD = { yellow: '黄区', blue: '蓝区', red: '红区', hub: '中枢', out: '区外' };
+function landBlurb(card, f) {
+  if (!card) return '点一块地。黄区是开局的。蓝区要挨着已有的地。蓝区买完，挨着的红区才开。另外三名玩家的地锁着。';
+  if (card.zone === 'hub') return card.hub === 0 ? '中枢这一分归玩家1。机库和仓还在原来的垫块上，不搬走。' : `中枢这一分归${card.name}，锁定。`;
+  if (!card.local) return `${card.name}的${ZONE_WORD[card.zone] || '地'}。不能买，不能耕。`;
+  if (f?.owned && card.zone === 'yellow') return '开局地块。可以整地、种植。';
+  if (card.canSell) return '已经买下。卖掉只退一半占位价。';
+  if (card.canBuy) return card.zone === 'blue' ? '挨着已有的地，可以买。' : '蓝区已经买完，并且挨着已有的地，可以买。';
+  if (card.reason === 'blue') return '红区还关着。先把这一侧的蓝区买完。';
+  if (card.reason === 'adj') return '还不能买。要先买到挨着它的那一侧。';
+  return '这块不卖。';
+}
+function landSheet() {
+  const parcel = selected && selected.landZone && selected.landZone !== 'out';
+  const card = parcel ? landCard(selected.i, selected.j) : null;
+  const cells = overlayCells();
+  const nBlue = cells.filter(c => c.kind === 'blue').length;
+  const nRed = cells.filter(c => c.kind === 'red').length;
+  const where = !card ? '还没选'
+    : card.zone === 'hub' ? `中枢四分 · ${card.name}`
+    : `${ZONE_WORD[card.zone] || card.zone} · ${card.name} · 区 ${card.dx},${card.dz}`;
+  const price = card?.price ? `<p class="note">占位价 ${fmt(card.price)}。卖掉退 ${fmt(card.sell)}。</p>` : '';
+  const buy = card?.canBuy ? `<button type="button" class="sell" id="land-buy">购买这一区 · −${fmt(card.price)}</button>` : '';
+  const sell = card?.canSell ? `<button type="button" class="sell" id="land-sell">出售这一区 · +${fmt(card.sell)}</button>` : '';
+  const ops = selected?.owned
+    ? `<button type="button" class="sell" id="land-ops">地块操作</button><p class="note">占位。整地和种植在底栏，只对已经拥有的田生效。</p>`
+    : card?.zone === 'hub' && card.hub === 0
+      ? `<p class="note">这一分中枢归你用。田上的整地和种植不在中枢格上。</p>`
+      : '';
+  return `<div class="who"><b>买卖地块</b><span>${where}</span></div><p class="note">${landBlurb(card, selected)}</p>${price}<div class="buyline">${buy}${sell}</div>${ops}<p class="note">可购蓝 ${nBlue} 区 · 可购红 ${nRed} 区。黄是开局，蓝是一扩，红是二扩。灰的是别的玩家。</p>`;
+}
+function buySelectedLand() {
+  const f = selected;
+  if (!f) return;
+  const r = buyLandAt(f.i, f.j);
+  if (!r.ok) {
+    const why = r.reason === 'money' ? '营收不够' : r.reason === 'blue' ? '先把蓝区买完' : r.reason === 'adj' ? '要挨着已经拥有的地' : r.reason === 'locked' ? '这是别的玩家的地' : '这块不能买';
+    toast(why);
+    return;
+  }
+  syncOwnedFields();
+  if (f.owned) pickedFields.add(f.idx);
+  toast(`买下这一区 · −${fmt(r.price)}`);
+  paintSheet();
+  updateDock();
+  saveSoon();
+  paintLandOverlay(true);
+}
+function sellSelectedLand() {
+  const f = selected;
+  if (!f) return;
+  const r = sellLandAt(f.i, f.j);
+  if (!r.ok) { toast(r.reason === 'busy' ? '这块正在作业，先等它停' : '这块不能卖'); return; }
+  pickedFields.delete(f.idx);
+  syncOwnedFields();
+  toast(`卖掉这一区 · +${fmt(r.price)}`);
+  paintSheet();
+  updateDock();
+  saveSoon();
+  paintLandOverlay(true);
+}
 function paintSheet() {
   const el = $('sheet');
   el.classList.toggle('wide', mode === 'crops' || mode === 'store' || mode === 'shop' || mode === 'scheme' || mode === 'rigshop' || mode === 'dispatch');
@@ -2948,8 +3088,7 @@ function paintSheet() {
       : `<div class="who"><b>${d.name}</b><span>${d.analog} · 参考 ${d.days} 日</span></div><p class="note">${d.yieldNote}</p>`;
     el.innerHTML = `<div class="split"><div><div class="who"><b>作物</b><span>点一种看阶段</span></div>${stackSlots(rows, d.id, 'data-cropid')}</div><div>${head}</div></div>`;
   } else if (mode === 'scheme') {
-    const n = pickedFields.size;
-    el.innerHTML = `<div class="who"><b>规划</b><span>已选 ${n} 块田</span></div><p class="note">拖出方框选田。按住 Shift 再点，加选。右键已选的田，种拉斯提卡。田要先整成一般田地。</p>${planTicks()}${planCropButtons(!n)}`;
+    el.innerHTML = landSheet();
   } else if (mode === 'dispatch') {
     dispatchSig = '';
     el.innerHTML = `<div class="who"><b>调度</b><span>只观察，还不能改派</span></div><div id="dispatch-body"></div>`;
@@ -3112,6 +3251,9 @@ $('sheet').addEventListener('click', e => {
   const stack = e.target.closest('[data-stack]');
   if (stack) { pickedStack = stack.dataset.stack; paintSheet(); return; }
   if (e.target.dataset.flag) { readPlanFlags($('sheet')); return; }
+  if (e.target.id === 'land-buy') { buySelectedLand(); return; }
+  if (e.target.id === 'land-sell') { sellSelectedLand(); return; }
+  if (e.target.id === 'land-ops') { toast('地块操作还是占位。整地和种植在底栏，只对已拥有的田。'); return; }
   const plan = e.target.closest('[data-plan]');
   if (plan) { planSelected(plan.dataset.plan); return; }
   const bact = e.target.closest('[data-bact]');
@@ -3755,7 +3897,7 @@ function updateDock() {
     chip.classList.toggle('on', !!title);
     chip.textContent = title;
   }
-  const show = viewLayer === 'surface' && (list.length || rigOnly) && (mode === 'look' || mode === 'plan' || mode === 'machines' || mode === 'dispatch');
+  const show = viewLayer === 'surface' && (list.length || rigOnly) && (mode === 'look' || mode === 'plan' || mode === 'machines' || mode === 'dispatch' || mode === 'scheme');
   if (!show) { el.classList.remove('on'); dockHover = null; return; }
   el.classList.add('on');
   const f = list[0] || selected;
@@ -4584,6 +4726,7 @@ function frame(now) {
   const mpp = d * 2 * Math.tan(15 * DEG) / innerHeight; const [m, px] = niceScale(mpp);
   $('scalebar').style.width = px.toFixed(0) + 'px'; $('scaletxt').textContent = m >= 1000 ? (m / 1000) + ' km' : m + ' m';
   tickFieldSoil();
+  paintLandOverlay();
   updateLabels(d);
   paintKpi();
   updateDock();
@@ -4608,6 +4751,9 @@ window.__farm = {
   deck(on) { visitDeck(on == null ? !camS.deck : !!on); },
   get onDeck() { return !!camS.deck; },
   snapshot: exportSnapshot, plant: () => doPlant(), prep: () => doPrep(), select: (i, j) => selectField(fieldAt(i, j)),
+  buyLand: (i, j) => { const r = buyLandAt(i, j); if (r.ok) { syncOwnedFields(); paintLandOverlay(true); } return r; },
+  sellLand: (i, j) => { const r = sellLandAt(i, j); if (r.ok) { syncOwnedFields(); paintLandOverlay(true); } return r; },
+  land: (i, j) => landCard(i, j),
   b() {
     const f = selected;
     const rig = rigs.find(r => r.bDrive && r.busy) || rigs.find(r => r.bDrive) || null;
