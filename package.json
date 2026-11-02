@@ -6,7 +6,7 @@
   "main": "index.html",
   "scripts": {
     "build": "node build.mjs",
-    "test": "node --test test/framework-b.test.mjs test/save-contract.test.mjs test/land-buy.test.mjs test/modulus.test.mjs"
+    "test": "node --test test/framework-b.test.mjs test/save-contract.test.mjs test/land-buy.test.mjs test/modulus.test.mjs test/build-placement.test.mjs"
   },
   "keywords": [],
   "author": "",

@@ -276,12 +276,14 @@ export function droneKit() {
   return k.build();
 }
 
-// ---------------- 小人（1.8 m，尺度参照） ----------------
+// ---------------- 小人（1.7 m，相对 4.2 m 建筑格） ----------------
+// 先前头顶约 1.8 m。现按 1.7 / 1.8 收到真实身高，格子仍远大于人。
 export function personKit() {
   const k = new Kit();
-  k.cyl('light', 0.2, 0.17, 1.1, [0, 0.95, 0], [0, 0, 0], 'paper', 8);
-  k.cyl('dark', 0.13, 0.13, 0.75, [0, 0.38, 0], [0, 0, 0], null, 6);
-  k.add('light', new THREE.SphereGeometry(0.14, 8, 6), [0, 1.66, 0], [0, 0, 0], 'paper');
+  const S = 1.7 / 1.8;
+  k.cyl('light', 0.16 * S, 0.14 * S, 1.1 * S, [0, 0.95 * S, 0], [0, 0, 0], 'paper', 8);
+  k.cyl('dark', 0.11 * S, 0.11 * S, 0.75 * S, [0, 0.38 * S, 0], [0, 0, 0], null, 6);
+  k.add('light', new THREE.SphereGeometry(0.12 * S, 8, 6), [0, 1.66 * S, 0], [0, 0, 0], 'paper');
   return k.build();
 }
 

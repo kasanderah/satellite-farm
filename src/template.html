@@ -42,6 +42,16 @@ body.nohud .hud,body.nohud #labels{opacity:0!important}
 #tiers button b{display:block;font-weight:400;font-size:12px;letter-spacing:.2em}
 #tiers button small{display:block;font-size:9px;letter-spacing:.24em;color:var(--mut)}
 #tiers button.on{opacity:1;border-bottom-color:var(--sig)}
+#buildbar{bottom:74px;left:50%;transform:translateX(-50%);display:none;max-width:min(94vw,920px);overflow-x:auto;gap:0;padding:8px 8px 6px;z-index:5;align-items:flex-end}
+#buildbar.on{display:flex}
+#buildbar .grp{display:flex;gap:6px;align-items:flex-end;padding:0 10px;border-right:1px solid var(--line)}
+#buildbar .grp:last-child{border-right:0}
+#buildbar .grp>span{align-self:center;font-size:10px;letter-spacing:.18em;color:var(--mut);padding-right:4px}
+#buildbar button{font-family:inherit;color:var(--fg);background:transparent;border:1px solid var(--line);width:76px;min-height:62px;padding:6px 4px 5px;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:4px}
+#buildbar button i{display:block;border:1px solid var(--mut);background:rgba(232,216,208,.08)}
+#buildbar button b{font-weight:500;font-size:11px;letter-spacing:.08em}
+#buildbar button.on{border-color:var(--sig);color:var(--sig)}
+#buildbar button.on i{border-color:var(--sig)}
 #subbar{bottom:70px;left:50%;transform:translateX(-50%);display:none;max-width:min(92vw,720px);overflow-x:auto;gap:6px;padding:6px 8px;z-index:4}
 #subbar.on{display:flex}
 #subbar button{font-family:inherit;color:var(--fg);background:transparent;border:1px solid var(--line);padding:6px 14px 5px;cursor:pointer;flex:0 0 auto;text-align:center}
@@ -297,6 +307,7 @@ body.underground #dock{display:none}
 <div class="hud panel hit" id="layers"></div>
 <div class="hud panel hit" id="sheet"></div>
 <div class="hud panel hit" id="subbar"></div>
+<div class="hud panel hit" id="buildbar"></div>
 <div class="hud panel hit" id="tiers"></div>
 <div class="hud panel hit" id="dock"></div>
 <div class="hud" id="toasts"></div>
@@ -309,7 +320,7 @@ body.underground #dock{display:none}
 <div class="hud panel hit" id="planmenu"></div>
 <div id="viewer"><div class="bar"><div><h2>资产</h2><div class="sub">当前的薯田阶段、机器和田块。每张卡片是名字加上现在的样子。点一张就能指着它改。这是查看，不能上传。</div></div><button type="button" id="viewer-close">关闭</button></div><div class="sec">商品薯阶段</div><div class="grid" id="view-stages"></div><div class="sec">机器</div><div class="grid" id="view-machines"></div><div class="sec">田块</div><div class="grid" id="view-tiles"></div></div>
 <div class="hud" id="scale"><span id="scaletxt"></span><div id="scalebar"></div></div>
-<div class="hud" id="buildrev">环穗 v6.31</div>
+<div class="hud" id="buildrev">环穗 v6.32</div>
 <div class="hud" id="modread"></div>
 <div id="tip"></div>
 <script>__BUNDLE__</script>

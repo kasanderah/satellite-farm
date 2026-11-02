@@ -32,6 +32,10 @@ import {
   hubWedgePolygon, hubGridSegments, fieldCellSegments,
 } from './modulus.js';
 import { overlayCells } from './land-buy.js';
+import { BUILDINGS, ROADS as BUILD_ROADS } from './build/catalog.js';
+import { placeWork, eraseWork, listWorks } from './build/works.js';
+import { createWorkMesh, ghostMaterial } from './build/meshes.js';
+import { footprint, worldCell, cellOrigin } from './build/placement.js';
 import { DAY_SECONDS } from './world-clock.js';
 import { SOIL_STORE, defaultSoilCurves, normalizeSoilCurves, freshSoil, stepSoil, soilDrivers, soilText } from './soil.js';
 
@@ -1477,18 +1481,20 @@ function wedgeMesh(player, color, opacity) {
 const hubRoot = new THREE.Group();
 hubRoot.name = 'hub-wedge';
 scene.add(hubRoot);
-for (let player = 0; player < 4; player++) hubRoot.add(wedgeMesh(player, player === 0 ? 0x85eed9 : 0x5c584f, player === 0 ? 0.28 : 0.42));
+for (let player = 0; player < 4; player++) hubRoot.add(wedgeMesh(player, player === 0 ? 0x9aa8a4 : 0x6a655c, player === 0 ? 0.1 : 0.14));
 const hubLines = new THREE.LineSegments(
-  segsGeometry(hubGridSegments(0), 2.4),
-  curved(new THREE.LineBasicMaterial({ color: 0xe7eef2, transparent: true, opacity: 0.9, depthWrite: false })),
+  segsGeometry(hubGridSegments(0), 0.35),
+  curved(new THREE.LineBasicMaterial({ color: 0xb7b1a6, transparent: true, opacity: 0.32, depthWrite: false })),
 );
 hubLines.frustumCulled = false;
 hubLines.renderOrder = 3;
 hubRoot.add(hubLines);
+hubRoot.visible = false;
 const equipRoot = new THREE.Group();
 equipRoot.name = 'equip-grid';
+equipRoot.visible = false;
 scene.add(equipRoot);
-const equipMat = curved(new THREE.LineBasicMaterial({ color: 0x85eed9, transparent: true, opacity: 0.92, depthWrite: false }));
+const equipMat = curved(new THREE.LineBasicMaterial({ color: 0xb7b1a6, transparent: true, opacity: 0.32, depthWrite: false }));
 function refreshEquipGrids() {
   while (equipRoot.children.length) {
     const child = equipRoot.children.pop();
@@ -1496,7 +1502,7 @@ function refreshEquipGrids() {
   }
   for (const f of fields) {
     if (!f.equip) continue;
-    const line = new THREE.LineSegments(segsGeometry(fieldCellSegments(f.x0, f.z0, L.FIELD), 2.2), equipMat);
+    const line = new THREE.LineSegments(segsGeometry(fieldCellSegments(f.x0, f.z0, L.FIELD), 0.4), equipMat);
     line.frustumCulled = false;
     line.renderOrder = 3;
     equipRoot.add(line);
@@ -1509,8 +1515,96 @@ function convertEquip() {
   if (!r.ok) { toast(r.reason === 'busy' ? '这块正在作业' : '这块不能改成设备单元'); return; }
   syncOwnedFields();
   refreshEquipGrids();
-  toast(r.equip ? '已转为设备单元 · 再按 F4 转回' : '已转回田面');
+  toast(r.equip ? '已转为建造区 · 再按 F4 转回田面' : '已转回田面');
   updateDock();
+  saveSoon();
+  if (mode === 'build') syncBuildView();
+}
+let buildTool = null;
+let buildRot = 0;
+const workRoot = new THREE.Group();
+workRoot.name = 'build-works';
+scene.add(workRoot);
+const ghostRoot = new THREE.Group();
+ghostRoot.name = 'build-ghost';
+ghostRoot.visible = false;
+scene.add(ghostRoot);
+function rebuildWorks() {
+  while (workRoot.children.length) {
+    const child = workRoot.children.pop();
+    child.traverse(obj => { if (obj.geometry) obj.geometry.dispose(); });
+  }
+  for (const piece of listWorks()) mountWork(piece);
+}
+function mountWork(piece) {
+  const mesh = createWorkMesh(piece.kind);
+  mesh.position.set(piece.x, 0, piece.z);
+  mesh.rotation.y = piece.rot * Math.PI / 2;
+  mesh.userData.workId = piece.id;
+  workRoot.add(mesh);
+}
+function hideGhost() {
+  ghostRoot.visible = false;
+  while (ghostRoot.children.length) ghostRoot.children.pop();
+}
+function showGhost(kind) {
+  hideGhost();
+  if (!kind || kind === 'erase') return;
+  ghostRoot.add(ghostMaterial(createWorkMesh(kind)));
+  ghostRoot.visible = true;
+}
+function updateGhost(cx, cy) {
+  if (mode !== 'build' || !buildTool || buildTool === 'erase') { ghostRoot.visible = false; return; }
+  const p = pickFlat(cx, cy);
+  if (!p) { ghostRoot.visible = false; return; }
+  const spec = [...BUILDINGS, ...BUILD_ROADS].find(item => item.id === buildTool);
+  if (!spec) return;
+  const cell = worldCell(p.x, p.z);
+  const box = footprint(spec.w, spec.h, buildRot);
+  const origin = cellOrigin(cell.gx, cell.gz);
+  ghostRoot.position.set(origin.x + box.w * CELL / 2, 0, origin.z + box.h * CELL / 2);
+  ghostRoot.rotation.y = buildRot * Math.PI / 2;
+  ghostRoot.visible = true;
+}
+function paintBuildBar() {
+  const el = $('buildbar');
+  if (!el) return;
+  const icon = (item) => `<button type="button" data-build="${item.id}" class="${buildTool === item.id ? 'on' : ''}"><i style="width:${10 + item.w * 6}px;height:${8 + item.h * 6}px"></i><b>${item.name}</b></button>`;
+  el.innerHTML = `<div class="grp"><span>建筑</span>${BUILDINGS.map(icon).join('')}</div><div class="grp"><span>道路</span>${BUILD_ROADS.map(icon).join('')}</div><div class="grp">${icon({ id: 'erase', name: '拆除', w: 1, h: 1 })}</div>`;
+  el.classList.toggle('on', mode === 'build');
+}
+function syncBuildView() {
+  const on = mode === 'build';
+  hubRoot.visible = on;
+  if (on) refreshEquipGrids();
+  equipRoot.visible = on;
+  if (!on) { buildTool = null; buildRot = 0; hideGhost(); }
+  paintBuildBar();
+}
+function armBuild(id) {
+  buildTool = buildTool === id ? null : id;
+  buildRot = 0;
+  if (buildTool && buildTool !== 'erase') showGhost(buildTool);
+  else hideGhost();
+  paintBuildBar();
+}
+function layAt(x, z, quiet) {
+  if (!buildTool || buildTool === 'erase') {
+    if (buildTool === 'erase') {
+      const gone = eraseWork(x, z);
+      if (!gone.ok) { if (!quiet) toast('这里没有可拆的'); return; }
+      rebuildWorks();
+      if (!quiet) toast('已拆除');
+      saveSoon();
+    }
+    return;
+  }
+  const placed = placeWork(buildTool, x, z, buildRot);
+  if (!placed.ok) {
+    if (!quiet) toast(placed.reason === 'zone' ? '要落在建造区里' : placed.reason === 'block' ? '和已有占地重叠' : '不能放');
+    return;
+  }
+  mountWork(placed.piece);
   saveSoon();
 }
 const buildingSets = {
@@ -1529,7 +1623,9 @@ const workDroneMesh = {
   drone_treat: instanced(surfaceKits.drone_treat, 8, false),
 };
 // 小人：在中枢场地上散步
-const people = Array.from({ length: 46 }, (_, n) => ({ x: HUBC - 120 + hr() * 260, z: HUBC - 60 + hr() * 200, a: hr() * 6.28, sp: 0.6 + hr() * 0.8 }));
+const people = Array.from({ length: 46 }, (_, n) => n === 0
+  ? { x: 236, z: 48, a: 0.4, sp: 0 }
+  : { x: HUBC - 120 + hr() * 260, z: HUBC - 60 + hr() * 200, a: hr() * 6.28, sp: 0.6 + hr() * 0.8 });
 const peopleSet = instanced(personKit(), people.length);
 // 中枢雕塑换成工坊定稿的中枢地块。旧网格留在场景里但不再显示，仓棚仍是另一套实例。
 const hubMeshes = (() => { const hk = hubKit(hr); for (const k in hk) if (hk[k]) hk[k].translate(HUBC, 0, HUBC); return staticMesh(hk); })();
@@ -2449,7 +2545,11 @@ function paintContext() {
   syncTip();
 }
 function onRightClick(cx, cy) {
-  if (viewLayer !== 'surface' || mode === 'build') return;
+  if (mode === 'build') {
+    if (buildTool) { buildTool = null; buildRot = 0; hideGhost(); paintBuildBar(); }
+    return;
+  }
+  if (viewLayer !== 'surface') return;
   const rig = pickRigScreen(cx, cy);
   const f = rig ? null : fieldFromScreen(cx, cy);
   const fieldsOn = selectionKind() === 'field' && pickedFields.size > 0;
@@ -2544,17 +2644,9 @@ function onMapClick(cx, cy) {
     return;
   }
   if (mode === 'build') {
-    if (buildAct === 'watch') return;
-    if (!p) { toast('点在自己的田区里'); return; }
-    if (buildAct === 'delete') {
-      let best = null, bd = 48;
-      for (const b of buildings) { const d = Math.hypot(b.x - p.x, b.z - p.z); if (d < bd) { bd = d; best = b; } }
-      if (!best) { toast('点中枢上的一栋'); return; }
-      buildPick = best.id; paintSheet(); return;
-    }
-    const r = placeBuilding(p.x, p.z, buildKind);
-    if (!r.ok) toast(r.reason === 'field' ? '房子建在中枢地块上' : r.reason === 'hub' ? '这四分中枢是别的玩家的' : r.reason === 'money' ? '营收不够' : '只能建在自己的田区里');
-    else { toast(r.cost ? `<b>−${fmt(r.cost)}</b>${r.building.name}` : `${r.building.name}已放下`); saveSoon(); paintSheet(); }
+    if (!p) return;
+    if (!buildTool) { toast('先在上面的条里选一种'); return; }
+    layAt(p.x, p.z);
     return;
   }
   onLeftClick(cx, cy, false);
@@ -2744,8 +2836,13 @@ R.domElement.addEventListener('contextmenu', e => e.preventDefault());
 document.addEventListener('contextmenu', e => e.preventDefault(), true);
 R.domElement.addEventListener('pointerdown', e => {
   ptr = { x: e.clientX, y: e.clientY, b: e.button, shift: e.shiftKey };
-  if (e.button === 2 && viewLayer === 'surface' && mode !== 'build') {
+  if (e.button === 2 && viewLayer === 'surface') {
     rightArm = { x: e.clientX, y: e.clientY, t: performance.now() };
+    return;
+  }
+  if (mode === 'build' && buildTool === 'service' && e.button === 0) {
+    drag = { b: 'road', x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY };
+    R.domElement.setPointerCapture(e.pointerId);
     return;
   }
   if (e.button === 0 && e.shiftKey && viewLayer === 'surface' && (mode === 'look' || mode === 'plan')) {
@@ -2811,6 +2908,14 @@ addEventListener('pointerup', e => {
     drag = null; ptr = null;
     return;
   }
+  if (drag && drag.b === 'road') {
+    if (Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) < 6) {
+      const p = pickFlat(drag.x0, drag.y0);
+      if (p) layAt(p.x, p.z);
+    }
+    drag = null; ptr = null;
+    return;
+  }
   if (rightArm && !drag) {
     onRightClick(rightArm.x, rightArm.y);
     rightArm = null;
@@ -2820,6 +2925,14 @@ addEventListener('pointerup', e => {
 });
 let hoverPtr = null, deckHover = null;
 addEventListener('pointermove', e => {
+  if (mode === 'build' && buildTool && buildTool !== 'erase') updateGhost(e.clientX, e.clientY);
+  if (drag && drag.b === 'road') {
+    if (Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) >= 4) {
+      const p = pickFlat(e.clientX, e.clientY);
+      if (p) layAt(p.x, p.z, true);
+    }
+    return;
+  }
   const onHud = e.target && e.target.closest && e.target.closest('.hit, button, a, input, textarea');
   hoverPtr = onHud ? null : { x: e.clientX, y: e.clientY };
   if (rightArm && !drag) {
@@ -2860,6 +2973,11 @@ addEventListener('keydown', e => {
     if (e.key === 'Escape') e.target.blur();
     return;
   }
+  if (mode === 'build' && buildTool && buildTool !== 'erase' && (e.key === 'q' || e.key === 'e' || e.key === 'Q' || e.key === 'E')) {
+    buildRot = (buildRot + (e.key.toLowerCase() === 'q' ? 3 : 1)) % 4;
+    if (tipPtr) updateGhost(tipPtr.x, tipPtr.y);
+    return;
+  }
   keys[e.key.toLowerCase()] = true;
   if (e.key === 'p' || e.key === 'P') { setPaused(!paused); paintPause(); }
   if (e.key === '[' || e.key === '【' || (e.code === 'BracketLeft' && e.key !== '{')) stepRate(-1);
@@ -2872,6 +2990,7 @@ addEventListener('keydown', e => {
   if (e.key === 'F4') { e.preventDefault(); convertEquip(); }
   if (e.key === 'v' || e.key === 'V') toggleViewer();
   if (e.key === 'Escape') {
+    if (mode === 'build' && buildTool) { buildTool = null; buildRot = 0; hideGhost(); paintBuildBar(); return; }
     if (subTool) { closeSubTool(); return; }
     if (prepOpen || plantOpen) { closeToolMenus(); updateDock(); return; }
     $('admin').classList.remove('on');
@@ -3235,22 +3354,8 @@ function paintSheet() {
     qty.addEventListener('mouseup', ev => ev.preventDefault());
     qty.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); $('buy').click(); } });
   } else if (mode === 'build') {
-    const acts = [['place', '放下'], ['delete', '拆除'], ['watch', '查看']].map(([id, name]) => `<button type="button" class="sell${buildAct === id ? ' on' : ''}" data-bact="${id}">${name}</button>`).join('');
-    let body = '';
-    if (buildAct === 'place') {
-      body = `<p class="note">先选一种，再点中枢地块。田里种薯。无人机从基站起飞，不进机库。</p>` + ['warehouse', 'garage', 'process', 'drone_base'].map(id => {
-        const spec = BUILDING_KINDS[id];
-        const sub = spec.price ? `${fmt(spec.price)} · 点中枢放下` : '点中枢放下';
-        return `<button type="button" class="rowbtn${buildKind === id ? ' on' : ''}" data-bkind="${id}"><b>${spec.name}</b><small>${sub}</small></button>`;
-      }).join('');
-    } else if (buildAct === 'delete') {
-      const rows = buildings.map(b => `<button type="button" class="rowbtn${buildPick === b.id ? ' on' : ''}" data-bdel="${b.id}"><b>${b.name}</b><small>中枢 · ${Math.round(b.x)}, ${Math.round(b.z)}</small></button>`).join('');
-      body = `<p class="note">选中一栋再拆除。查看不在这一档。</p>${rows || '<p class="note">中枢上没有房子。</p>'}<button type="button" class="sell" id="bremove"${buildPick == null ? ' disabled' : ''}>拆除所选</button>`;
-    } else {
-      const rows = buildings.map(b => `<button type="button" class="rowbtn" data-bwatch="${b.id}"><b>${b.name}</b><small>中枢 · ${Math.round(b.x)}, ${Math.round(b.z)}</small></button>`).join('');
-      body = `<p class="note">已建的房子。点一行看位置。放下和拆除是另外两档。</p>${rows || '<p class="note">中枢上没有房子。</p>'}`;
-    }
-    el.innerHTML = `<div class="who"><b>建设</b><span>放下、拆除、查看分开</span></div><div class="buyline">${acts}</div>${body}`;
+    el.classList.remove('on');
+    el.innerHTML = '';
   } else if (mode === 'deck') {
     const rows = tanks.map(t => {
       const w = cultureWatch(t);
@@ -3280,6 +3385,7 @@ function returnToLook() {
   paintSheet();
   paintSubbar();
   paintLock();
+  syncBuildView();
 }
 function setMode(id) {
   if (id !== 'deck' && viewLayer !== 'surface') {
@@ -3292,12 +3398,13 @@ function setMode(id) {
   }
   mode = id;
   subTool = null;
-  if (id === 'plan') { showPlan(); paintSubbar(); return; }
+  if (id === 'plan') { showPlan(); paintSubbar(); syncBuildView(); return; }
   if (id !== 'machines') watchRig = null;
   if (id !== 'scheme') closePlanMenu();
   paintModes();
   paintSheet();
   paintSubbar();
+  syncBuildView();
 }
 function toggleMode(id) {
   if (mode === id) { returnToLook(); return; }
@@ -3307,6 +3414,11 @@ $('tiers').addEventListener('click', e => {
   const b = e.target.closest('button');
   if (!b) return;
   toggleMode(b.dataset.mode);
+});
+$('buildbar').addEventListener('click', e => {
+  const b = e.target.closest('[data-build]');
+  if (!b) return;
+  armBuild(b.dataset.build);
 });
 $('subbar').addEventListener('click', e => {
   const recipe = e.target.closest('[data-recipe]');
@@ -4024,7 +4136,7 @@ function updateDock() {
   if (sum) {
     if (rigOnly) sum.textContent = rigLine(selectedRig);
     else if (many) sum.textContent = '操作取这些田都能做的';
-    else if (f?.equip) sum.textContent = `设备单元 · 建筑格 ${CELL} m。不整地、不播种。再按 F4 转回田面。`;
+    else if (f?.equip) sum.textContent = `建造区 · 建筑格 ${CELL} m。不整地、不播种。再按 F4 转回田面。`;
     else if (!f?.owned) sum.textContent = selNote || '邻区快照 · 只读';
     else if (!desc?.crop) sum.textContent = '还没有作物';
     else {
@@ -4397,6 +4509,7 @@ $('reset-yes').addEventListener('click', () => {
   planBuy = false;
   resetGame();
   bindSlice();
+  rebuildWorks();
   dropRigSelection();
   try { localStorage.removeItem(SAVE_KEY); } catch (e) { /* private mode */ }
   clearTimeout(saveSoon.t);
@@ -4552,6 +4665,7 @@ function bindSlice() {
 }
 bindSlice();
 refreshEquipGrids();
+rebuildWorks();
 {
   const opening = fieldAt(focus.i, focus.j);
   if (opening?.owned) selectField(opening, '');
@@ -4572,7 +4686,7 @@ function frame(now) {
   if (camLock && pad) exitToDefault();
   if (keys.w || keys.arrowup) { camT.x -= s * ks; camT.z -= c * ks; } if (keys.s || keys.arrowdown) { camT.x += s * ks; camT.z += c * ks; }
   if (keys.a || keys.arrowleft) { camT.x -= c * ks; camT.z += s * ks; } if (keys.d || keys.arrowright) { camT.x += c * ks; camT.z -= s * ks; }
-  if (keys.q) camT.yaw += dt; if (keys.e) camT.yaw -= dt;
+  if (!(mode === 'build' && buildTool && buildTool !== 'erase')) { if (keys.q) camT.yaw += dt; if (keys.e) camT.yaw -= dt; }
   if (camLock && !drag) {
     const point = lockPoint();
     if (point) { camT.x = point.x; camT.z = point.z; }
@@ -4851,6 +4965,9 @@ window.__farm = {
   snapshot: exportSnapshot, plant: () => doPlant(), prep: () => doPrep(), select: (i, j) => selectField(fieldAt(i, j)),
   buyLand: (i, j) => { const r = buyLandAt(i, j); if (r.ok) { syncOwnedFields(); paintLandOverlay(true); } return r; },
   toggleEquip: () => { convertEquip(); return !!selected?.equip; },
+  build(kind) { armBuild(kind); },
+  placeAt(x, z) { layAt(x, z); return listWorks(); },
+  works: () => listWorks(),
   sellLand: (i, j) => { const r = sellLandAt(i, j); if (r.ok) { syncOwnedFields(); paintLandOverlay(true); } return r; },
   land: (i, j) => landCard(i, j),
   b() {

@@ -9,8 +9,9 @@ import { WORLD_MIN_PER_REAL_MIN, DAY_SECONDS } from './world-clock.js';
 export { WORLD_MIN_PER_REAL_MIN, DAY_SECONDS };
 import {
   UNIT as MOD_UNIT, ROAD as MOD_ROAD, PLOT_UNITS, SECTOR_PLOTS, PLOTS_ALONG, WORK_LANE, SHELL,
-  RING_CIRC as MOD_CIRC, RING_R as MOD_R, MODULUS_ID, CELL, cellsFromLegacyMps,
+  RING_CIRC as MOD_CIRC, RING_R as MOD_R, MODULUS_ID, CELL, cellsFromLegacyMps, inHubWedge,
 } from './modulus.js';
+import { bindBuildZone, exportWorks, loadWorks, clearWorks } from './build/works.js';
 export { MODULUS_ID };
 import {
   bindGrid as bindLand, inspect as inspectLand, buy as commitLandBuy, sell as commitLandSell,
@@ -784,7 +785,17 @@ export function fieldOps() {
 for (const f of fields) if (f.state === 3) { rnd(); rnd(); }
 
 // 可操作缓存只由买地模块写。种植、调度、农机工单只读 f.owned。
+// 建造区 = 本地中枢梯形 + F4 转成的设备单元。摆放不进调度。
 bindLand(L);
+function cellInBuildZone(x, z) {
+  if (inHubWedge(x, z, 0)) return true;
+  for (const f of fields) {
+    if (!f.equip) continue;
+    if (x >= f.x0 && x < f.x0 + L.FIELD && z >= f.z0 && z < f.z0 + L.FIELD) return true;
+  }
+  return false;
+}
+bindBuildZone(cellInBuildZone);
 function stampLand(f) {
   const info = inspectLand(f.i, f.j);
   f.landPlayer = info.player;
@@ -2289,6 +2300,7 @@ function restoreDecor(f, src, live) {
 }
 export function resetGame() {
   resetLand();
+  clearWorks();
   const by = new Map(openingFields.map(s => [s.idx, s]));
   for (const f of fields) {
     const s = by.get(f.idx);
@@ -2540,6 +2552,7 @@ export function exportSnapshot() {
     revenue: economy.revenue,
     modulus: MODULUS_ID,
     land: exportLand(),
+    works: exportWorks(),
     timeScale: economy.timeScale,
     stores: { seed: stores.seed, fertilizer: stores.fertilizer, spray: stores.spray, feed: stores.feed, peel: stores.peel, frass: stores.frass, seed_soy: stores.seed_soy || 0, seed_barley: stores.seed_barley || 0, seedling_cabbage: stores.seedling_cabbage || 0 },
     warehouse: warehouse.map(lot => ({ ...lot })),
@@ -2639,6 +2652,7 @@ export function applySnapshot(data) {
   // 没有模数或模数不是这一版：世界尺度对不上，拒绝读入，调用方清档。
   if (data.modulus !== MODULUS_ID) return false;
   loadLand(data.land);
+  loadWorks(data.works);
   for (const f of fields) {
     f.equip = false;
     stampLand(f);
