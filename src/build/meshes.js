@@ -3,6 +3,7 @@
 import * as THREE from 'three';
 import { CELL } from '../modulus.js';
 import { workSpec } from './catalog.js';
+import { ROAD_E, ROAD_N, ROAD_W, ROAD_S, roadDirs } from './roads.js';
 
 const METAL = 0x6f6a61;
 const DARK = 0x3a3834;
@@ -136,23 +137,76 @@ function link(group, W, D) {
   add(group, lamp(W * 0.4, 0.045, 0.045, 0, 1.15, D * 0.32));
 }
 
-function service(group, W, D) {
-  // 贴地亮带。底面离地约 7 cm，避免和地表共面闪烁。
-  const deck = add(group, box(W * 0.92, 0.1, D * 0.92, 0, 0.12, 0, 0x8a847c, 0.78, 0.12));
-  deck.material.polygonOffset = true;
-  deck.material.polygonOffsetFactor = -2;
-  deck.material.polygonOffsetUnits = -4;
-  deck.renderOrder = 2;
-  const band = add(group, box(W * 0.28, 0.035, D * 0.78, 0, 0.185, 0, 0xe4d8c6, 0.55, 0.08));
-  band.material.polygonOffset = true;
-  band.material.polygonOffsetFactor = -4;
-  band.material.polygonOffsetUnits = -6;
-  band.renderOrder = 3;
-  const edge = add(group, box(W * 0.92, 0.02, 0.08, 0, 0.18, D * 0.4, 0x5c5852, 0.7, 0.2));
-  edge.material.polygonOffset = true;
-  edge.material.polygonOffsetFactor = -3;
-  edge.material.polygonOffsetUnits = -4;
-  edge.renderOrder = 3;
+function raised(mesh, order, factor) {
+  mesh.material.polygonOffset = true;
+  mesh.material.polygonOffsetFactor = factor;
+  mesh.material.polygonOffsetUnits = -4;
+  mesh.renderOrder = order;
+  return mesh;
+}
+
+function garageBay(group, W, D) {
+  const stalls = 3;
+  skirt(group, W, D);
+  add(group, box(W * 0.92, 3.4, D * 0.62, 0, 1.85, -D * 0.08, METAL));
+  add(group, box(W * 0.94, 0.28, D * 0.7, 0, 3.65, -D * 0.06, DARK));
+  add(group, box(W * 0.28, 2.6, D * 0.34, W * 0.3, 1.5, D * 0.22, DARK));
+  for (let i = 0; i < stalls; i++) {
+    const x = (i - (stalls - 1) / 2) * (W * 0.28);
+    add(group, box(W * 0.22, 2.15, 0.12, x, 1.25, -D * 0.38, 0x2a2927, 0.7, 0.25));
+    add(group, lamp(W * 0.18, 0.05, 0.05, x, 2.4, -D * 0.4));
+  }
+  add(group, box(W * 0.36, 0.45, 0.08, -W * 0.22, 2.5, D * 0.22, GLASS, 0.16, 0.6));
+  add(group, box(0.7, 1.15, 0.7, W * 0.34, 4.3, -D * 0.05, DARK));
+}
+
+function bulk(group, W, D, wall) {
+  skirt(group, W, D);
+  add(group, box(W * 0.9, wall, D * 0.86, 0, wall / 2 + 0.1, 0, METAL));
+  add(group, box(W * 0.92, 0.28, D * 0.9, 0, wall + 0.3, 0, DARK));
+  add(group, box(W * 0.55, 0.55, 0.08, 0, wall * 0.55, D * 0.43, GLASS, 0.16, 0.55));
+  add(group, box(W * 0.18, 0.7, D * 0.22, -W * 0.28, wall + 0.7, 0, DARK));
+  add(group, lamp(W * 0.4, 0.05, 0.05, 0, wall * 0.35, D * 0.44));
+}
+
+export function createRoadMesh(mask) {
+  const group = new THREE.Group();
+  group.name = 'work-service';
+  const H = CELL / 2 - 0.02;
+  const off = 0.42;
+  raised(add(group, box(CELL * 0.98, 0.08, CELL * 0.98, 0, 0.07, 0, 0x3a3834, 0.86, 0.18)), 2, -2);
+  let dirs = roadDirs(mask);
+  const bare = !dirs.length;
+  if (bare) dirs = [[1, 0]];
+  const straight = mask === (ROAD_E | ROAD_W) || mask === (ROAD_N | ROAD_S);
+  const endOnly = bare || roadDirs(mask).length === 1;
+  const rail = (x, z, w, d) => raised(add(group, box(w, 0.055, d, x, 0.13, z, 0xcfc6b8, 0.42, 0.38)), 3, -4);
+  for (const [dx, dz] of dirs) {
+    const px = -dz;
+    const pz = dx;
+    const inner = endOnly ? -0.5 : 0;
+    for (const side of [-1, 1]) {
+      const ox = px * off * side;
+      const oz = pz * off * side;
+      const x0 = dx * inner + ox;
+      const z0 = dz * inner + oz;
+      const x1 = dx * H + ox;
+      const z1 = dz * H + oz;
+      rail((x0 + x1) / 2, (z0 + z1) / 2, Math.abs(dx) ? Math.abs(x1 - x0) : 0.15, Math.abs(dz) ? Math.abs(z1 - z0) : 0.15);
+    }
+    const span = Math.abs(H - inner);
+    const mid = (inner + H) / 2;
+    const lx = dx * mid + px * (off + 0.62);
+    const lz = dz * mid + pz * (off + 0.62);
+    const strip = add(group, lamp(Math.abs(dx) ? span : 0.05, 0.035, Math.abs(dz) ? span : 0.05, lx, 0.15, lz));
+    strip.renderOrder = 4;
+  }
+  if (!straight) raised(add(group, box(1.2, 0.04, 1.2, 0, 0.145, 0, 0xb7b0a4, 0.48, 0.32)), 3, -5);
+  if (endOnly) {
+    const [dx, dz] = dirs[0];
+    raised(add(group, box(Math.abs(dz) ? 1.2 : 0.14, 0.07, Math.abs(dx) ? 1.2 : 0.14, -dx * 0.62, 0.14, -dz * 0.62, 0x5e5954, 0.62, 0.3)), 3, -4);
+  }
+  return group;
 }
 
 export function createWorkMesh(kind) {
@@ -167,7 +221,11 @@ export function createWorkMesh(kind) {
   else if (kind === 'tank') tank(group, W, D);
   else if (kind === 'hangar') hangar(group, W, D);
   else if (kind === 'link') link(group, W, D);
-  else if (kind === 'service') service(group, W, D);
+  else if (kind === 'garage') garageBay(group, W, D);
+  else if (kind === 'block_hall') bulk(group, W, D, 4.8);
+  else if (kind === 'block_yard') bulk(group, W, D, 2.4);
+  else if (kind === 'block_wall') bulk(group, W, D, 6.2);
+  else if (kind === 'service') return createRoadMesh(ROAD_E | ROAD_W);
   return group;
 }
 

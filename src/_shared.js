@@ -11,7 +11,10 @@ import {
   UNIT as MOD_UNIT, ROAD as MOD_ROAD, PLOT_UNITS, SECTOR_PLOTS, PLOTS_ALONG, WORK_LANE, SHELL,
   RING_CIRC as MOD_CIRC, RING_R as MOD_R, MODULUS_ID, CELL, cellsFromLegacyMps, inHubWedge,
 } from './modulus.js';
-import { bindBuildZone, exportWorks, loadWorks, clearWorks } from './build/works.js';
+import { bindBuildZone, bindOccupy, exportWorks, loadWorks, clearWorks, listWorks } from './build/works.js';
+import { claimStall, stallTotal } from './build/garage.js';
+import { planRoute } from './build/nav.js';
+import { worldCell } from './build/placement.js';
 export { MODULUS_ID };
 import {
   bindGrid as bindLand, inspect as inspectLand, buy as commitLandBuy, sell as commitLandSell,
@@ -796,6 +799,7 @@ function cellInBuildZone(x, z) {
   return false;
 }
 bindBuildZone(cellInBuildZone);
+bindOccupy(piece => rigs.filter(r => r.garageId === piece.id).length);
 function stampLand(f) {
   const info = inspectLand(f.i, f.j);
   f.landPlayer = info.player;
@@ -943,9 +947,13 @@ function bootRig(r) {
   r.serviceT = 0;
   r.switchT = 0;
 }
+function facePark(r) {
+  r.x = r.parkX; r.z = r.parkZ; r.ang = r.parkAng != null ? r.parkAng : -Math.PI / 2;
+}
 function parkRig(r, refill = false) {
   r.busy = false; r.f = null; r.intent = null; r.route = null; r.ri = 0; r.partner = null;
-  r.x = r.parkX; r.z = r.parkZ; r.ang = -Math.PI / 2;
+  r.routeBlocked = false; r.navFail = '';
+  facePark(r);
   if (refill || r.charge == null) r.charge = 1;
   if (refill) bootRig(r);
   r.mode = r.charge < 1 ? 'charge' : 'park';
@@ -981,7 +989,34 @@ function beginJob(r, f, job) {
   r.x = pose.x; r.z = pose.z; r.ang = pose.ang;
   r.route = null; r.ri = 0;
 }
-export function roadRoute(x, z, ex, ez) {
+function travelBlocked(px, pz) {
+  for (const piece of listWorks()) {
+    if (piece.kind === 'service') continue;
+    const hw = piece.w * CELL / 2 + 1.5;
+    const hh = piece.h * CELL / 2 + 1.5;
+    if (Math.abs(px - piece.x) <= hw && Math.abs(pz - piece.z) <= hh) return true;
+  }
+  return false;
+}
+function travelCheap(px, pz) {
+  let cost = 2.6;
+  for (const road of ROADS) {
+    if (Math.abs(road - px) < 7 || Math.abs(road - pz) < 7) { cost = 1.15; break; }
+  }
+  const cell = worldCell(px, pz);
+  for (const piece of listWorks()) {
+    if (piece.kind !== 'service') continue;
+    if (cell.gx >= piece.gx && cell.gx < piece.gx + piece.w && cell.gz >= piece.gz && cell.gz < piece.gz + piece.h) return 1;
+  }
+  return cost;
+}
+function finishRoute(x, z, ex, ez, pts) {
+  const plan = planRoute(x, z, ex, ez, pts, travelBlocked, travelCheap);
+  const out = plan.pts.length ? plan.pts : [[ex, ez]];
+  out.blocked = !!plan.blocked;
+  return out;
+}
+function classicRoad(x, z, ex, ez) {
   const sx = nearestRoad(x), sz = nearestRoad(z);
   const startVert = Math.abs(sx - x) <= Math.abs(sz - z);
   const exr = nearestRoad(ex), ezr = nearestRoad(ez);
@@ -1004,6 +1039,9 @@ export function roadRoute(x, z, ex, ez) {
   if (!out.length) out.push([ex, ez]);
   return out;
 }
+export function roadRoute(x, z, ex, ez) {
+  return finishRoute(x, z, ex, ez, classicRoad(x, z, ex, ez));
+}
 function shiftRoute(r, pts) {
   const bias = ((r.id % 5) - 2) * 1.15;
   if (!pts || pts.length < 2 || Math.abs(bias) < 0.1) return pts;
@@ -1023,8 +1061,12 @@ function routeTo(r, ex, ez, intent, f) {
   r.busy = true;
   r.mode = 'travel';
   const dist = Math.hypot(r.x - ex, r.z - ez);
-  const route = dist < 36 ? [[ex, ez]] : roadRoute(r.x, r.z, ex, ez);
-  r.route = shiftRoute(r, route);
+  const raw = dist < 36 ? [[ex, ez]] : classicRoad(r.x, r.z, ex, ez);
+  const route = finishRoute(r.x, r.z, ex, ez, shiftRoute(r, raw));
+  r.route = route;
+  r.routeBlocked = !!route.blocked;
+  r.routeGoal = { x: ex, z: ez };
+  r.navFail = '';
   r.ri = 0;
 }
 function routeToJob(r, f, job) {
@@ -1294,6 +1336,16 @@ function crowded(r) {
   return false;
 }
 function arriveTravel(r) {
+  if (r.routeBlocked && r.routeGoal && Math.hypot(r.x - r.routeGoal.x, r.z - r.routeGoal.z) > 6) {
+    r.mode = 'stuck';
+    r.busy = false;
+    r.intent = null;
+    r.route = null;
+    r.routeBlocked = false;
+    r.navFail = '路被建筑挡住，绕不过去';
+    return;
+  }
+  r.routeBlocked = false;
   if (r.intent === 'home') { parkRig(r, false); return; }
   if (r.intent === 'deliver') { r.cargo = 0; parkRig(r, false); return; }
   if (r.intent === 'service') {
@@ -1303,7 +1355,7 @@ function arriveTravel(r) {
     r.mode = 'service';
     r.serviceT = (swap ? HITCH_SWAP_S : 0) + (reload ? RELOAD_S : 0);
     if (r.serviceT <= 0) r.serviceT = HITCH_SWAP_S;
-    r.x = r.parkX; r.z = r.parkZ; r.ang = -Math.PI / 2;
+    facePark(r);
     r.busy = true;
     r.route = null;
     return;
@@ -1331,7 +1383,7 @@ function arriveTravel(r) {
 }
 function stepService(r, dt) {
   r.serviceT = (r.serviceT || 0) - dt;
-  r.x = r.parkX; r.z = r.parkZ; r.ang = -Math.PI / 2;
+  facePark(r);
   if (r.serviceT > 0) return;
   const pending = r.pending;
   if (pending?.hitch) r.hitch = pending.hitch;
@@ -1652,7 +1704,7 @@ function stepRigs(dt) {
     if ((r.mode === 'park' || r.mode === 'charge') && atGarage(r) && (r.charge ?? 1) < 1) {
       r.charge = Math.min(1, (r.charge ?? 1) + dt / RECHARGE_S);
       r.mode = r.charge >= 1 ? 'park' : 'charge';
-      r.x = r.parkX; r.z = r.parkZ; r.ang = -Math.PI / 2;
+      facePark(r);
     }
   }
   assignIdleRigs();
@@ -1855,7 +1907,7 @@ export function rigReadout(r) {
   const job = r.f && cropOf(r.f)?.jobs.find(j => j.id === r.job);
   const pace = !aerial && job ? (hitchPlan(r.kind, r.hitch, job)?.speed || 1) : 1;
   const speed = moving ? (aerial ? DRONE_MPS : MACHINE_MPS * pace) * economy.timeScale : 0;
-  let doing = aerial ? '停在基站' : '停在机库';
+  let doing = r.navFail || (aerial ? '停在基站' : '停在机库');
   if (aerial && r.mode === 'reload') doing = '在基站装药';
   else if (r.mode === 'turn') doing = '地头转弯';
   else if (r.mode === 'need_unload') doing = '等侧卸';
@@ -2346,27 +2398,48 @@ function parkSpot(n) {
   while (rigs.some(r => Math.hypot(r.parkX - x, r.parkZ - z) < 3)) z += 9;
   return { x, z };
 }
-function addRig(kind) {
+const STARTER_FLEET = 3;
+export function garageBoard() {
+  const stalls = stallTotal(listWorks());
+  const used = rigs.filter(r => r.garageId != null).length;
+  return { stalls, used, free: Math.max(0, stalls - used) };
+}
+function addRig(kind, opt = {}) {
   const spec = MACHINE_SHOP.find(m => m.id === kind);
   if (!spec) return null;
-  const spot = parkSpot(rigs.length);
+  let pose = claimStall(listWorks(), rigs, opt.garageId, opt.stall);
+  if (!pose) {
+    if (!opt.legacy) return null;
+    const spot = parkSpot(rigs.length);
+    pose = { x: spot.x, z: spot.z, ang: -Math.PI / 2, garageId: null, stall: null };
+  }
   const r = {
     id: nextRigId++, kind, label: rigProfile(kind)?.label || spec.name, logicId: rigProfile(kind)?.logicId || kind,
     busy: false, f: null, job: null, mode: 'park', intent: null, route: null, ri: 0,
-    charge: 1, lane: 0, u: 0, bin: 0, cargo: 0, parkX: spot.x, parkZ: spot.z, x: spot.x, z: spot.z, ang: -Math.PI / 2,
-    buyPrice: spec.price,
+    charge: 1, lane: 0, u: 0, bin: 0, cargo: 0,
+    parkX: pose.x, parkZ: pose.z, parkAng: pose.ang, x: pose.x, z: pose.z, ang: pose.ang,
+    buyPrice: spec.price, bought: true, garageId: pose.garageId, stall: pose.stall, navFail: '',
   };
   bootRig(r);
   rigs.push(r);
   return r;
 }
 function restoreFleet(list) {
-  while (rigs.length > 3) rigs.pop();
-  nextRigId = 3;
+  while (rigs.length > STARTER_FLEET) rigs.pop();
+  nextRigId = Math.max(nextRigId, STARTER_FLEET);
   if (!Array.isArray(list)) return;
   for (const item of list) {
-    if (item && MACHINE_SHOP.some(m => m.id === item.kind)) addRig(item.kind);
+    if (item && MACHINE_SHOP.some(m => m.id === item.kind)) addRig(item.kind, { legacy: true, garageId: item.garageId, stall: item.stall });
   }
+}
+export function sendRigHome(id, x, z) {
+  const rig = rigs.find(item => item.id === id);
+  if (!rig) return null;
+  if (Number.isFinite(x)) rig.x = x;
+  if (Number.isFinite(z)) rig.z = z;
+  rig.navFail = '';
+  goHome(rig);
+  return { id: rig.id, x: rig.x, z: rig.z, parkX: rig.parkX, parkZ: rig.parkZ, blocked: !!rig.routeBlocked, navFail: rig.navFail || '' };
 }
 export const MACHINE_SELL_RATIO = 0.5;
 
@@ -2401,11 +2474,14 @@ export function sellRig(id) {
 export function buyMachine(kind) {
   const item = MACHINE_SHOP.find(m => m.id === kind);
   if (!item) return { ok: false, reason: 'kind' };
-  if (!(economy.revenue >= item.price)) return { ok: false, reason: 'money', cost: item.price };
-  economy.revenue -= item.price;
+  const board = garageBoard();
+  if (board.free < 1) return { ok: false, reason: 'stall', ...board, cost: item.price };
+  if (!(economy.revenue >= item.price)) return { ok: false, reason: 'money', cost: item.price, ...board };
   const r = addRig(kind);
+  if (!r) return { ok: false, reason: 'stall', ...garageBoard(), cost: item.price };
+  economy.revenue -= item.price;
   log.push({ type: 'buy', pay: item.price, name: item.name, n: 1, t: worldDay });
-  return { ok: true, cost: item.price, name: item.name, id: r.id, kind };
+  return { ok: true, cost: item.price, name: item.name, id: r.id, kind, ...garageBoard() };
 }
 export function buyItem(id, qty) {
   const item = SHOP.find(s => s.id === id);
@@ -2579,7 +2655,7 @@ export function exportSnapshot() {
       jobs: f.jobS ? Object.fromEntries(Object.entries(f.jobS).map(([k, v]) => [k, +v || 0])) : undefined,
       laneW: f.laneW ? Object.fromEntries(Object.entries(f.laneW).map(([k, v]) => [k, +v || 0])) : undefined,
     })),
-    fleet: rigs.slice(4).map(r => ({ kind: r.kind })),
+    fleet: rigs.filter(r => r.bought).map(r => ({ kind: r.kind, garageId: r.garageId ?? null, stall: r.stall ?? null })),
     workDrones: workDrones.map(d => ({ kind: d.kind })),
     harvesters: harvesters.map(h => ({
       id: h.id, mode: h.mode, lane: h.lane, u: +h.u.toFixed(2),

@@ -11,7 +11,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { HorizontalTiltShiftShader } from 'three/addons/shaders/HorizontalTiltShiftShader.js';
 import { VerticalTiltShiftShader } from 'three/addons/shaders/VerticalTiltShiftShader.js';
-import { PALETTE, CROPS, TEX_ID, L, fields, harvesters, haulers, drones, step, TRUNKS_X, TRUNKS_Z, depots, inCrater, ROADS, RING, LAYERS, CUT, wrapX, PLOT, economy, focus, signals, log, plantField, abandonField, quote, setTimeScale, setPaused, paused, exportSnapshot, applySnapshot, fieldAtWorld, fieldAt, toWorld, onAfterStep, fieldOrigin, simTime, worldDay, stores, rigs, fieldVisual, cropWatch, stageBoard, POTATO_DAYS, POTATO_STAGES, warehouse, buildings, sellLot, sellStack, warehouseStacks, warehouseCapacity, placeBuilding, removeBuilding, rigReadout, SHOP, buySeed, buyItem, SEED_PER_FIELD, FERT_PER_FIELD, resetGame, CULTURES, DECK_CLIMATE, tanks, cultureWatch, startCulture, tendCulture, harvestCulture, BUILDING_KINDS, CULTURE_CELLS, tankSite, devices, potatoStock, fertPlan, cultureFeedPlan, millWatch, startMill, removeMill, orderProcess, HUB_SITES, cropDossier, MACHINE_SHOP, buyMachine, cropDef, boomWatch, rigProfile, DRONE_SHOP, workDrones, buyDrone, sectorLight, sectorWord, dayCenter, buyLandAt, sellLandAt, fieldAtWorldAny, landCard, toggleEquip, setWorldDay, RING_OMEGA, bindPotatoClock, bindSurfaceClock, formatTimeScale, sellRig, machineSellPrice, rigIsWorking } from './_shared.js';
+import { PALETTE, CROPS, TEX_ID, L, fields, harvesters, haulers, drones, step, TRUNKS_X, TRUNKS_Z, depots, inCrater, ROADS, RING, LAYERS, CUT, wrapX, PLOT, economy, focus, signals, log, plantField, abandonField, quote, setTimeScale, setPaused, paused, exportSnapshot, applySnapshot, fieldAtWorld, fieldAt, toWorld, onAfterStep, fieldOrigin, simTime, worldDay, stores, rigs, fieldVisual, cropWatch, stageBoard, POTATO_DAYS, POTATO_STAGES, warehouse, buildings, sellLot, sellStack, warehouseStacks, warehouseCapacity, placeBuilding, removeBuilding, rigReadout, SHOP, buySeed, buyItem, SEED_PER_FIELD, FERT_PER_FIELD, resetGame, CULTURES, DECK_CLIMATE, tanks, cultureWatch, startCulture, tendCulture, harvestCulture, BUILDING_KINDS, CULTURE_CELLS, tankSite, devices, potatoStock, fertPlan, cultureFeedPlan, millWatch, startMill, removeMill, orderProcess, HUB_SITES, cropDossier, MACHINE_SHOP, buyMachine, cropDef, boomWatch, rigProfile, DRONE_SHOP, workDrones, buyDrone, sectorLight, sectorWord, dayCenter, buyLandAt, sellLandAt, fieldAtWorldAny, landCard, toggleEquip, setWorldDay, RING_OMEGA, bindPotatoClock, bindSurfaceClock, formatTimeScale, sellRig, machineSellPrice, rigIsWorking, garageBoard, sendRigHome } from './_shared.js';
 import { applyStagePayload, bootFieldStageSource, writeStageStore, suspendLastikaStage, resumeLastikaStage, stageBadge, bootFieldBlocks } from './field-stage-live.js';
 import { bootWorkshopMachines } from './machine-live.js';
 import { potatoDrawLooks, POTATO_PAINT_SLOTS, workWidthOf } from './surface-crops.js';
@@ -33,8 +33,8 @@ import {
 } from './modulus.js';
 import { overlayCells } from './land-buy.js';
 import { BUILDINGS, ROADS as BUILD_ROADS } from './build/catalog.js';
-import { placeWork, eraseWork, listWorks, previewWork } from './build/works.js';
-import { createWorkMesh, ghostMaterial, applyGhostTint } from './build/meshes.js';
+import { placeWork, eraseWork, listWorks, previewWork, roadMask, pieceUnder } from './build/works.js';
+import { createWorkMesh, ghostMaterial, applyGhostTint, createRoadMesh } from './build/meshes.js';
 import { footprint, worldCell, cellOrigin } from './build/placement.js';
 import { DAY_SECONDS } from './world-clock.js';
 import { SOIL_STORE, defaultSoilCurves, normalizeSoilCurves, freshSoil, stepSoil, soilDrivers, soilText } from './soil.js';
@@ -1626,7 +1626,7 @@ function rebuildWorks() {
   refreshBuildGrid();
 }
 function mountWork(piece) {
-  const mesh = createWorkMesh(piece.kind);
+  const mesh = piece.kind === 'service' ? createRoadMesh(roadMask(piece.gx, piece.gz)) : createWorkMesh(piece.kind);
   stickToRing(mesh);
   mesh.position.set(piece.x, 0, piece.z);
   mesh.rotation.y = piece.rot * Math.PI / 2;
@@ -1646,8 +1646,16 @@ function showGhost(kind) {
   ghostRoot.add(ghost);
   ghostRoot.visible = true;
 }
+function updateErase(cx, cy) {
+  ghostRoot.visible = false;
+  if (mode !== 'build' || buildTool !== 'erase') { hideFootprint(); return; }
+  const p = pickFlat(cx, cy);
+  const piece = p ? pieceUnder(p.x, p.z) : null;
+  if (!piece) { hideFootprint(); return; }
+  paintFootprint({ ok: false, cells: piece.cells, bad: piece.cells });
+}
 function updateGhost(cx, cy) {
-  if (mode !== 'build' || !buildTool || buildTool === 'erase') { ghostRoot.visible = false; hideFootprint(); return; }
+  if (mode !== 'build' || !buildTool || buildTool === 'erase') { ghostRoot.visible = false; if (buildTool !== 'erase') hideFootprint(); return; }
   const p = pickFlat(cx, cy);
   if (!p) { ghostRoot.visible = false; hideFootprint(); return; }
   const spec = [...BUILDINGS, ...BUILD_ROADS].find(item => item.id === buildTool);
@@ -1666,7 +1674,8 @@ function paintBuildBar() {
   const el = $('buildbar');
   if (!el) return;
   const icon = (item) => `<button type="button" data-build="${item.id}" class="${buildTool === item.id ? 'on' : ''}"><i style="width:${10 + item.w * 6}px;height:${8 + item.h * 6}px"></i><b>${item.name}</b></button>`;
-  el.innerHTML = `<div class="grp"><span>建筑</span>${BUILDINGS.map(icon).join('')}</div><div class="grp"><span>道路</span>${BUILD_ROADS.map(icon).join('')}</div><div class="grp">${icon({ id: 'erase', name: '拆除', w: 1, h: 1 })}</div>`;
+  const board = garageBoard();
+  el.innerHTML = `<div class="grp"><span>建筑</span>${BUILDINGS.map(icon).join('')}</div><div class="grp"><span>道路</span>${BUILD_ROADS.map(icon).join('')}</div><div class="grp">${icon({ id: 'erase', name: '拆除', w: 1, h: 1 })}</div><div class="grp"><span>车位 ${board.used}/${board.stalls}</span></div>`;
   el.classList.toggle('on', mode === 'build');
 }
 function syncBuildView() {
@@ -1687,9 +1696,13 @@ function layAt(x, z, quiet) {
   if (!buildTool || buildTool === 'erase') {
     if (buildTool === 'erase') {
       const gone = eraseWork(x, z);
-      if (!gone.ok) { if (!quiet) toast('这里没有可拆的'); return; }
+      if (!gone.ok) {
+        if (!quiet) toast(gone.reason === 'occupied' ? '这栋车库还停着农机。先卖掉，车位空了才能拆。' : '这里没有可拆的');
+        return;
+      }
       rebuildWorks();
       if (!quiet) toast('已拆除');
+      paintBuildBar();
       saveSoon();
     }
     return;
@@ -1699,8 +1712,21 @@ function layAt(x, z, quiet) {
     if (!quiet) toast(placed.reason === 'zone' ? '要落在建造区里' : placed.reason === 'block' ? '和已有占地重叠' : '不能放');
     return;
   }
-  mountWork(placed.piece);
+  if (placed.piece.kind === 'service') {
+    for (const piece of listWorks()) {
+      if (piece.kind !== 'service') continue;
+      if (Math.abs(piece.gx - placed.piece.gx) > 1 || Math.abs(piece.gz - placed.piece.gz) > 1) continue;
+      const old = workRoot.children.find(child => child.userData.workId === piece.id);
+      if (old) {
+        workRoot.remove(old);
+        old.traverse(obj => { if (obj.geometry) obj.geometry.dispose(); });
+      }
+      mountWork(piece);
+    }
+  } else mountWork(placed.piece);
+  if (placed.piece.kind === 'garage' && !quiet) toast(`车库 ${garageBoard().stalls} 个车位。停着农机时不能拆。`);
   refreshBuildGrid();
+  paintBuildBar();
   saveSoon();
 }
 const buildingSets = {
@@ -3021,7 +3047,8 @@ addEventListener('pointerup', e => {
 });
 let hoverPtr = null, deckHover = null;
 addEventListener('pointermove', e => {
-  if (mode === 'build' && buildTool && buildTool !== 'erase') updateGhost(e.clientX, e.clientY);
+  if (mode === 'build' && buildTool === 'erase') updateErase(e.clientX, e.clientY);
+  else if (mode === 'build' && buildTool) updateGhost(e.clientX, e.clientY);
   if (drag && drag.b === 'road') {
     if (Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) >= 4) {
       const p = pickFlat(e.clientX, e.clientY);
@@ -3182,6 +3209,7 @@ function rigLine(r) {
   const st = r.bDrive ? rigStandby(r) : null;
   if (st?.standby) return `${role}待机剩余 ${st.clock} · 电 ${pct}%${width}`;
   if (st?.waiting) return `${role}完成当前作业后待机 · 电 ${pct}%${width}`;
+  if (r.navFail) return `${r.navFail} · 电 ${pct}%${width}`;
   if (!r.busy && r.mode !== 'charge') return `${role}停在机库 · 电 ${pct}%${width}${caps}`;
   const where = r.f ? ' · ' + fieldCode(r.f) : '';
   return `${role}${info.doing}${where} · 电 ${pct}%${width}${caps}`;
@@ -3416,12 +3444,16 @@ function paintSheet() {
     });
     const item = MACHINE_SHOP.find(s => s.id === rigPick) || MACHINE_SHOP[0];
     const n = rigs.filter(r => r.kind === item.id).length;
+    const board = garageBoard();
+    const stallLine = board.stalls
+      ? `车位 ${board.used}/${board.stalls}。每座车库 3 个车位。卖掉农机才空出来。`
+      : '还没有车库。先在建设里放下车库，才能买农机。';
     const note = item.id === 'tractor'
       ? '自己不带犁田。有空着的犁就挂上，然后才能整地。售价是购入价的一半。'
       : item.id === 'plow'
         ? '挂到还没有犁的拖拉机上。卖掉是购入价的一半。'
         : '自走一体。犁田、播种、收割、收拾、追肥、培土都能做。售价是购入价的一半。';
-    el.innerHTML = `<div class="split"><div><div class="who"><b>农机店</b><span>用营收买</span></div>${stackSlots(rows, item.id, 'data-rigshop')}</div><div><div class="who"><b>${item.name}</b><span>单价 ${fmt(item.price)} · 已有 ${n}</span></div><p class="note">${note}</p><button type="button" class="sell" id="buy-rig">购买</button></div></div>`;
+    el.innerHTML = `<div class="split"><div><div class="who"><b>农机店</b><span>用营收买</span></div>${stackSlots(rows, item.id, 'data-rigshop')}</div><div><div class="who"><b>${item.name}</b><span>单价 ${fmt(item.price)} · 已有 ${n}</span></div><p class="note">${note}</p><p class="note">${stallLine}</p><button type="button" class="sell" id="buy-rig">购买</button></div></div>`;
   } else if (mode === 'store') {
     const cap = warehouseCapacity();
     const stacks = warehouseStacks();
@@ -3590,7 +3622,8 @@ $('sheet').addEventListener('click', e => {
       const rig = rigs.find(r => r.id === bought.id);
       if (rig) adoptBought(rig);
     }
-    if (!bought.ok && bought.reason === 'money') toast('营收不够');
+    if (!bought.ok && bought.reason === 'stall') toast(bought.stalls ? `车位满了（${bought.used}/${bought.stalls}）。先再建一座车库，或卖掉农机。` : '没有车库车位。先在建设里放下车库。');
+    else if (!bought.ok && bought.reason === 'money') toast('营收不够');
     else if (!bought.ok) toast('这台不卖');
     else toast(`<b>−${fmt(bought.cost)}</b>${bought.name}`);
     paintSheet();
@@ -3953,7 +3986,7 @@ function updateLabels(d) {
   if (!camS.deck && labelMode !== 3) for (const r of rigs) {
     if (r.kind === 'plow') continue;
     const st = r.bDrive ? rigStandby(r) : null;
-    const mark = st?.standby ? `待机剩余: ${st.clock}` : st?.waiting ? '完成当前作业后待机' : '';
+    const mark = r.navFail ? r.navFail : st?.standby ? `待机剩余: ${st.clock}` : st?.waiting ? '完成当前作业后待机' : '';
     if (!showRigs && !mark) continue;
     const html = mark ? `<b>${r.label}</b><span>${mark}</span>` : `<b>${r.label}</b>`;
     const near = Math.min(1, Math.max(0.35, (1600 - d) / 700));
@@ -5062,6 +5095,8 @@ window.__farm = {
   toggleEquip: () => { convertEquip(); return !!selected?.equip; },
   build(kind) { armBuild(kind); },
   placeAt(x, z) { layAt(x, z); return listWorks(); },
+  garage: garageBoard,
+  sendHome: (id, x, z) => sendRigHome(id, x, z),
   works: () => listWorks(),
   sellLand: (i, j) => { const r = sellLandAt(i, j); if (r.ok) { syncOwnedFields(); paintLandOverlay(true); } return r; },
   land: (i, j) => landCard(i, j),

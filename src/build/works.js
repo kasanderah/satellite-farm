@@ -1,11 +1,17 @@
 // 已放下的建筑和道路。存档只记格子坐标。调度不读这里。
 import { CELL } from '../modulus.js';
 import { workSpec } from './catalog.js';
+import { roadMaskAt } from './roads.js';
 import { tryPlace, pieceRecord, pieceAt, worldCell, cellOrigin, takenKeys } from './placement.js';
 
 let pieces = [];
 let nextId = 1;
 let zoneFn = () => false;
+let occupyFn = () => 0;
+
+export function bindOccupy(fn) {
+  occupyFn = typeof fn === 'function' ? fn : () => 0;
+}
 
 export function bindBuildZone(fn) {
   zoneFn = typeof fn === 'function' ? fn : () => false;
@@ -66,6 +72,18 @@ export function previewWork(kind, x, z, rot) {
   };
 }
 
+export function pieceUnder(x, z) {
+  const cell = worldCell(x, z);
+  return pieceAt(pieces, cell.gx, cell.gz);
+}
+
+export function roadMask(gx, gz) {
+  return roadMaskAt(gx, gz, (x, z) => {
+    const piece = pieceAt(pieces, x, z);
+    return !!(piece && piece.kind === 'service');
+  });
+}
+
 export function placeWork(kind, x, z, rot) {
   const spec = workSpec(kind);
   const cell = worldCell(x, z);
@@ -80,6 +98,8 @@ export function eraseWork(x, z) {
   const cell = worldCell(x, z);
   const piece = pieceAt(pieces, cell.gx, cell.gz);
   if (!piece) return { ok: false, reason: 'empty' };
+  const used = occupyFn(piece) || 0;
+  if (used > 0) return { ok: false, reason: 'occupied', used, piece };
   pieces = pieces.filter(item => item.id !== piece.id);
   return { ok: true, piece };
 }

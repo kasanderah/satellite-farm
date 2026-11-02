@@ -85,6 +85,8 @@ function followRoad(unit, x, z, ang, speed, slice) {
     return;
   }
   unit.ang = ang;
+  if (unit.ri >= pts.length && pts.blocked && Math.hypot(unit.x - x, unit.z - z) > 6) unit.navFail = '路被建筑挡住，绕不过去';
+  else if (unit.ri < pts.length) unit.navFail = '';
 }
 
 function roadLeft(unit, x, z) {
@@ -106,7 +108,8 @@ function readout(order, unit) {
   const machine = order ? machineOf(order.machineId) : machineOf(unit?.machineId);
   const home = !order && unit && Math.hypot(unit.x - unit.parkX, unit.z - unit.parkZ) <= 1.2;
   let doing = '停在机库';
-  if (machine?.standby > 0) doing = `待机剩余 ${standbyClock(machine)}`;
+  if (unit?.navFail) doing = unit.navFail;
+  else if (machine?.standby > 0) doing = `待机剩余 ${standbyClock(machine)}`;
   else if (machine?.recall === 'wait') doing = '等硬作业做完';
   else if (order?.phase === 'cruise') doing = '开往田块';
   else if (order?.phase === 'turn') doing = '地头转弯';
