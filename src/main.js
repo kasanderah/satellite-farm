@@ -262,9 +262,10 @@ function writeFields() {
       const orient = v.dir > 0.5 ? 1 : 0;
       alpha = orient + (Math.round(v.next) % 100) / 100;
     }
+    // 类型放在作物号的十分位。百分位在中精度里会被整数部分吃掉，垄距就退回作物上的旧值。
     const gnd = v.ground === 'deepridge' ? 2 : v.ground === 'general' ? 1 : 0;
     const lift = Math.max(0, Math.min(0.45, (v.ridgeScale || 1) - 1));
-    fieldData[o] = v.crop + (gnd > 0 ? (gnd + lift) / 100 : 0); fieldData[o + 1] = v.g; fieldData[o + 2] = v.mask != null && v.mask !== 0 ? v.mask : v.s; fieldData[o + 3] = alpha;
+    fieldData[o] = v.crop + (gnd > 0 ? gnd * 0.1 + lift * 0.01 : 0); fieldData[o + 1] = v.g; fieldData[o + 2] = v.mask != null && v.mask !== 0 ? v.mask : v.s; fieldData[o + 3] = alpha;
   }
   fieldTex.needsUpdate = true;
 }
@@ -495,18 +496,18 @@ uniform sampler2D uPotRidge;
 uniform float uPotOn;
 uniform vec4 uGndRow, uGndAmp;
 uniform vec3 uBRaw, uBYoung, uBRipe, uBStraw;
-float gndCode(float r) { return fract(abs(r)) * 100.0; }
+float gndCode(float r) { return fract(abs(r)) * 10.0; }
 float gndRowOf(float r) {
   float code = gndCode(r);
-  int g = int(floor(code + 0.001));
+  int g = int(floor(code + 0.05));
   if (g == 2) return max(uGndRow.y, 0.05);
   if (g == 1) return max(uGndRow.x, 0.05);
   return 0.0;
 }
 float gndAmpOf(float r) {
   float code = gndCode(r);
-  int g = int(floor(code + 0.001));
-  float lift = max(code - float(g), 0.0);
+  int g = int(floor(code + 0.05));
+  float lift = max(code - float(g), 0.0) * 10.0;
   float base = g == 2 ? uGndAmp.y : uGndAmp.x;
   return max(base, 0.04) * (1.0 + lift);
 }
@@ -678,7 +679,8 @@ vec3 farmAlbedo(vec2 p){
     bool head = !bField && (uv.x < 6. || uv.x > FIELD - 6.);      // 地头：作物行方向与田内垂直
     float across = head ? uv.x : uv.y;
     if (head) acrossW = acrossW.yx;
-    float rowS = P.y * (tex == 4 ? 2.2 : 1.0);
+    float rowFromGnd = gndRowOf(d.r);
+    float rowS = (bField && rowFromGnd > 0.0 ? rowFromGnd : P.y) * (tex == 4 ? 2.2 : 1.0);
     float ph = across / rowS;
     float fw = fwidth(ph);
     float rowVis = 1. - smoothstep(0.22, 0.55, fw);  // 行距小于约 2 像素时淡出，避免摩尔纹
@@ -712,8 +714,7 @@ vec3 farmAlbedo(vec2 p){
       // 扫过的格子用下一道。做完以后蒙版回到 -1，整块回到同一个 g。
       float edgeIn = min(min(loc.x, FIELD - loc.x), min(loc.y, FIELD - loc.y));
       float edgeFade = smoothstep(0.0, 1.8, edgeIn);
-      float rowFromGnd = gndRowOf(d.r);
-      float rowSpB = rowFromGnd > 0.0 ? rowFromGnd : max(P.y, 0.05);
+      float rowSpB = max(rowS, 0.05);
       float gainB = clamp(gndAmpOf(d.r) / 0.16, 0.45, 2.8);
       float rowPhB = uv.y / rowSpB;
       float rowSeeB = (1.0 - smoothstep(0.22, 0.55, fwidth(rowPhB))) * edgeFade;
@@ -1294,7 +1295,7 @@ function ownedLookSig() {
   let s = '';
   for (const f of fields) {
     if (!f.bUnit || (f.bUnit.look === 'hold' && !f.bUnit.sweep)) continue;
-    s += f.idx + ':' + f.bUnit.look + ':' + (f.bUnit.cropId || '') + ':' + (f.bUnit.ground || '') + ':' + (f.bUnit.sweep ? f.bUnit.sweep.look : '') + '|';
+    s += f.idx + ':' + f.bUnit.look + ':' + (f.bUnit.cropId || '') + ':' + (f.bUnit.ground || '') + ':' + (f.bUnit.row || 0) + ':' + (f.bUnit.ridgeScale || 1) + ':' + (f.bUnit.sweep ? f.bUnit.sweep.look : '') + '|';
   }
   return s;
 }
