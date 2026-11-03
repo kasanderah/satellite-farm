@@ -2,12 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import lastika from '../data/field-stages/lastika.json' with { type: 'json' };
 import { cropDef } from '../src/surface-crops.js';
-import { PLANT_CROPS } from '../src/framework-b.js';
+import { PLANT_CROPS, FIELD_BLOCKS } from '../src/framework-b.js';
 import { installShippedLastika } from '../src/lastika-stage.js';
 import { DAY_SECONDS } from '../src/world-clock.js';
 import {
   applyStagePayload, lastikaDocFromPayload, bootFieldStageSource,
   writeStageStore, suspendLastikaStage, resumeLastikaStage, stageBadge, FIELD_STAGE_STORE, readStageStore,
+  bootFieldBlocks, workshopSourceNote, FIELD_BLOCK_STORE,
 } from '../src/field-stage-live.js';
 
 function edited() {
@@ -117,6 +118,23 @@ test('repo default keeps the workshop doc for a later reread', () => {
   } finally {
     installShippedLastika();
   }
+});
+
+test('田块档和作物档分开读，缺作物档不会说成整份工坊都没有', () => {
+  const store = memoryStore();
+  store.setItem(FIELD_BLOCK_STORE, JSON.stringify({
+    schema: 'ringsheaf.field-block/1',
+    blocks: { deepridge: { id: 'deepridge', name: '深垄田地', row: 2.1, graph: { stages: [{ id: 'turned' }], edges: [] } } },
+  }));
+  const blocks = bootFieldBlocks(store);
+  assert.equal(FIELD_BLOCKS.deepridge.row, 2.1);
+  assert.equal(blocks.loaded.length, 1);
+  const stage = bootFieldStageSource(store, null);
+  const note = workshopSourceNote(stage, blocks);
+  assert.match(note, /作物档：没有拉斯提卡工坊档/);
+  assert.match(note, /田块档：已加载深垄田地（行距 2.1 m）/);
+  bootFieldBlocks(null);
+  assert.equal(FIELD_BLOCKS.deepridge.row, 1.05);
 });
 
 test('an empty browser boots the shipped lastika document', () => {

@@ -12,7 +12,7 @@ import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { HorizontalTiltShiftShader } from 'three/addons/shaders/HorizontalTiltShiftShader.js';
 import { VerticalTiltShiftShader } from 'three/addons/shaders/VerticalTiltShiftShader.js';
 import { PALETTE, CROPS, TEX_ID, L, fields, harvesters, haulers, drones, step, TRUNKS_X, TRUNKS_Z, depots, inCrater, ROADS, RING, LAYERS, CUT, wrapX, PLOT, economy, focus, signals, log, plantField, abandonField, quote, setTimeScale, setPaused, paused, exportSnapshot, applySnapshot, fieldAtWorld, fieldAt, toWorld, onAfterStep, fieldOrigin, simTime, worldDay, stores, rigs, fieldVisual, cropWatch, stageBoard, POTATO_DAYS, POTATO_STAGES, warehouse, buildings, sellLot, sellStack, warehouseStacks, warehouseCapacity, placeBuilding, removeBuilding, rigReadout, SHOP, buySeed, buyItem, SEED_PER_FIELD, FERT_PER_FIELD, resetGame, CULTURES, DECK_CLIMATE, tanks, cultureWatch, startCulture, tendCulture, harvestCulture, BUILDING_KINDS, CULTURE_CELLS, tankSite, devices, potatoStock, fertPlan, cultureFeedPlan, millWatch, startMill, removeMill, orderProcess, HUB_SITES, cropDossier, MACHINE_SHOP, buyMachine, cropDef, boomWatch, rigProfile, DRONE_SHOP, workDrones, buyDrone, sectorLight, sectorWord, dayCenter, buyLandAt, sellLandAt, fieldAtWorldAny, landCard, toggleEquip, setWorldDay, RING_OMEGA, bindPotatoClock, bindSurfaceClock, formatTimeScale, sellRig, machineSellPrice, rigIsWorking, garageBoard, sendRigHome } from './_shared.js';
-import { applyStagePayload, bootFieldStageSource, writeStageStore, suspendLastikaStage, resumeLastikaStage, stageBadge, bootFieldBlocks } from './field-stage-live.js';
+import { applyStagePayload, bootFieldStageSource, writeStageStore, suspendLastikaStage, resumeLastikaStage, stageBadge, bootFieldBlocks, workshopSourceNote } from './field-stage-live.js';
 import { bootWorkshopMachines } from './machine-live.js';
 import { potatoDrawLooks, POTATO_PAINT_SLOTS, workWidthOf } from './surface-crops.js';
 import { ridgeCrestT } from './field-stages.js';
@@ -4456,14 +4456,11 @@ function adoptStageText(text, persist) {
 }
 function reloadStageStore() {
   try { resumeLastikaStage(localStorage); } catch { /* 无痕模式 */ }
-  try { bootFieldBlocks(localStorage); } catch { /* 无痕模式 */ }
+  let blocks = { loaded: [] };
+  try { blocks = bootFieldBlocks(localStorage); } catch { /* 无痕模式 */ }
   const booted = bootFieldStageSource(localStorage, null);
   bindPlayableClocks();
-  if (!booted.ok) {
-    paintStageChrome(booted.message || '工坊存档读不了');
-    return booted;
-  }
-  paintStageChrome(booted.skipped ? '这台浏览器里没有拉斯提卡工坊档，仍用仓库默认' : '');
+  paintStageChrome(workshopSourceNote(booted, blocks));
   return booted;
 }
 function useRepoStages() {
@@ -4472,7 +4469,8 @@ function useRepoStages() {
   bootFieldBlocks(null);
   bootFieldStageSource(localStorage, 'repo');
   bindPlayableClocks();
-  paintStageChrome(kept ? '已改用仓库里的拉斯提卡。工坊档还在这台浏览器里，重读即可恢复。' : '');
+  const crop = kept ? '作物档：已改用仓库里的拉斯提卡。工坊作物档还在，重读即可恢复。' : '作物档：这一轮用仓库默认。';
+  paintStageChrome(crop + '田块档：这一轮用仓库默认。');
 }
 function bindPlayableClocks() {
   bindPotatoClock();
@@ -4492,13 +4490,11 @@ document.addEventListener('visibilitychange', () => {
 });
 function bootStagesSync() {
   const param = Q.get('stages');
-  bootFieldBlocks(param === 'repo' ? null : localStorage);
+  const blocks = bootFieldBlocks(param === 'repo' ? null : localStorage);
   if (stageParamIsUrl(param)) return '';
   const booted = bootFieldStageSource(localStorage, param === 'repo' ? 'repo' : null);
   bindPlayableClocks();
-  if (booted.origin === 'workshop') return '';
-  if (!booted.ok) return booted.message || '工坊存档读不了，仍用仓库默认';
-  return '';
+  return workshopSourceNote(booted, blocks);
 }
 const bootStageNote = bootStagesSync();
 $('kpi').innerHTML = `<div class="k-rev"><small>营收</small><b class="hv" id="kpi-rev">0</b></div><div class="k-day"><small>世界日</small><b id="kpi-day">0</b></div><div class="k-time"><small>时刻</small><span class="clk"><i class="face" id="kpi-face" aria-hidden="true"><i id="kpi-hh"></i><i id="kpi-mh"></i></i><b id="kpi-hm">00:00</b><b id="kpi-rate">1×</b></span></div><div class="k-act"><small>作业</small><b class="hv" id="kpi-act">0</b><em>/ ${rigs.length}</em></div>`;

@@ -907,7 +907,7 @@ test('电尽后空闲万能机补满，第六单和收拾都会继续派', () =>
 });
 
 test('拉斯提卡阶段和版本戳来自同一份定义', () => {
-  assert.equal(HUD_VERSION, '环穗 v6.35');
+  assert.equal(HUD_VERSION, '环穗 v6.35.1');
   const doc = parseFieldStageDoc(structuredClone(lastikaRaw));
   const windows = jobWindows(doc, alignFieldCalendar(doc)).filter(item => item.op.kind === 'optional');
   assert.deepEqual(windows.map(item => item.op.id), ['topdress', 'spray', 'hill']);

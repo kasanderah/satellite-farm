@@ -1,7 +1,7 @@
 // 田块编辑器和阶段编辑器同一套壳：上进度、中节点图、右上资产、右中预览、右下细节。
 import { analyzeGraph, hangSlots, jobKey } from './stage-graph.js';
 import { CELL } from './modulus.js';
-import { FIELD_BLOCK_STORE, cloneFieldBlocks, prepSteps, snapRow, ridgeAmp } from './field-blocks.js';
+import { FIELD_BLOCK_STORE, cloneFieldBlocks, prepSteps, snapRow, ridgeAmp, normalizeFieldBlock } from './field-blocks.js';
 import { installFieldBlocks } from './framework-b.js';
 import { mountSoilEditor } from './lab-field.js';
 
@@ -21,14 +21,7 @@ export function createBlockWorkshop(els) {
   let wire = null;
 
   function hydrate(doc) {
-    const seed = cloneFieldBlocks().find(item => item.id === doc.id);
-    if (!(Number(doc.row) > 0)) doc.row = Number(doc.ridgeWidth) > 0 ? doc.ridgeWidth : seed?.row;
-    const snapped = snapRow(doc.row || seed?.row || 0.7);
-    doc.rowsPerCell = snapped.rowsPerCell;
-    doc.row = snapped.row;
-    doc.ridgeWidth = doc.row;
-    if (!Array.isArray(doc.ridge) || doc.ridge.length < 2) doc.ridge = structuredClone(seed?.ridge || []);
-    return doc;
+    return normalizeFieldBlock(doc);
   }
 
   function current() {
@@ -59,7 +52,7 @@ export function createBlockWorkshop(els) {
     localStorage.setItem(FIELD_BLOCK_STORE, JSON.stringify({ schema: 'ringsheaf.field-block/1', blocks }));
     installFieldBlocks(Object.values(blocks).concat(cloneFieldBlocks().filter(item => !blocks[item.id])));
     installFieldBlocks(Object.values(blocks));
-    if (note) note.textContent = '已存。主游戏重读后，整地按这张工序图派车。';
+    if (note) note.textContent = '田块档已写入。和作物阶段档分开。主游戏点「重读工坊」后用新的行距和垄截面。';
     return true;
   }
 
@@ -251,11 +244,18 @@ export function createBlockWorkshop(els) {
     const canvas = panel.querySelector('#fb-ridge');
     const doc = current();
     if (!canvas || !doc?.ridge) return;
+    // 显示尺寸走样式。位图尺寸不能回写成布局宽，否则每次拖点都乘一次像素比，画布会撑破。
+    canvas.style.width = '100%';
+    canvas.style.height = '96px';
+    canvas.style.display = 'block';
     const w = canvas.clientWidth || 280;
-    const h = 96;
+    const h = canvas.clientHeight || 96;
+    if (!(w > 0) || !(h > 0)) return;
     const dpr = Math.min(devicePixelRatio || 1, 2);
-    canvas.width = Math.round(w * dpr);
-    canvas.height = Math.round(h * dpr);
+    const bw = Math.min(2048, Math.max(1, Math.round(w * dpr)));
+    const bh = Math.min(512, Math.max(1, Math.round(h * dpr)));
+    if (canvas.width !== bw) canvas.width = bw;
+    if (canvas.height !== bh) canvas.height = bh;
     const ctx = canvas.getContext('2d');
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
@@ -290,7 +290,7 @@ export function createBlockWorkshop(els) {
     });
     if (bestD > 18) return;
     ridgeDrag = best;
-    canvas.setPointerCapture(ev.pointerId);
+    try { canvas.setPointerCapture(ev.pointerId); } catch { /* 合成事件没有 pointerId */ }
   }
   function onRidgeMove(ev) {
     if (ridgeDrag == null) return;
@@ -306,6 +306,8 @@ export function createBlockWorkshop(els) {
       point.x = Math.max(lo, Math.min(hi, p.x));
     }
     point.y = p.y;
+    const note = panel.querySelector('#fb-row-note');
+    if (note) note.textContent = `一格 ${doc.rowsPerCell || '—'} 行 · 垄高 ${ridgeAmp(doc.ridge).toFixed(2)} m。行距整除 4.2 m。`;
     drawRidge();
   }
 

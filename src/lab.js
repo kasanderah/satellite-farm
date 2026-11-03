@@ -737,6 +737,13 @@ function previewHost() {
 function resize() {
   const host = previewHost();
   if (renderer.domElement.parentElement !== host) host.appendChild(renderer.domElement);
+  const el = renderer.domElement;
+  el.style.position = 'absolute';
+  el.style.inset = '0';
+  el.style.width = '100%';
+  el.style.height = '100%';
+  el.style.maxWidth = '100%';
+  el.style.maxHeight = '100%';
   const w = host.clientWidth || 800;
   const h = host.clientHeight || 600;
   renderer.setSize(w, h, false);
@@ -892,11 +899,15 @@ canvas.addEventListener('pointerup', () => { drag = null; });
 canvas.addEventListener('pointercancel', () => { drag = null; });
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 document.addEventListener('contextmenu', (e) => e.preventDefault(), true);
-canvas.addEventListener('wheel', (e) => {
+function onPreviewWheel(e) {
+  const host = previewHost();
+  if (!host || host === viewEl || !host.contains(e.target)) return;
   e.preventDefault();
+  e.stopPropagation();
   const distCap = curId === 'hub' ? 90000 : 6000;
   eye.dist = Math.min(distCap, Math.max(2.5, eye.dist * (e.deltaY > 0 ? 1.08 : 0.92)));
-}, { passive: false });
+}
+document.addEventListener('wheel', onPreviewWheel, { capture: true, passive: false });
 
 for (const e of LAB_ENTRIES) {
   if (!BUILD[e.id]) throw new Error('资产工坊缺少预制：' + e.id);

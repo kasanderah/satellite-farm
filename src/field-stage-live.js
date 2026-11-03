@@ -8,7 +8,7 @@
 // file:// 在 Chrome 里每个文件各算一个来源，两页的 localStorage 互不可见。
 import { FIELD_STAGE_SCHEMA, FIELD_STAGE_STORE } from './field-stages.js';
 import { PLANT_CROPS, installFieldBlocks } from './framework-b.js';
-import { FIELD_BLOCK_STORE, cloneFieldBlocks } from './field-blocks.js';
+import { FIELD_BLOCK_STORE, cloneFieldBlocks, normalizeFieldBlock } from './field-blocks.js';
 import { installLastikaDoc, installShippedLastika, installTuberDoc, installShippedTuber } from './lastika-stage.js';
 
 export { FIELD_BLOCK_STORE };
@@ -16,19 +16,36 @@ export { FIELD_BLOCK_STORE };
 export function bootFieldBlocks(storage) {
   const shipped = cloneFieldBlocks();
   const byId = Object.fromEntries(shipped.map(doc => [doc.id, doc]));
+  const loaded = [];
   if (storage) {
     try {
       const raw = JSON.parse(storage.getItem(FIELD_BLOCK_STORE) || 'null');
       const blocks = raw?.blocks;
       if (blocks && typeof blocks === 'object') {
         for (const [id, doc] of Object.entries(blocks)) {
-          if (doc && doc.graph && Array.isArray(doc.graph.stages)) byId[id] = doc;
+          if (!doc || !doc.graph || !Array.isArray(doc.graph.stages)) continue;
+          const next = normalizeFieldBlock({ ...doc, id: doc.id || id });
+          byId[next.id || id] = next;
+          loaded.push({ id: next.id || id, name: next.name || id, row: next.row });
         }
       }
     } catch { /* 坏档用仓库默认 */ }
   }
   installFieldBlocks(Object.values(byId));
-  return byId;
+  return { byId, loaded };
+}
+
+// 作物阶段档和田块档是两把钥匙。缺作物档不能写成整份工坊都没读到。
+export function workshopSourceNote(stageBoot, blockBoot) {
+  let crop = '作物档：没有拉斯提卡工坊档，仍用仓库默认。';
+  if (stageBoot?.ok === false) crop = `作物档：${stageBoot.message || '读不了'}。`;
+  else if (stageBoot?.origin === 'workshop' && !stageBoot.skipped) crop = '作物档：已读工坊里的拉斯提卡。';
+  else if (stageBoot?.suspended) crop = '作物档：这一轮改用仓库里的拉斯提卡。';
+  const loaded = blockBoot?.loaded || [];
+  const blocks = loaded.length
+    ? `田块档：已加载${loaded.map(item => `${item.name}（行距 ${item.row} m）`).join('、')}。`
+    : '田块档：没有工坊田块档，仍用仓库默认。';
+  return crop + blocks;
 }
 
 export { FIELD_STAGE_STORE };

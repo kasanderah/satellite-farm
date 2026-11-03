@@ -28,6 +28,19 @@ export function ridgeAmp(points) {
   return (points || []).reduce((max, point) => Math.max(max, Number(point?.y) || 0), 0);
 }
 
+// 旧工坊档可能只有 ridgeWidth。打开时收成行距，缺的截面用仓库里同 id 的那条。
+export function normalizeFieldBlock(doc) {
+  if (!doc || typeof doc !== 'object') return doc;
+  const seed = FIELD_BLOCK_LIST.find(item => item.id === doc.id);
+  const raw = Number(doc.row) > 0 ? Number(doc.row) : Number(doc.ridgeWidth);
+  const snapped = snapRow(raw > 0 ? raw : seed?.row || 0.7);
+  doc.rowsPerCell = snapped.rowsPerCell;
+  doc.row = snapped.row;
+  doc.ridgeWidth = doc.row;
+  if (!Array.isArray(doc.ridge) || doc.ridge.length < 2) doc.ridge = structuredClone(seed?.ridge || []);
+  return doc;
+}
+
 // 一般田地垄矮。深垄沟更深、顶更高。软作业只在这个截面上乘一个抬高，不换类型。
 export const RIDGE_GENERAL = [
   { x: 0, y: 0.03 },

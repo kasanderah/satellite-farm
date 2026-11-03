@@ -65,8 +65,9 @@ main.block-on #fb-board{order:1;flex:1;min-height:0;display:flex;flex-direction:
 #fb-board[hidden],#fb-bar[hidden]{display:none !important}
 #fb-blue,#fb-purple{min-height:0;overflow-x:hidden;overflow-y:auto;border:1px solid var(--line);padding:10px;box-sizing:border-box}
 #fb-blue{border-top:4px solid #3d7ec8}
-#fb-stageview{position:relative;min-height:0;height:100%;background:#10131c;border:1px solid var(--line);border-top:4px solid #c4503a;overflow:hidden}
-#fb-stageview canvas{position:absolute;inset:0;width:100%;height:100%}
+#fb-stageview{position:relative;min-height:160px;height:180px;max-height:32%;background:#10131c;border:1px solid var(--line);border-top:4px solid #c4503a;overflow:hidden;overscroll-behavior:contain}
+#fb-stageview canvas{position:absolute;inset:0;width:100%;height:100%;max-width:100%;max-height:100%}
+main.block-on #soil-panel{overscroll-behavior:contain}
 #fb-purple{border-top:4px solid #8a4db3}
 #fb-graph{position:relative;flex:1;min-height:0;overflow:auto}
 #fb-canvas{position:relative;min-width:760px;min-height:420px}
@@ -147,6 +148,7 @@ main.block-on #fb-board{order:1;flex:1;min-height:0;display:flex;flex-direction:
 .fs-stage{display:grid;grid-template-columns:1fr 72px;gap:6px;align-items:center}
 .fs-stage button{text-align:left}
 #fs-curve{width:100%;height:148px;background:#10131c;border:1px solid var(--line);touch-action:none;cursor:crosshair;display:block}
+#fb-ridge{width:100%;height:96px;background:#10131c;border:1px solid var(--line);touch-action:none;cursor:crosshair;display:block}
 .fs-help,.fs-note{font-size:11px;line-height:1.55;color:var(--mut);letter-spacing:.03em}
 .fs-jobs{display:flex;flex-direction:column;gap:8px}
 .fs-jobs h4{margin:0;font-size:11px;font-weight:500;letter-spacing:.14em}
