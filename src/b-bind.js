@@ -492,6 +492,15 @@ export function tickSlice(dt) {
     if (rig.phase === 'sweep' && rig.job) settleSoft(farm, rig.job.fieldId, rig.job.jobId, rig.progress || 0);
   }
   for (const item of finished) settleSoft(farm, item.fieldId, item.jobId, 1);
+  for (const field of farm.fields.values()) {
+    const book = field.plant?.soft;
+    if (!book) continue;
+    for (const [jobId, row] of Object.entries(book)) {
+      if (row.status !== '执行中' || row.progress >= 1) continue;
+      const live = listRigs().some(rig => rig.job && rig.job.fieldId === field.id && rig.job.jobId === jobId);
+      if (!live) row.status = '未执行';
+    }
+  }
 }
 
 export function prepField(f, recipeId = 'clear_general') {

@@ -36,7 +36,7 @@ import { BUILDINGS, ROADS as BUILD_ROADS } from './build/catalog.js';
 import { placeWork, eraseWork, listWorks, previewWork, roadMask, pieceUnder } from './build/works.js';
 import { createWorkMesh, ghostMaterial, applyGhostTint, createRoadMesh } from './build/meshes.js';
 import { footprint, worldCell, cellOrigin } from './build/placement.js';
-import { trussSlots, buyTruss, TRUSS_PRICE, listRigs, drainTips, syncSlots, slotKey } from './truss.js';
+import { trussSlots, buyTruss, TRUSS_PRICE, listRigs, drainTips, syncSlots, slotKey, exportTruss } from './truss.js';
 import { DAY_SECONDS } from './world-clock.js';
 import { SOIL_STORE, defaultSoilCurves, normalizeSoilCurves, freshSoil, stepSoil, soilDrivers, soilText } from './soil.js';
 
@@ -690,30 +690,21 @@ vec3 farmAlbedo(vec2 p){
     bool cut = d.b >= 0.0 && d.b < 20.0 && laneCut(uv, d.b);
       float patchy = (n1 - 0.5) * 0.12 + (n2 - 0.5) * 0.05;
       float pst = floor(g + 0.001);
-      // hold 犁地：0.37 只是哨兵。未扫过清掉蒙版，继续走开局那套填充；扫过的条按这张工序的目标田块画垄。
+      // hold 犁地：0.37 只是哨兵。底色始终是开局冠层；扫过的部分再按目标田块叠上土垄。
+      // 垄相位的屏幕导数必须在分支外先算完，否则交界上的 2×2 块会算出乱法线，沿犁缝闪成一溜点。
       bool holdPlow = abs(d.r - uBCrop) > 0.25 && d.b >= 20.0 && abs(fract(d.a) - 0.37) < 0.02;
-      bool holdSwept = holdPlow && jobSwept(uv, d.b);
-      if (holdPlow && !holdSwept) {
+      float rowFromH = gndRowOf(d.r);
+      float rowSpH = max(rowFromH > 0.0 ? rowFromH : max(uGndRow.x, 0.05), 0.05);
+      float rowPhH = uv.y / rowSpH;
+      float rowFwH = fwidth(rowPhH);
+      float sweepCov = holdPlow ? jobSweptCov(uv, d.b) : 0.0;
+      if (holdPlow) {
         float keptS = max(fract(d.a) - 0.37, 0.0) * 1000.0;
         d.b = keptS > 0.2 ? keptS : 0.0;
         d.a = d.a > 0.5 ? 1.0 : 0.0;
         cut = d.b > 0.0 && d.b < 20.0 && laneCut(uv, d.b);
       }
-      if (holdSwept) {
-        float edgeInH = min(min(loc.x, FIELD - loc.x), min(loc.y, FIELD - loc.y));
-        float edgeFadeH = smoothstep(0.0, 1.8, edgeInH);
-        float rowFromH = gndRowOf(d.r);
-        float rowSpH = max(rowFromH > 0.0 ? rowFromH : uGndRow.x, 0.05);
-        float gainH = clamp((rowFromH > 0.0 ? gndAmpOf(d.r) : uGndAmp.x) / 0.16, 0.45, 2.8);
-        float rowPhH = uv.y / rowSpH;
-        float rowSeeH = (1.0 - smoothstep(0.22, 0.55, fwidth(rowPhH))) * edgeFadeH;
-        float profH = 0.5 + 0.5 * cos(6.2832 * rowPhH);
-        float slopeH = -sin(6.2832 * rowPhH) * gainH;
-        col = g_soil * (0.86 + 0.08 * profH * rowSeeH) * (1.0 + patchy) * mix(1.0, 0.82 + 0.18 * profH, clamp(gainH - 1.0, 0.0, 1.0));
-        gTilt = acrossW * slopeH * 0.72 * rowSeeH;
-        gRough = 0.94;
-        canopyHere = false;
-      } else if ((bWhole || bSweep) && tex == 2) {
+      if ((bWhole || bSweep) && tex == 2) {
       // 扫过的格子用下一道。做完以后蒙版回到 -1，整块回到同一个 g。
       float edgeIn = min(min(loc.x, FIELD - loc.x), min(loc.y, FIELD - loc.y));
       float edgeFade = smoothstep(0.0, 1.8, edgeIn);
@@ -1001,6 +992,19 @@ vec3 farmAlbedo(vec2 p){
       if (tex == 3) gRough = mix(0.12, 0.85, mask * rowVis + (1. - rowVis) * 0.55);   // 水田：行间水面反光
       // 喷药机的「拖拉机道」：每 24 m 两条细线
       if (tex < 3 && !head) { float tl = mod(uv.y, 24.) - 12.; col *= 1. - 0.32 * max(aaLine(tl - 0.9, 0.22), aaLine(tl + 0.9, 0.22)) * cover; }
+    }
+    if (sweepCov > 0.001) {
+      float edgeInH = min(min(loc.x, FIELD - loc.x), min(loc.y, FIELD - loc.y));
+      float edgeFadeH = smoothstep(0.0, 1.8, edgeInH);
+      float gainH = clamp((rowFromH > 0.0 ? gndAmpOf(d.r) : uGndAmp.x) / 0.16, 0.45, 2.8);
+      float rowSeeH = (1.0 - smoothstep(0.16, 0.32, rowFwH)) * edgeFadeH;
+      float profH = 0.5 + 0.5 * cos(6.2832 * rowPhH);
+      float slopeH = -sin(6.2832 * rowPhH) * gainH;
+      vec3 soilH = g_soil * (0.86 + 0.08 * profH * rowSeeH) * (1.0 + patchy) * mix(1.0, 0.82 + 0.18 * profH, clamp(gainH - 1.0, 0.0, 1.0));
+      col = mix(col, soilH, sweepCov);
+      gTilt = mix(gTilt, acrossW * slopeH * 0.55 * rowSeeH, sweepCov);
+      gRough = mix(gRough, 0.94, sweepCov);
+      if (sweepCov > 0.65) canopyHere = false;
     }
     // 制图层的地图模式：成熟度用单一色相渐变
     if (uMap > 0.) {
@@ -1679,16 +1683,24 @@ function syncTruss() {
     const child = trussRoot.children.pop();
     child.traverse(obj => { if (obj.userData.ownGeo && obj.geometry) obj.geometry.dispose(); });
   }
+  const seenPlot = new Set();
+  for (const key of exportTruss()) {
+    const [bi, bj] = key.split(':');
+    const plot = bi + ':' + bj;
+    if (seenPlot.has(plot)) continue;
+    seenPlot.add(plot);
+    syncSlots(trussSlots(fields, Number(bi), Number(bj), L.PER, L.FIELD));
+  }
+  for (const key of exportTruss()) {
+    const beam = longTruss();
+    beam.name = key;
+    trussRoot.add(beam);
+  }
   const slots = focusSlots();
   syncSlots(slots);
   const padMat = new THREE.MeshStandardMaterial({ color: 0x3a3834, roughness: 0.8, metalness: 0.2 });
   for (const slot of slots) {
-    if (slot.bought) {
-      const beam = longTruss();
-      beam.name = slot.key;
-      trussRoot.add(beam);
-      continue;
-    }
+    if (slot.bought) continue;
     const pad = new THREE.Mesh(new THREE.BoxGeometry(7, 0.12, 2.2), padMat);
     pad.position.set(slot.x, 0.08, slot.z);
     pad.name = 'pad-' + slot.key;

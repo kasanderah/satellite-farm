@@ -464,20 +464,29 @@ export function installPlayerMachine(farm, kind, rigId) {
   return null;
 }
 
+function orderUsesMachine(order, machine) {
+  if (!order || !machine) return false;
+  if (order.machineId === machine.id) return true;
+  if (machine.hitchId && order.hitchId === machine.hitchId) return true;
+  if (machine.classId === 'hitch' && order.hitchId === machine.id) return true;
+  return false;
+}
+
 export function removePlayerMachine(farm, machineId) {
   const machine = farm.machines.find(m => m.id === machineId);
   if (!machine) return { ok: true };
-  if (machine.busy) return { ok: false, reason: 'busy' };
+  const onOrder = farm.orders.some(order => orderUsesMachine(order, machine));
+  // 硬作业「做完再待机」还挂在这台上。空闲、回库、已经开始的待机可以卖。
+  if (onOrder || (machine.recall === 'wait' && machine.busy)) return { ok: false, reason: 'busy' };
   if (machine.classId === 'hitch') {
     const host = farm.machines.find(m => m.hitchId === machine.id);
-    if (host?.busy) return { ok: false, reason: 'busy' };
+    if (host && farm.orders.some(order => order.machineId === host.id || order.hitchId === machine.id)) {
+      return { ok: false, reason: 'busy' };
+    }
     if (host) host.hitchId = null;
     machine.hostId = null;
     farm.machines = farm.machines.filter(m => m.id !== machine.id);
     return { ok: true, hostId: host?.id || null };
-  }
-  if (farm.orders.some(order => order.machineId === machine.id || order.hitchId === machine.hitchId)) {
-    return { ok: false, reason: 'busy' };
   }
   if (machine.hitchId) {
     const hitch = farm.machines.find(m => m.id === machine.hitchId);

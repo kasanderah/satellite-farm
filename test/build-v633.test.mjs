@@ -90,6 +90,28 @@ test('桁架扫完停回地头，不再自己漂', () => {
   clearTruss();
 });
 
+test('一台桁架扫完自己这一行的第四个单元再回地头', () => {
+  clearTruss();
+  const span = 147;
+  const fields = [0, 1, 2, 3].map(k => ({ i: k, j: 0, x0: 100 + k * span, z0: 20 }));
+  assert.equal(buyTruss('0:0:0', () => true).ok, true);
+  syncSlots(trussSlots(fields, 0, 0, 4, 134.4));
+  syncSlots(trussSlots([{ i: 4, j: 0, x0: 900, z0: 20 }], 1, 0, 4, 134.4));
+  const rig = listRigs().find(item => item.key === '0:0:0');
+  assert.ok(rig, '别的地块刷新不能把这台桁架删掉');
+  const goalU = fields[3].x0 - fields[0].x0;
+  assert.equal(claimJob(rig.key, { fieldId: 'far', jobId: 'spray', goalU, len: 134.4 }), true);
+  let reached = false;
+  for (let n = 0; n < 200 && rig.phase !== 'park'; n++) {
+    if (rig.x >= fields[3].x0 - 1 && rig.x <= fields[3].x0 + 134.4 + 1) reached = true;
+    tickTrusses(2);
+  }
+  assert.equal(reached, true);
+  assert.equal(rig.phase, 'park');
+  assert.ok(Math.abs(rig.x - (fields[0].x0 - 8)) < 0.5);
+  clearTruss();
+});
+
 test('一行只能买一台桁架', () => {
   clearTruss();
   const fields = [{ i: 0, j: 0, x0: 0, z0: 0 }, { i: 0, j: 1, x0: 0, z0: 10 }];

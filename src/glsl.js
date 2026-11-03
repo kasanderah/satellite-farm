@@ -85,6 +85,25 @@ bool jobSwept(vec2 uv, float db){
   float fr = (prog - fs) * FIELD;
   return mod(fs, 2.0) < 0.5 ? uv.x < fr : uv.x > FIELD - fr;
 }
+// 犁刀边如果硬切，2×2 像素块会跨到两边，块内的 dFdx 变成垃圾值，垄法线就沿整条交界闪。
+// 覆盖量在交界两侧各留出约一个像素，整块田都算同一套导数。
+float jobSweptCov(vec2 uv, float db){
+  if (db < 20.0) return jobSwept(uv, db) ? 1.0 : 0.0;
+  float widthCode = floor(db / 100.0 + 0.001);
+  float prog = db - widthCode * 100.0;
+  float laneW = max(widthCode / 10.0, 0.4);
+  float fs = floor(prog + 0.0001);
+  float yLane = uv.y / laneW;
+  float aaL = max(fwidth(yLane) * 1.35, 0.015);
+  float aaX = max(fwidth(uv.x) * 1.35, 0.05);
+  float fr = (prog - fs) * FIELD;
+  float forward = mod(fs, 2.0) < 0.5
+    ? 1.0 - smoothstep(fr - aaX, fr + aaX, uv.x)
+    : smoothstep(FIELD - fr - aaX, FIELD - fr + aaX, uv.x);
+  float enter = smoothstep(fs - aaL, fs + aaL, yLane);
+  float leave = smoothstep(fs + 1.0 - aaL, fs + 1.0 + aaL, yLane);
+  return mix(mix(1.0, forward, enter), 0.0, leave);
+}
 // 框架 B：裸地与收割后没有冠层。播种完成 g=2 起到成熟 g=5 长满。不借用旧档的膨大 / 待收。
 float bGrowthVis(float g){
   if (g < 1.5 || g >= 6.5) return 0.0;

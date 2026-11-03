@@ -1,5 +1,5 @@
-// 喷灌桁架。一个地块四行，每行西端一个位，一行一台。
-// 梁盖住一整块田面单元，沿这一行的长边扫过去。没派活就停在地头，不进车库。
+// 喷灌桁架。一个地块四行，每行西端地头一台。
+// 这一台负责该行连续 4 个单元的撒药和追肥，从地头旁第一格扫到第四格。没派活就停在地头，不进车库。
 export const TRUSS_PRICE = 6000;
 export const TRUSS_ROWS = 4;
 export const TRUSS_SPEED = 6;
@@ -100,13 +100,13 @@ export function buyTruss(key, pay) {
 }
 
 export function syncSlots(slots) {
-  const live = new Set();
   for (const slot of slots) {
-    if (!slot.bought) continue;
-    live.add(slot.key);
+    if (!slot.bought) {
+      rigs.delete(slot.key);
+      continue;
+    }
     remember(slot);
   }
-  for (const key of [...rigs.keys()]) if (!live.has(key)) rigs.delete(key);
 }
 
 export function listRigs() {

@@ -852,6 +852,17 @@ test('回库待机放下软单和未开工硬单，正在做的硬单做完才�
   assert.equal(machine.standby, STANDBY_SECONDS * 2);
   assert.equal(chooseMachine(farm, ['播种']), null);
   assert.equal(removePlayerMachine(farm, machine.id).ok, true);
+  addMachine(farm, { ...TRACTOR, id: 'tractor-6', caps: TRACTOR.caps.slice(), energyLeft: TRACTOR.energyKwh, hitchId: null });
+  const parked = farm.machines.find(m => m.id === 'tractor-6');
+  parked.busy = false;
+  parked.hitchId = null;
+  farm.orders.push({
+    id: 9, fieldId: 'a', jobId: 'plow', machineId: 'omni-other', hitchId: null,
+    lane: 'prep', width: 16, origin: 3.2, progress: 0.4, phase: 'work', pose: null,
+  });
+  assert.equal(removePlayerMachine(farm, 'tractor-6').ok, true, 'idle tractor shares a null hitch with someone else\'s job');
+  assert.equal(farm.machines.some(m => m.id === 'tractor-6'), false);
+  farm.orders = farm.orders.filter(order => order.machineId !== 'omni-other');
 
   addMachine(farm, fastOmni());
   const again = farm.machines[0];
@@ -916,7 +927,7 @@ test('电尽后空闲万能机补满，第六单和收拾都会继续派', () =>
 });
 
 test('拉斯提卡阶段和版本戳来自同一份定义', () => {
-  assert.equal(HUD_VERSION, '环穗 v6.35.3');
+  assert.equal(HUD_VERSION, '环穗 v6.35.4');
   const doc = parseFieldStageDoc(structuredClone(lastikaRaw));
   const windows = jobWindows(doc, alignFieldCalendar(doc)).filter(item => item.op.kind === 'optional');
   assert.deepEqual(windows.map(item => item.op.id), ['topdress', 'spray', 'hill']);
