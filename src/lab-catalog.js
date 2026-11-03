@@ -200,7 +200,7 @@ export const LAB_ENTRIES = [
 
 一般田地是犁一遍。深垄田地是犁一遍再培土一遍，土豆类产量 ×1.2，和作物作业的产量倍数相乘。
 
-垄宽、垄数、地面颜色写在田块上。保存钥匙 ringsheaf.assetlab.fieldBlocks.v1，和作物阶段图分开。土性曲线仍在这页下面。`,
+行距和垄截面写在田地类型上，并对齐 4.2 m 格。作物只留株距。保存钥匙 ringsheaf.assetlab.fieldBlocks.v1。旧档如果只有 ridgeWidth，打开时收成行距。土性曲线仍在这页下面。`,
   },
   {
     id: 'field-stage',

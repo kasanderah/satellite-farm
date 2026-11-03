@@ -99,6 +99,8 @@ const U = {
   uBStop: { value: new THREE.Vector4(2, 8, 12, 12) },
   uBCover: { value: new THREE.Vector4(0.16, 0.42, 0.72, 0.95) },
   uBCrop: { value: CROPS.findIndex(c => c.id === 'lastika') },
+  uGndRow: { value: new THREE.Vector4(0.7, 1.05, 0, 0) },
+  uGndAmp: { value: new THREE.Vector4(0.16, 0.46, 0, 0) },
 };
 const POT_SLOTS = POTATO_PAINT_SLOTS;
 const potTintData = new Float32Array(POT_SLOTS * 3 * 4);
@@ -206,6 +208,15 @@ float bStageCover(float age) {
 `;
 function syncLastikaPaint() {
   const paints = PLANT_CROPS.lastika.paints;
+  const general = FIELD_BLOCKS.general;
+  const deep = FIELD_BLOCKS.deepridge;
+  const ampOf = (block, fallback) => {
+    const pts = block?.ridge || [];
+    const amp = pts.reduce((max, point) => Math.max(max, Number(point?.y) || 0), 0);
+    return amp > 0 ? amp : fallback;
+  };
+  U.uGndRow.value.set(general?.row || 0.7, deep?.row || 1.05, 0, 0);
+  U.uGndAmp.value.set(ampOf(general, 0.16), ampOf(deep, 0.46), 0, 0);
   if (paints) {
     if (paints.raw) U.uBRaw.value.set(paints.raw);
     if (paints.young) U.uBYoung.value.set(paints.young);
@@ -251,7 +262,9 @@ function writeFields() {
       const orient = v.dir > 0.5 ? 1 : 0;
       alpha = orient + (Math.round(v.next) % 100) / 100;
     }
-    fieldData[o] = v.crop; fieldData[o + 1] = v.g; fieldData[o + 2] = v.mask != null && v.mask !== 0 ? v.mask : v.s; fieldData[o + 3] = alpha;
+    const gnd = v.ground === 'deepridge' ? 2 : v.ground === 'general' ? 1 : 0;
+    const lift = Math.max(0, Math.min(0.45, (v.ridgeScale || 1) - 1));
+    fieldData[o] = v.crop + (gnd > 0 ? (gnd + lift) / 100 : 0); fieldData[o + 1] = v.g; fieldData[o + 2] = v.mask != null && v.mask !== 0 ? v.mask : v.s; fieldData[o + 3] = alpha;
   }
   fieldTex.needsUpdate = true;
 }
@@ -480,7 +493,23 @@ ${FARM}
 uniform sampler2D uPotTint;
 uniform sampler2D uPotRidge;
 uniform float uPotOn;
+uniform vec4 uGndRow, uGndAmp;
 uniform vec3 uBRaw, uBYoung, uBRipe, uBStraw;
+float gndCode(float r) { return fract(abs(r)) * 100.0; }
+float gndRowOf(float r) {
+  float code = gndCode(r);
+  int g = int(floor(code + 0.001));
+  if (g == 2) return max(uGndRow.y, 0.05);
+  if (g == 1) return max(uGndRow.x, 0.05);
+  return 0.0;
+}
+float gndAmpOf(float r) {
+  float code = gndCode(r);
+  int g = int(floor(code + 0.001));
+  float lift = max(code - float(g), 0.0);
+  float base = g == 2 ? uGndAmp.y : uGndAmp.x;
+  return max(base, 0.04) * (1.0 + lift);
+}
 ${B_STAGE_GLSL}
 float potRidgeAt(int slot, int i) {
   int pix = i < 4 ? 0 : 1;
@@ -671,7 +700,7 @@ vec3 farmAlbedo(vec2 p){
       if (holdSwept) {
         float edgeInH = min(min(loc.x, FIELD - loc.x), min(loc.y, FIELD - loc.y));
         float edgeFadeH = smoothstep(0.0, 1.8, edgeInH);
-        float rowPhH = uv.y / 0.75;
+        float rowPhH = uv.y / max(uGndRow.x, 0.05);
         float rowSeeH = (1.0 - smoothstep(0.22, 0.55, fwidth(rowPhH))) * edgeFadeH;
         float profH = 0.5 + 0.5 * cos(6.2832 * rowPhH);
         float slopeH = -sin(6.2832 * rowPhH);
@@ -683,12 +712,14 @@ vec3 farmAlbedo(vec2 p){
       // 扫过的格子用下一道。做完以后蒙版回到 -1，整块回到同一个 g。
       float edgeIn = min(min(loc.x, FIELD - loc.x), min(loc.y, FIELD - loc.y));
       float edgeFade = smoothstep(0.0, 1.8, edgeIn);
-      float rowSpB = max(P.y, 0.05);
+      float rowFromGnd = gndRowOf(d.r);
+      float rowSpB = rowFromGnd > 0.0 ? rowFromGnd : max(P.y, 0.05);
+      float gainB = clamp(gndAmpOf(d.r) / 0.16, 0.45, 2.8);
       float rowPhB = uv.y / rowSpB;
       float rowSeeB = (1.0 - smoothstep(0.22, 0.55, fwidth(rowPhB))) * edgeFade;
       float profB = 0.5 + 0.5 * cos(6.2832 * rowPhB);
-      float slopeB = -sin(6.2832 * rowPhB);
-      vec3 soilB = g_soil * (0.86 + 0.08 * profB * rowSeeB) * (1.0 + patchy);
+      float slopeB = -sin(6.2832 * rowPhB) * gainB;
+      vec3 soilB = g_soil * (0.86 + 0.08 * profB * rowSeeB) * (1.0 + patchy) * mix(1.0, 0.82 + 0.18 * profB, clamp(gainB - 1.0, 0.0, 1.0));
       // 未整地、幼苗、成熟、残茬读拉斯提卡文档。一般田地仍是犁地后的深土，不从种植链里取。
       vec3 rawSoil = uBRaw * (0.98 + 0.04 * profB * rowSeeB) * (1.0 + patchy * 0.35);
       float ageB = clamp((visG - 2.0) / 3.0, 0.0, 1.0) * max(uBStop.z, 0.001);
@@ -1297,7 +1328,7 @@ function rebuildPlants(cx, cz, W) {
         : CROPS[f.crop];
       const im = plantMeshes[cr.shape];
       if (!im) continue;
-      const ridge = bActive && f.bUnit?.ridgeWidth > 0 ? f.bUnit.ridgeWidth : cr.row;
+      const ridge = bActive && f.bUnit?.row > 0 ? f.bUnit.row : cr.row;
       const rowS = ridge * (cr.tex === 'beds' ? 1.1 : 1), al = cr.along;
       const potRow = cr.id === 'potato' && potDraw.workshop;
       const bWhole = bActive;
@@ -4336,7 +4367,8 @@ function updateDock() {
     if (!fieldOne) { meta.hidden = true; meta.textContent = ''; }
     else {
       meta.hidden = false;
-      meta.innerHTML = `田地类型 ${desc?.groundName || '—'}<br>${f.equip ? '设备单元' : '田面单元'} ${UNIT} m · 格 ${CELL} m<br>${soilText(f.soil)}`;
+      const spacing = desc?.row ? `行距 ${desc.row} m${desc.along ? ` · 株距 ${desc.along} m` : ''}${desc.stands ? ` · 约 ${desc.stands} 株` : ''}<br>` : '';
+      meta.innerHTML = `田地类型 ${desc?.groundName || '—'}<br>${spacing}${f.equip ? '设备单元' : '田面单元'} ${UNIT} m · 格 ${CELL} m<br>${soilText(f.soil)}`;
     }
   }
   const workEl = $('selwork');
@@ -5185,7 +5217,7 @@ window.__farm = {
   devices, potatoStock, fertPlan, cultureFeedPlan, millWatch, startMill, removeMill, orderProcess, products: productById,
   deck(on) { visitDeck(on == null ? !camS.deck : !!on); },
   get onDeck() { return !!camS.deck; },
-  snapshot: exportSnapshot, plant: () => doPlant(), prep: () => doPrep(), select: (i, j) => selectField(fieldAt(i, j)),
+  snapshot: exportSnapshot, plant: () => doPlant(), prep: (id) => doPrep(id), select: (i, j) => selectField(fieldAt(i, j)),
   buyLand: (i, j) => { const r = buyLandAt(i, j); if (r.ok) { syncOwnedFields(); paintLandOverlay(true); } return r; },
   toggleEquip: () => { convertEquip(); return !!selected?.equip; },
   build(kind) { armBuild(kind); },

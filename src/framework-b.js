@@ -93,7 +93,8 @@ export const PLANT_CROPS = {
     qualityBase: 1,
     // 100% 跟收获硬窗起点走，不另记一条日数。超过 maxHarvest 不能开工收获。
     maturity: { maxHarvest: 120, rotLine: 120 },
-    visual: { shape: 'bush', tex: 'ridges', height: 0.7, row: 0.75, along: 0.36 },
+    // along 是株距，4.2 m 格里 12 株。row 只给旧画面兜底，主进程行距读田地类型。
+    visual: { shape: 'bush', tex: 'ridges', height: 0.7, row: 0.7, along: 0.35 },
     graph: {
       entry: { job: 'sow', to: 'seedling' },
       edges: [
@@ -134,7 +135,8 @@ export const PLANT_CROPS = {
     yieldBase: 80,
     qualityBase: 1,
     maturity: { maxHarvest: 120, rotLine: 120 },
-    visual: { shape: 'bush', tex: 'ridges', height: 0.48, row: 0.82, along: 0.42 },
+    // 株距 0.42 m，一格 10 株。row 不驱动垄距。
+    visual: { shape: 'bush', tex: 'ridges', height: 0.48, row: 0.7, along: 0.42 },
     paints: {
       raw: '#6f6a61',
       young: '#6a7340',
@@ -517,6 +519,7 @@ function clearCrop(farm, field) {
   field.lock = null;
   field.plant = null;
   field.prep = null;
+  field.ridgeScale = 1;
 }
 
 export function requestPrep(farm, fieldId, recipeId = 'clear_general') {
@@ -994,6 +997,7 @@ function enterStage(farm, field, stageId, how) {
     field.look = 'general';
     field.lock = null;
     field.stageFade = null;
+    field.ridgeScale = 1;
     pushEvent(farm, { type: 'stage', fieldId: field.id, stageId: 'exit' });
     pushEvent(farm, { type: 'ground', fieldId: field.id, ground: 'general' });
     return;
@@ -1043,6 +1047,36 @@ function leaveByNatural(farm, field) {
   }
   if (hard) farm.queue = farm.queue.filter(item => !(item.fieldId === field.id && item.jobId === hard.job));
   enterStage(farm, field, natural.to, 'natural');
+}
+
+// 行距在田地类型上。作物阶段文档里的 ridge / plant.row 不参与主进程。
+export function groundRow(field) {
+  const block = FIELD_BLOCKS[field?.ground];
+  const row = Number(block?.row) > 0 ? Number(block.row) : Number(block?.ridgeWidth);
+  return row > 0 ? row : 0;
+}
+
+export function groundRidge(field) {
+  const block = FIELD_BLOCKS[field?.ground];
+  return block?.ridge || null;
+}
+
+// 有效株数 = 面积 / (行距 × 株距)。没有作物时不算株。
+export function standCount(field, crop) {
+  const row = groundRow(field);
+  const along = Number(crop?.visual?.along);
+  const length = Number(field?.length);
+  const width = Number(field?.width);
+  if (!(row > 0) || !(along > 0) || !(length > 0) || !(width > 0)) return 0;
+  return (length * width) / (row * along);
+}
+
+// 以一般田地的行距为 1。深垄行更稀，株数变少，再乘类型上的产量倍率。
+export function standDensity(field) {
+  const row = groundRow(field);
+  const ref = groundRow({ ground: 'general' });
+  if (!(row > 0) || !(ref > 0)) return 1;
+  return ref / row;
 }
 
 export function groundYieldMul(field, crop) {
@@ -1215,6 +1249,8 @@ function finishOrder(farm, order) {
         const base = field.plant.quality ?? cropOfPlant(field)?.qualityBase ?? 1;
         field.plant.quality = base + row.qualityAdd;
       }
+      // 培土只把当前类型的垄顶抬高一截，不改田地类型。
+      if (job.id === 'hill' && field) field.ridgeScale = Math.max(Number(field.ridgeScale) || 1, 1.18);
       const spec = (stageRow(field)?.jobs || []).find(item => item.job === job.id && item.kind === 'soft');
       const brushed = spec?.brush ? { ...job, brush: { ...(job.brush || {}), ...spec.brush } } : job;
       painted = commitSweep(field, brushed);
@@ -1633,7 +1669,8 @@ export function describeField(farm, fieldId) {
   }));
   const rotten = stage?.role === 'rot';
   const maturity = !crop || rotten ? null : maturityPercent(crop, Math.min(age, cycle || age));
-  const yieldValue = crop ? Math.round((crop.yieldBase || 0) * (field.plant?.yieldMul || 1) * groundYieldMul(field, crop)) : 0;
+  const yieldValue = crop ? Math.round((crop.yieldBase || 0) * (field.plant?.yieldMul || 1) * groundYieldMul(field, crop) * standDensity(field)) : 0;
+  const stands = crop ? Math.round(standCount(field, crop)) : 0;
   const quality = crop && field.plant ? qualityNow(crop, field) : null;
   const locked = fieldLocked(farm, field);
   const next = field.nextCrop ? PLANT_CROPS[field.nextCrop] : null;
@@ -1659,6 +1696,10 @@ export function describeField(farm, fieldId) {
     cycle,
     maturity,
     yieldValue,
+    row: groundRow(field),
+    along: crop?.visual?.along || 0,
+    stands,
+    ridgeScale: Number(field.ridgeScale) > 0 ? Number(field.ridgeScale) : 1,
     quality,
     showMaturity: maturity != null,
     stageName: stage?.name || '',

@@ -1,7 +1,46 @@
 // 田块是整地做出来、还没种的地。工序在图上，和作物阶段图分开存。
 // 主游戏把图编译成整地步骤。深垄是犁一遍再培土一遍。
+// 行距和垄截面以田地类型为准。作物阶段文档里的 ridge 不再驱动主进程，只留给旧工坊预览。
+import { CELL } from './modulus.js';
 
 export const FIELD_BLOCK_STORE = 'ringsheaf.assetlab.fieldBlocks.v1';
+
+// 行距必须整除建筑格，这样一格里是整数行。
+export function rowFromCellCount(count) {
+  const n = Math.max(2, Math.min(12, Math.round(count) || 6));
+  return Math.round((CELL / n) * 1000) / 1000;
+}
+
+export function snapRow(meters) {
+  const guess = Number(meters) > 0 ? CELL / Number(meters) : 6;
+  const n = Math.max(2, Math.min(12, Math.round(guess)));
+  return { rowsPerCell: n, row: rowFromCellCount(n) };
+}
+
+// 株距同样整除建筑格。每格株数可以比行数更密。
+export function snapAlong(meters) {
+  const guess = Number(meters) > 0 ? CELL / Number(meters) : 12;
+  const n = Math.max(4, Math.min(24, Math.round(guess)));
+  return { perCell: n, along: Math.round((CELL / n) * 1000) / 1000 };
+}
+
+export function ridgeAmp(points) {
+  return (points || []).reduce((max, point) => Math.max(max, Number(point?.y) || 0), 0);
+}
+
+// 一般田地垄矮。深垄沟更深、顶更高。软作业只在这个截面上乘一个抬高，不换类型。
+export const RIDGE_GENERAL = [
+  { x: 0, y: 0.03 },
+  { x: 0.5, y: 0.16 },
+  { x: 1, y: 0.03 },
+];
+export const RIDGE_DEEP = [
+  { x: 0, y: 0.02 },
+  { x: 0.22, y: 0.06 },
+  { x: 0.5, y: 0.46 },
+  { x: 0.78, y: 0.06 },
+  { x: 1, y: 0.02 },
+];
 
 export const FIELD_BLOCK_LIST = [
   {
@@ -9,10 +48,12 @@ export const FIELD_BLOCK_LIST = [
     recipeId: 'clear_general',
     recipeName: '清地',
     name: '一般田地',
-    tip: '犁一遍，做成可以种的田块。垄较平，不加成产量。拉斯提卡和短季薯都能种。',
+    tip: '犁一遍，做成可以种的田块。垄较平，不加成产量。行距 0.70 m，一格 6 行。拉斯提卡和短季薯都能种。',
     groundColor: '#5c5348',
-    ridgeWidth: 0.75,
-    ridgeCount: 8,
+    rowsPerCell: 6,
+    row: 0.7,
+    ridgeWidth: 0.7,
+    ridge: RIDGE_GENERAL.map(point => ({ ...point })),
     yieldMul: 1,
     families: [],
     graph: {
@@ -37,10 +78,12 @@ export const FIELD_BLOCK_LIST = [
     recipeId: 'deepridge',
     recipeName: '深垄',
     name: '深垄田地',
-    tip: '犁一遍，再培土一遍。土豆类（短季薯、拉斯提卡）产量 ×1.2，和作物作业的产量倍数相乘。',
+    tip: '犁一遍，再培土一遍。行距 1.05 m，一格 4 行，垄比一般田地高。土豆类产量再 ×1.2，和株数、作业倍数相乘。',
     groundColor: '#4a3b2a',
-    ridgeWidth: 1.15,
-    ridgeCount: 5,
+    rowsPerCell: 4,
+    row: 1.05,
+    ridgeWidth: 1.05,
+    ridge: RIDGE_DEEP.map(point => ({ ...point })),
     yieldMul: 1.2,
     families: ['potato'],
     graph: {

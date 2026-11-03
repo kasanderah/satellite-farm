@@ -1,6 +1,7 @@
 // 田块编辑器和阶段编辑器同一套壳：上进度、中节点图、右上资产、右中预览、右下细节。
 import { analyzeGraph, hangSlots, jobKey } from './stage-graph.js';
-import { FIELD_BLOCK_STORE, cloneFieldBlocks, prepSteps } from './field-blocks.js';
+import { CELL } from './modulus.js';
+import { FIELD_BLOCK_STORE, cloneFieldBlocks, prepSteps, snapRow, ridgeAmp } from './field-blocks.js';
 import { installFieldBlocks } from './framework-b.js';
 import { mountSoilEditor } from './lab-field.js';
 
@@ -19,8 +20,19 @@ export function createBlockWorkshop(els) {
   let drag = null;
   let wire = null;
 
+  function hydrate(doc) {
+    const seed = cloneFieldBlocks().find(item => item.id === doc.id);
+    if (!(Number(doc.row) > 0)) doc.row = Number(doc.ridgeWidth) > 0 ? doc.ridgeWidth : seed?.row;
+    const snapped = snapRow(doc.row || seed?.row || 0.7);
+    doc.rowsPerCell = snapped.rowsPerCell;
+    doc.row = snapped.row;
+    doc.ridgeWidth = doc.row;
+    if (!Array.isArray(doc.ridge) || doc.ridge.length < 2) doc.ridge = structuredClone(seed?.ridge || []);
+    return doc;
+  }
+
   function current() {
-    return docs[blockId];
+    return hydrate(docs[blockId]);
   }
 
   function load() {
@@ -28,7 +40,7 @@ export function createBlockWorkshop(els) {
       const raw = JSON.parse(localStorage.getItem(FIELD_BLOCK_STORE) || 'null');
       if (raw?.blocks) {
         for (const [id, doc] of Object.entries(raw.blocks)) {
-          if (doc?.graph?.stages) docs[id] = doc;
+          if (doc?.graph?.stages) docs[id] = hydrate(doc);
         }
       }
     } catch { /* 空浏览器 */ }
@@ -72,9 +84,12 @@ export function createBlockWorkshop(els) {
 <label>当前田块<select id="fb-pick"></select></label>
 <label>名称<input id="fb-name" type="text" maxlength="16"></label>
 <div class="fs-split">
-<label>垄宽 m<input id="fb-width" type="number" min="0.4" max="2.4" step="0.05"></label>
-<label>垄数<input id="fb-count" type="number" min="2" max="24" step="1"></label>
+<label>行距 m<input id="fb-width" type="number" min="0.35" max="2.1" step="0.01"></label>
+<label>每格行数<input id="fb-count" type="number" min="2" max="12" step="1"></label>
 </div>
+<p id="fb-row-note" class="fs-note"></p>
+<canvas id="fb-ridge"></canvas>
+<p class="fs-note">垄截面跟田地类型走。横轴是一条垄，纵轴是高度。拖点。软作业只能抬高当前截面，不换类型。</p>
 <label>地面颜色<input id="fb-color" type="color"></label>
 <label>产量倍率<input id="fb-mul" type="number" min="1" max="3" step="0.05"></label>
 <p class="fs-note">倍率只给土豆类，和作物作业的产量倍数相乘。0 到 1 以下按 1 记。</p>
@@ -95,18 +110,29 @@ export function createBlockWorkshop(els) {
     });
     panel.querySelector('#fb-name').addEventListener('input', (e) => { current().name = e.target.value; persist(); });
     panel.querySelector('#fb-width').addEventListener('change', (e) => {
-      current().ridgeWidth = Math.max(0.4, Math.min(2.4, Number(e.target.value) || 0.75));
+      const snapped = snapRow(e.target.value);
+      const doc = current();
+      doc.rowsPerCell = snapped.rowsPerCell;
+      doc.row = snapped.row;
+      doc.ridgeWidth = doc.row;
+      paintFields();
+      drawRidge();
       persist();
     });
     panel.querySelector('#fb-count').addEventListener('change', (e) => {
-      const count = Math.max(2, Math.min(24, Math.round(Number(e.target.value) || 8)));
+      const snapped = snapRow(CELL / (Number(e.target.value) || 6));
       const doc = current();
-      doc.ridgeCount = count;
-      doc.ridgeWidth = Math.round((128 / count) * 100) / 100;
-      const width = panel.querySelector('#fb-width');
-      if (width) width.value = doc.ridgeWidth;
+      doc.rowsPerCell = snapped.rowsPerCell;
+      doc.row = snapped.row;
+      doc.ridgeWidth = doc.row;
+      paintFields();
+      drawRidge();
       persist();
     });
+    const canvas = panel.querySelector('#fb-ridge');
+    canvas.addEventListener('pointerdown', onRidgeDown);
+    canvas.addEventListener('pointermove', onRidgeMove);
+    canvas.addEventListener('pointerup', () => { ridgeDrag = null; persist(); });
     panel.querySelector('#fb-color').addEventListener('input', (e) => { current().groundColor = e.target.value; persist(); });
     panel.querySelector('#fb-mul').addEventListener('change', (e) => {
       current().yieldMul = Math.max(1, Math.min(3, Number(e.target.value) || 1));
@@ -126,8 +152,10 @@ export function createBlockWorkshop(els) {
       if (el && document.activeElement !== el) el.value = value;
     };
     set('#fb-name', doc.name || '');
-    set('#fb-width', doc.ridgeWidth ?? 0.75);
-    set('#fb-count', doc.ridgeCount ?? 8);
+    set('#fb-width', doc.row ?? doc.ridgeWidth ?? 0.7);
+    set('#fb-count', doc.rowsPerCell ?? 6);
+    const note = panel.querySelector('#fb-row-note');
+    if (note) note.textContent = `一格 ${doc.rowsPerCell || '—'} 行 · 垄高 ${ridgeAmp(doc.ridge).toFixed(2)} m。行距整除 4.2 m。`;
     set('#fb-color', doc.groundColor || '#5c5348');
     set('#fb-mul', doc.yieldMul ?? 1);
     const bar = document.getElementById('fb-bar');
@@ -211,6 +239,76 @@ export function createBlockWorkshop(els) {
     host.querySelector('#fb-stage-name').addEventListener('input', (e) => { stage.name = e.target.value; sig = ''; paint(); persist(); });
   }
 
+  let ridgeDrag = null;
+  function ridgeSpace(canvas, ev) {
+    const rect = canvas.getBoundingClientRect();
+    const pad = 12;
+    const x = (ev.clientX - rect.left - pad) / Math.max(1, rect.width - pad * 2);
+    const y = (rect.bottom - pad - ev.clientY) / Math.max(1, rect.height - pad * 2);
+    return { x: Math.max(0, Math.min(1, x)), y: Math.max(0, Math.min(0.7, y * 0.7)) };
+  }
+  function drawRidge() {
+    const canvas = panel.querySelector('#fb-ridge');
+    const doc = current();
+    if (!canvas || !doc?.ridge) return;
+    const w = canvas.clientWidth || 280;
+    const h = 96;
+    const dpr = Math.min(devicePixelRatio || 1, 2);
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    const pad = 12;
+    const xOf = (x) => pad + x * (w - pad * 2);
+    const yOf = (y) => h - pad - (y / 0.7) * (h - pad * 2);
+    ctx.strokeStyle = 'rgba(188,195,196,.35)';
+    ctx.beginPath();
+    doc.ridge.forEach((point, i) => {
+      if (i === 0) ctx.moveTo(xOf(point.x), yOf(point.y));
+      else ctx.lineTo(xOf(point.x), yOf(point.y));
+    });
+    ctx.stroke();
+    ctx.fillStyle = '#e0b13a';
+    for (const point of doc.ridge) {
+      ctx.beginPath();
+      ctx.arc(xOf(point.x), yOf(point.y), 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  function onRidgeDown(ev) {
+    const canvas = panel.querySelector('#fb-ridge');
+    const doc = current();
+    const rect = canvas.getBoundingClientRect();
+    let best = 0;
+    let bestD = 1e9;
+    doc.ridge.forEach((point, i) => {
+      const px = 12 + point.x * (rect.width - 24);
+      const py = rect.height - 12 - (point.y / 0.7) * (rect.height - 24);
+      const d = Math.hypot(ev.clientX - rect.left - px, ev.clientY - rect.top - py);
+      if (d < bestD) { bestD = d; best = i; }
+    });
+    if (bestD > 18) return;
+    ridgeDrag = best;
+    canvas.setPointerCapture(ev.pointerId);
+  }
+  function onRidgeMove(ev) {
+    if (ridgeDrag == null) return;
+    const canvas = panel.querySelector('#fb-ridge');
+    const doc = current();
+    const p = ridgeSpace(canvas, ev);
+    const point = doc.ridge[ridgeDrag];
+    if (ridgeDrag === 0) point.x = 0;
+    else if (ridgeDrag === doc.ridge.length - 1) point.x = 1;
+    else {
+      const lo = doc.ridge[ridgeDrag - 1].x + 0.02;
+      const hi = doc.ridge[ridgeDrag + 1].x - 0.02;
+      point.x = Math.max(lo, Math.min(hi, p.x));
+    }
+    point.y = p.y;
+    drawRidge();
+  }
+
   function paint() {
     const board = boardEl();
     if (!board) return;
@@ -219,6 +317,7 @@ export function createBlockWorkshop(els) {
     if (bar) bar.hidden = !active;
     if (!active) return;
     paintFields();
+    drawRidge();
     const doc = current();
     const nodes = ensureLayout(doc.graph);
     const structural = blockId + JSON.stringify(doc.graph.stages) + JSON.stringify(doc.graph.edges) + (pick || '');

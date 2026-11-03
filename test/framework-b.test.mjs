@@ -6,6 +6,7 @@ import {
   stageDisplayStops, stageTint, stageShadeG, growthAge, BRUSH_FADE_DAYS,
   maturityPercent, harvestAllowed, qualityNow, harvestWindow,
   createFarm, addField, addMachine, mountHitch, chooseMachine, requestPrep, requestPlant, setNextCrop, stepFarm, fieldWork, describeField,
+  FIELD_BLOCKS, groundRow, standDensity,
   recallMachine, releaseStandby, standbyClock, writePose, STANDBY_SECONDS, removePlayerMachine,
   installPlayerMachine,
 } from '../src/framework-b.js';
@@ -132,9 +133,9 @@ test('没整地不能种；播种做完才开始生长', () => {
   assert.deepEqual(PLANT_CROPS.lastika.stages.map(s => s.name), ['青苗', '发育', '成熟', '烂地', '收获后']);
   assert.equal(PLANT_CROPS.lastika.visual.shape, 'bush');
   assert.equal(PLANT_CROPS.lastika.visual.tex, 'ridges');
-  assert.equal(PLANT_CROPS.lastika.visual.row, 0.75);
+  assert.equal(PLANT_CROPS.lastika.visual.row, 0.7);
   assert.equal(PLANT_CROPS.lastika.visual.height, 0.7);
-  assert.equal(PLANT_CROPS.lastika.visual.along, 0.36);
+  assert.equal(PLANT_CROPS.lastika.visual.along, 0.35);
   assert.notEqual(PLANT_CROPS.lastika.visual.row, 0.9);
 });
 
@@ -906,7 +907,7 @@ test('电尽后空闲万能机补满，第六单和收拾都会继续派', () =>
 });
 
 test('拉斯提卡阶段和版本戳来自同一份定义', () => {
-  assert.equal(HUD_VERSION, '环穗 v6.34.1');
+  assert.equal(HUD_VERSION, '环穗 v6.35');
   const doc = parseFieldStageDoc(structuredClone(lastikaRaw));
   const windows = jobWindows(doc, alignFieldCalendar(doc)).filter(item => item.op.kind === 'optional');
   assert.deepEqual(windows.map(item => item.op.id), ['topdress', 'spray', 'hill']);
@@ -940,9 +941,9 @@ test('拉斯提卡阶段和版本戳来自同一份定义', () => {
   assert.equal(crop.maturity.maxHarvest, 120);
   assert.equal(crop.maturity.rotLine, 120);
   assert.equal(crop.growSeconds, 12 * DAY_SECONDS);
-  assert.equal(crop.visual.row, 0.75);
+  assert.equal(crop.visual.row, 0.7);
+  assert.equal(crop.visual.along, 0.35);
   assert.equal(crop.visual.height, 0.7);
-  assert.equal(crop.visual.along, 0.36);
   assert.equal(crop.visual.tex, 'ridges');
   doc.graph.layout = { nodes: { seedling: { x: 12, y: 40 } } };
   const kept = parseFieldStageDoc(doc);
@@ -953,6 +954,20 @@ test('拉斯提卡阶段和版本戳来自同一份定义', () => {
   assert.equal(spec.graph.layout, undefined);
   assert.equal(spec.graph.entry.to, 'seedling');
   assert.equal(spec.graph.entry.checks, undefined);
+});
+
+test('行距和株距整除建筑格', () => {
+  assert.equal(FIELD_BLOCKS.general.row, 0.7);
+  assert.equal(FIELD_BLOCKS.deepridge.row, 1.05);
+  assert.ok(Math.abs(CELL / FIELD_BLOCKS.general.row - 6) < 1e-6);
+  assert.ok(Math.abs(CELL / FIELD_BLOCKS.deepridge.row - 4) < 1e-6);
+  assert.ok(Math.abs(CELL / PLANT_CROPS.lastika.visual.along - 12) < 1e-6);
+  assert.ok(Math.abs(CELL / PLANT_CROPS.tuber.visual.along - 10) < 1e-6);
+  assert.ok(FIELD_BLOCKS.deepridge.ridge[2].y > FIELD_BLOCKS.general.ridge[1].y);
+  const farm = createFarm();
+  addField(farm, { id: 'a', length: 134.4, width: 134.4, ground: 'deepridge' });
+  assert.equal(groundRow(farm.fields.get('a')), 1.05);
+  assert.ok(Math.abs(standDensity(farm.fields.get('a')) - 0.7 / 1.05) < 1e-6);
 });
 
 test('深垄田地是犁加培土，土豆类产量和作业倍数相乘', () => {
@@ -967,12 +982,18 @@ test('深垄田地是犁加培土，土豆类产量和作业倍数相乘', () =>
   assert.equal(field.prep, null);
   assert.equal(field.look, 'general');
   field.plant = { cropId: 'tuber', stageId: 'after', yieldMul: 2, stored: false };
-  assert.equal(describeField(farm, 'a').yieldValue, Math.round(80 * 2 * 1.2));
+  assert.equal(describeField(farm, 'a').yieldValue, Math.round(80 * 2 * 1.2 * (0.7 / 1.05)));
   field.plant.cropId = 'lastika';
   field.plant.yieldMul = 1;
-  assert.equal(describeField(farm, 'a').yieldValue, Math.round(100 * 1.2));
+  const deep = describeField(farm, 'a');
+  assert.equal(deep.row, 1.05);
+  assert.equal(deep.yieldValue, Math.round(100 * 1.2 * (0.7 / 1.05)));
+  assert.ok(deep.stands > 0);
   field.ground = 'general';
-  assert.equal(describeField(farm, 'a').yieldValue, 100);
+  const flat = describeField(farm, 'a');
+  assert.equal(flat.row, 0.7);
+  assert.equal(flat.yieldValue, 100);
+  assert.ok(flat.stands > deep.stands);
 });
 
 test('短季薯能种，飘节点不进运行，主流程两个头不能编译', () => {

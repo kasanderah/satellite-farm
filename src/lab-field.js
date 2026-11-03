@@ -18,6 +18,7 @@ import potatoBRaw from '../data/field-stages/potato-b.json' with { type: 'json' 
 import lastikaRaw from '../data/field-stages/lastika.json' with { type: 'json' };
 import tuberRaw from '../data/field-stages/tuber.json' with { type: 'json' };
 import { SOIL_STORE, SOIL_PROPS, normalizeSoilCurves, defaultSoilCurves } from './soil.js';
+import { snapAlong } from './field-blocks.js';
 import { JOBS } from './framework-b.js';
 import { analyzeGraph, warningsFor, windowParts, hangSlots, jobKey } from './stage-graph.js';
 
@@ -469,7 +470,7 @@ export function createFieldWorkshop(els) {
 <div id="fs-edit"></div>
 <div id="fs-jobs"></div>
 <canvas id="fs-curve"></canvas>
-<p class="fs-note">横轴 垄宽 · 纵轴 高度。拖点。双击加点，右键删点。</p>
+<p class="fs-note">主垄形只读。行距和垄截面在田块编辑器，跟田地类型走。这里只改株距。阶段文档里的 ridge 主进程不读。</p>
 <div id="fs-chain"></div>
 <div class="fs-split">
 <label>过渡<select id="fs-trans">
@@ -490,7 +491,8 @@ export function createFieldWorkshop(els) {
 <label>植株模型<select id="fs-shape">${SHAPES.map(s => `<option value="${s}">${s}</option>`).join('')}</select></label>
 <label>株高 m<input id="fs-height" type="number" min="0.1" max="3" step="0.05"></label>
 </div>
-<label>株距 m<input id="fs-plant-along" type="number" min="0.25" max="1.4" step="0.05"></label>
+<label>株距 m<input id="fs-plant-along" type="number" min="0.175" max="1.05" step="0.001"></label>
+<p class="fs-note">株距沿垄。保存时对齐 4.2 m 格，使每格是整数株。不要写成列距。</p>
 <div id="fs-edges"></div>
 <p id="fs-mach" class="fs-note"></p>
 <p class="fs-note">新作物复制当前阶段链，另起 id。主游戏能种的是拉斯提卡和短季薯。整地不写进这条链。</p>
@@ -560,8 +562,10 @@ export function createFieldWorkshop(els) {
       dirty = true;
       persist();
     });
-    panel.querySelector('#fs-plant-along').addEventListener('input', (e) => {
-      current().plant.along = clampNum(e.target.value, 0.25, 1.4, 0.4);
+    panel.querySelector('#fs-plant-along').addEventListener('change', (e) => {
+      const snapped = snapAlong(e.target.value);
+      current().plant.along = snapped.along;
+      e.target.value = String(snapped.along);
       dirty = true;
       persist();
     });
@@ -1573,7 +1577,7 @@ ${v.auto ? `<label>停留日<input data-vdays="${v.id}" type="number" min="0.25"
 <label>盖度<input id="fs-cover" type="number" min="0" max="1" step="0.02" value="${st.cover}"></label>
 </div>
 <label>植株比例<input id="fs-pscale" type="number" min="0" max="1.4" step="0.02" value="${st.plantScale}"></label>
-<label class="fs-row"><input id="fs-own" type="checkbox" ${st.ridge ? 'checked' : ''}> 只改这一阶段的截面 <button type="button" class="qmark" title="垄截面：横轴是垄宽，纵轴是高度。不勾时各阶段共用文档上的连锁截面。">?</button></label>
+<p class="fs-note">这一阶段不改主垄形。培土只抬高当前田地类型的截面，不换类型。</p>
 ${variants}
 <div class="fs-row">
 <button type="button" id="fs-insert">在此后插入</button>
@@ -1608,7 +1612,8 @@ ${variants}
     edit.querySelector('#fs-rough').addEventListener('input', (e) => { st.roughness = clampNum(e.target.value, 0.04, 1, st.roughness); touch(); });
     edit.querySelector('#fs-cover').addEventListener('input', (e) => { st.cover = clampNum(e.target.value, 0, 1, st.cover); touch(); });
     edit.querySelector('#fs-pscale').addEventListener('input', (e) => { st.plantScale = clampNum(e.target.value, 0, 1.4, st.plantScale); touch(); });
-    edit.querySelector('#fs-own').addEventListener('change', (e) => {
+    const own = edit.querySelector('#fs-own');
+    if (own) own.addEventListener('change', (e) => {
       if (e.target.checked) st.ridge = (st.ridge || doc.ridge).map(p => ({ ...p }));
       else st.ridge = null;
       editorSig = '';
@@ -1963,6 +1968,7 @@ ${variants}
   }
 
   function onCurveDown(ev) {
+    return;
     const canvas = panel.querySelector('#fs-curve');
     const i = hitPoint(canvas, ev);
     if (i < 0) return;
@@ -1971,6 +1977,7 @@ ${variants}
   }
 
   function onCurveMove(ev) {
+    return;
     if (dragPt == null) return;
     const canvas = panel.querySelector('#fs-curve');
     const p = curveSpace(canvas, ev);
@@ -1991,6 +1998,7 @@ ${variants}
   }
 
   function onCurveAdd(ev) {
+    return;
     const canvas = panel.querySelector('#fs-curve');
     const doc = current();
     const st = stageById(doc, selected);
@@ -2007,6 +2015,7 @@ ${variants}
 
   function onCurveRemove(ev) {
     ev.preventDefault();
+    return;
     const canvas = panel.querySelector('#fs-curve');
     const i = hitPoint(canvas, ev);
     const doc = current();

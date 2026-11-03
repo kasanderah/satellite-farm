@@ -670,7 +670,10 @@ export function fieldVisual(f) {
   const shade = f?.bUnit ? fieldShader(f.bUnit) : null;
   if (shade && !shade.keep) {
     const lastika = CROPS.findIndex(c => c.id === 'lastika');
-    return { crop: lastika, g: shade.g, s: 0, dir: f.dir, mask: shade.mask, next: shade.next, fromG: shade.fromG };
+    return {
+      crop: lastika, g: shade.g, s: 0, dir: f.dir, mask: shade.mask, next: shade.next, fromG: shade.fromG,
+      ground: f.bUnit?.ground || '', ridgeScale: f.bUnit?.ridgeScale || 1,
+    };
   }
   const vis = fieldVisualHeld(f);
   if (!shade?.keep) return vis;

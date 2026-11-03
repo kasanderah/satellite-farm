@@ -366,7 +366,9 @@ function syncFields() {
       ground: unit.ground,
       plot: unit.plot,
       cropId: unit.plant?.cropId || '',
-      ridgeWidth: FIELD_BLOCKS[unit.ground]?.ridgeWidth || 0,
+      row: FIELD_BLOCKS[unit.ground]?.row || FIELD_BLOCKS[unit.ground]?.ridgeWidth || 0,
+      ridgeWidth: FIELD_BLOCKS[unit.ground]?.row || FIELD_BLOCKS[unit.ground]?.ridgeWidth || 0,
+      ridgeScale: Number(unit.ridgeScale) > 0 ? Number(unit.ridgeScale) : 1,
     };
     const jobDef = order ? JOBS[order.jobId] : null;
     const spec = jobDef && stage ? (stage.jobs || []).find(item => item.job === order.jobId) : null;

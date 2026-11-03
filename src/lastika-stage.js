@@ -48,7 +48,8 @@ export function lastikaSpecFromDoc(doc) {
       shape: plant.shape || 'bush',
       tex: 'ridges',
       height: Number(plant.height) > 0 ? Number(plant.height) : PLANT_CROPS.lastika.visual.height,
-      row: Number(plant.row) > 0 ? Number(plant.row) : PLANT_CROPS.lastika.visual.row,
+      // 阶段文档的 plant.row 不再写回。行距属于田地类型。
+      row: PLANT_CROPS.lastika.visual.row,
       along: Number(plant.along) > 0 ? Number(plant.along) : PLANT_CROPS.lastika.visual.along,
     },
     paints: {
