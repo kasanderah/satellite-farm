@@ -1,7 +1,7 @@
 // 田块编辑器和阶段编辑器同一套壳：上进度、中节点图、右上资产、右中预览、右下细节。
 import { analyzeGraph, hangSlots, jobKey } from './stage-graph.js';
 import { CELL } from './modulus.js';
-import { FIELD_BLOCK_STORE, cloneFieldBlocks, prepSteps, snapRow, ridgeAmp, normalizeFieldBlock } from './field-blocks.js';
+import { FIELD_BLOCK_STORE, cloneFieldBlocks, prepSteps, snapRow, ridgeAmp, normalizeFieldBlock, blockBlurb } from './field-blocks.js';
 import { installFieldBlocks } from './framework-b.js';
 import { mountSoilEditor } from './lab-field.js';
 
@@ -48,11 +48,15 @@ export function createBlockWorkshop(els) {
       if (note) note.textContent = report.errors[0] + '。没写入。';
       return false;
     }
+    for (const doc of Object.values(docs)) {
+      normalizeFieldBlock(doc);
+      doc.tip = blockBlurb(doc);
+    }
     const blocks = { ...docs };
     localStorage.setItem(FIELD_BLOCK_STORE, JSON.stringify({ schema: 'ringsheaf.field-block/1', blocks }));
     installFieldBlocks(Object.values(blocks).concat(cloneFieldBlocks().filter(item => !blocks[item.id])));
     installFieldBlocks(Object.values(blocks));
-    if (note) note.textContent = '田块档已写入。和作物阶段档分开。主游戏点「重读工坊」后用新的行距和垄截面。';
+    if (note) note.textContent = '田块档已写入。和作物阶段档分开。主游戏点「重读工坊」后，菜单和已经整好的田都按新行距重画。';
     return true;
   }
 

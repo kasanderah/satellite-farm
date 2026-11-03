@@ -6,7 +6,7 @@ import {
   stageDisplayStops, stageTint, stageShadeG, growthAge, BRUSH_FADE_DAYS,
   maturityPercent, harvestAllowed, qualityNow, harvestWindow,
   createFarm, addField, addMachine, mountHitch, chooseMachine, requestPrep, requestPlant, setNextCrop, stepFarm, fieldWork, describeField,
-  FIELD_BLOCKS, groundRow, standDensity,
+  FIELD_BLOCKS, groundRow, standDensity, paintGroundOf, installFieldBlocks,
   recallMachine, releaseStandby, standbyClock, writePose, STANDBY_SECONDS, removePlayerMachine,
   installPlayerMachine,
 } from '../src/framework-b.js';
@@ -18,6 +18,7 @@ import { HUD_VERSION } from '../src/version.js';
 import { fieldVisual, CROPS, roadRoute, warehouse, warehouseStacks, MACHINE_SHOP } from '../src/_shared.js';
 import { DAY_SECONDS, WORLD_MIN_PER_REAL_MIN } from '../src/world-clock.js';
 import { CELL } from '../src/modulus.js';
+import { cloneFieldBlocks } from '../src/field-blocks.js';
 
 // 框架测试仍用换尺前的快机，避免 1 格宽把整段用例拖过超时。玩法里的万能农机见 OMNI。
 function fastOmni(extra = {}) {
@@ -406,6 +407,14 @@ test('整块颜色和地块编号', () => {
   assert.equal(held.crop, wheat);
   assert.equal(held.g, 1);
   assert.equal(held.next, 1);
+  assert.equal(held.ground, '');
+  const aimed = fieldVisual({
+    crop: wheat, dir: 0, state: 2, g: 1, s: 0, live: false,
+    bUnit: { look: 'hold', ground: 'raw', paintGround: 'deepridge', sweep: { width: 16, pass: 2, alongFrac: 0.4, look: 'general' } },
+  });
+  assert.equal(aimed.holdSweep, true);
+  assert.equal(aimed.ground, 'deepridge');
+  assert.equal(aimed.crop, wheat);
   assert.notEqual(CROPS[held.crop].id, 'lastika');
   const addr = plotAddress(13, 9, 10, 10);
   assert.equal(addr.hub, HUB_PLOT);
@@ -907,7 +916,7 @@ test('电尽后空闲万能机补满，第六单和收拾都会继续派', () =>
 });
 
 test('拉斯提卡阶段和版本戳来自同一份定义', () => {
-  assert.equal(HUD_VERSION, '环穗 v6.35.2');
+  assert.equal(HUD_VERSION, '环穗 v6.35.3');
   const doc = parseFieldStageDoc(structuredClone(lastikaRaw));
   const windows = jobWindows(doc, alignFieldCalendar(doc)).filter(item => item.op.kind === 'optional');
   assert.deepEqual(windows.map(item => item.op.id), ['topdress', 'spray', 'hill']);
@@ -954,6 +963,35 @@ test('拉斯提卡阶段和版本戳来自同一份定义', () => {
   assert.equal(spec.graph.layout, undefined);
   assert.equal(spec.graph.entry.to, 'seedling');
   assert.equal(spec.graph.entry.checks, undefined);
+});
+
+test('整地菜单和耕中垄距跟着目标田块，不写死仓库句子', () => {
+  assert.match(PREP_RECIPES.clear_general.tip, /行距 0\.7 m，一格 6 行/);
+  assert.match(PREP_RECIPES.deepridge.tip, /行距 1\.05 m，一格 4 行/);
+  const farm = slice();
+  const field = farm.fields.get('a');
+  requestPrep(farm, 'a', 'deepridge');
+  assert.equal(field.ground, 'raw');
+  assert.equal(paintGroundOf(field), 'deepridge');
+  assert.equal(describeField(farm, 'a').row, FIELD_BLOCKS.deepridge.row);
+  const deep = structuredClone(FIELD_BLOCKS.deepridge);
+  deep.row = 0.525;
+  deep.rowsPerCell = 8;
+  deep.ridgeWidth = 0.525;
+  const general = structuredClone(FIELD_BLOCKS.general);
+  general.row = 2.1;
+  general.rowsPerCell = 2;
+  general.ridgeWidth = 2.1;
+  installFieldBlocks([general, deep]);
+  try {
+    assert.match(PREP_RECIPES.clear_general.tip, /行距 2\.1 m，一格 2 行/);
+    assert.match(PREP_RECIPES.deepridge.tip, /行距 0\.525 m，一格 8 行/);
+    assert.equal(paintGroundOf(field), 'deepridge');
+    assert.equal(describeField(farm, 'a').row, 0.525);
+    assert.equal(groundRow({ ground: 'general' }), 2.1);
+  } finally {
+    installFieldBlocks(cloneFieldBlocks());
+  }
 });
 
 test('行距和株距整除建筑格', () => {

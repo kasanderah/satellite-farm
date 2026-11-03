@@ -61,7 +61,7 @@ export const FIELD_BLOCK_LIST = [
     recipeId: 'clear_general',
     recipeName: '清地',
     name: '一般田地',
-    tip: '犁一遍，做成可以种的田块。垄较平，不加成产量。行距 0.70 m，一格 6 行。拉斯提卡和短季薯都能种。',
+    tip: '',
     groundColor: '#5c5348',
     rowsPerCell: 6,
     row: 0.7,
@@ -91,7 +91,7 @@ export const FIELD_BLOCK_LIST = [
     recipeId: 'deepridge',
     recipeName: '深垄',
     name: '深垄田地',
-    tip: '犁一遍，再培土一遍。行距 1.05 m，一格 4 行，垄比一般田地高。土豆类产量再 ×1.2，和株数、作业倍数相乘。',
+    tip: '',
     groundColor: '#4a3b2a',
     rowsPerCell: 4,
     row: 1.05,
@@ -125,6 +125,22 @@ export const FIELD_BLOCK_LIST = [
   },
 ];
 
+// 菜单文案跟当前行距走。存档里的 tip 是写下去那一刻的句子，主进程不拿它当数。
+export function blockBlurb(doc) {
+  const row = Number(doc?.row) > 0 ? Number(doc.row) : Number(doc?.ridgeWidth);
+  const n = Number(doc?.rowsPerCell) > 0 ? Math.round(doc.rowsPerCell) : (row > 0 ? Math.max(1, Math.round(CELL / row)) : 0);
+  const meters = row > 0 ? String(Math.round(row * 1000) / 1000) : '';
+  const spacing = meters && n ? `行距 ${meters} m，一格 ${n} 行` : '行距未定';
+  const steps = prepSteps(doc);
+  const deep = doc?.id === 'deepridge' || steps.includes('hill');
+  if (deep) {
+    const mul = Number(doc?.yieldMul) > 0 ? Number(doc.yieldMul) : 1;
+    const bonus = mul > 1 ? `土豆类产量再 ×${mul}，和株数、作业倍数相乘。` : '不另加成产量。';
+    return `犁一遍，再培土一遍。${spacing}。垄比一般田地高。${bonus}`;
+  }
+  return `犁一遍，做成可以种的田块。垄较平，不加成产量。${spacing}。拉斯提卡和短季薯都能种。`;
+}
+
 export function prepSteps(doc) {
   const steps = [];
   const entry = doc?.graph?.entry;
@@ -146,6 +162,8 @@ export function prepSteps(doc) {
   }
   return steps;
 }
+
+for (const doc of FIELD_BLOCK_LIST) doc.tip = blockBlurb(doc);
 
 export function cloneFieldBlocks(list = FIELD_BLOCK_LIST) {
   return list.map(doc => structuredClone(doc));

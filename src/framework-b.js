@@ -9,7 +9,7 @@
 
 import { DAY_SECONDS } from './world-clock.js';
 import { CELL, cellsFromLegacyMps, mpsFromCells } from './modulus.js';
-import { FIELD_BLOCK_LIST, prepSteps } from './field-blocks.js';
+import { FIELD_BLOCK_LIST, prepSteps, blockBlurb } from './field-blocks.js';
 
 export const HUB_PLOT = 'C0';
 
@@ -49,7 +49,7 @@ export function installFieldBlocks(list) {
       target: doc.id,
       targetName: doc.name,
       steps: prepSteps(doc),
-      tip: doc.tip || '',
+      tip: blockBlurb(doc),
       yieldMul: Number(doc.yieldMul) > 0 ? Number(doc.yieldMul) : 1,
       families: doc.families || [],
     };
@@ -1050,6 +1050,13 @@ function leaveByNatural(farm, field) {
 }
 
 // 行距在田地类型上。作物阶段文档里的 ridge / plant.row 不参与主进程。
+// 整地还没跑完时，垄距先按这张工序的目标类型画。田面类型仍要等工序做完才落账。
+export function paintGroundOf(field) {
+  const recipe = field?.prep ? PREP_RECIPES[field.prep.recipeId] : null;
+  if (recipe?.target) return recipe.target;
+  return field?.ground || '';
+}
+
 export function groundRow(field) {
   const block = FIELD_BLOCKS[field?.ground];
   const row = Number(block?.row) > 0 ? Number(block.row) : Number(block?.ridgeWidth);
@@ -1696,7 +1703,7 @@ export function describeField(farm, fieldId) {
     cycle,
     maturity,
     yieldValue,
-    row: groundRow(field),
+    row: groundRow({ ground: paintGroundOf(field) }) || groundRow(field),
     along: crop?.visual?.along || 0,
     stands,
     ridgeScale: Number(field.ridgeScale) > 0 ? Number(field.ridgeScale) : 1,

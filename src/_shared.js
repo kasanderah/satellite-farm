@@ -672,12 +672,19 @@ export function fieldVisual(f) {
     const lastika = CROPS.findIndex(c => c.id === 'lastika');
     return {
       crop: lastika, g: shade.g, s: 0, dir: f.dir, mask: shade.mask, next: shade.next, fromG: shade.fromG,
-      ground: f.bUnit?.ground || '', ridgeScale: f.bUnit?.ridgeScale || 1,
+      ground: f.bUnit?.paintGround || f.bUnit?.ground || '', ridgeScale: f.bUnit?.ridgeScale || 1,
     };
   }
   const vis = fieldVisualHeld(f);
   if (!shade?.keep) return vis;
-  return { ...vis, mask: shade.mask, next: shade.next, holdSweep: true };
+  return {
+    ...vis,
+    mask: shade.mask,
+    next: shade.next,
+    holdSweep: true,
+    ground: f.bUnit?.paintGround || f.bUnit?.ground || '',
+    ridgeScale: f.bUnit?.ridgeScale || 1,
+  };
 }
 function fieldVisualHeld(f) {
   const id = f && f.crop >= 0 ? CROPS[f.crop]?.id : null;

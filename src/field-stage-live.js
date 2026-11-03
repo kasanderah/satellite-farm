@@ -43,7 +43,7 @@ export function workshopSourceNote(stageBoot, blockBoot) {
   else if (stageBoot?.suspended) crop = '作物档：这一轮改用仓库里的拉斯提卡。';
   const loaded = blockBoot?.loaded || [];
   const blocks = loaded.length
-    ? `田块档：已加载${loaded.map(item => `${item.name}（行距 ${item.row} m）`).join('、')}。`
+    ? `田块档：已加载${loaded.map(item => `${item.name}（行距 ${item.row} m）`).join('、')}。已经整好的田按新行距重画，不用再犁。`
     : '田块档：没有工坊田块档，仍用仓库默认。';
   return crop + blocks;
 }

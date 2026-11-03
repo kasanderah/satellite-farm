@@ -1,7 +1,7 @@
 // 把框架 B 接到环面上的一块田。旧的垄扫不读这里的工单。
 import {
   OMNI, TRACTOR, PLOW, JOBS, TURN_SECONDS, createFarm, addField, addMachine, mountHitch,
-  requestPrep, requestPlant, setNextCrop, stepFarm, describeField, plotAddress, growthAge, workSweepLook, PLANT_CROPS, FIELD_BLOCKS,
+  requestPrep, requestPlant, setNextCrop, stepFarm, describeField, plotAddress, growthAge, workSweepLook, paintGroundOf, PLANT_CROPS, FIELD_BLOCKS,
   cycleDays, installPlayerMachine, removePlayerMachine, recallMachine, releaseStandby, standbyClock,
   settleSoft,
 } from './framework-b.js';
@@ -353,6 +353,8 @@ function syncFields() {
       : Math.min(0.999, unit.heldFrac || 0);
     const order = farm.orders.find(item => item.fieldId === id);
     const sweeping = order && (order.phase === 'work' || order.phase === 'turn') && order.pose;
+    const shown = paintGroundOf(unit);
+    const shownRow = FIELD_BLOCKS[shown]?.row || FIELD_BLOCKS[shown]?.ridgeWidth || FIELD_BLOCKS[unit.ground]?.row || FIELD_BLOCKS[unit.ground]?.ridgeWidth || 0;
     f.bUnit = {
       look: unit.look,
       growFrac: unit.look === 'sown' ? frac : 0,
@@ -364,10 +366,11 @@ function syncFields() {
       text: desc?.stat || '',
       label: desc?.float || '',
       ground: unit.ground,
+      paintGround: shown,
       plot: unit.plot,
       cropId: unit.plant?.cropId || '',
-      row: FIELD_BLOCKS[unit.ground]?.row || FIELD_BLOCKS[unit.ground]?.ridgeWidth || 0,
-      ridgeWidth: FIELD_BLOCKS[unit.ground]?.row || FIELD_BLOCKS[unit.ground]?.ridgeWidth || 0,
+      row: shownRow,
+      ridgeWidth: shownRow,
       ridgeScale: Number(unit.ridgeScale) > 0 ? Number(unit.ridgeScale) : 1,
     };
     const jobDef = order ? JOBS[order.jobId] : null;

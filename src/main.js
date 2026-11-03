@@ -690,7 +690,7 @@ vec3 farmAlbedo(vec2 p){
     bool cut = d.b >= 0.0 && d.b < 20.0 && laneCut(uv, d.b);
       float patchy = (n1 - 0.5) * 0.12 + (n2 - 0.5) * 0.05;
       float pst = floor(g + 0.001);
-      // hold 犁地：0.37 只是哨兵。未扫过清掉蒙版，继续走开局那套填充；扫过的条才涂成一般田地。
+      // hold 犁地：0.37 只是哨兵。未扫过清掉蒙版，继续走开局那套填充；扫过的条按这张工序的目标田块画垄。
       bool holdPlow = abs(d.r - uBCrop) > 0.25 && d.b >= 20.0 && abs(fract(d.a) - 0.37) < 0.02;
       bool holdSwept = holdPlow && jobSwept(uv, d.b);
       if (holdPlow && !holdSwept) {
@@ -702,11 +702,14 @@ vec3 farmAlbedo(vec2 p){
       if (holdSwept) {
         float edgeInH = min(min(loc.x, FIELD - loc.x), min(loc.y, FIELD - loc.y));
         float edgeFadeH = smoothstep(0.0, 1.8, edgeInH);
-        float rowPhH = uv.y / max(uGndRow.x, 0.05);
+        float rowFromH = gndRowOf(d.r);
+        float rowSpH = max(rowFromH > 0.0 ? rowFromH : uGndRow.x, 0.05);
+        float gainH = clamp((rowFromH > 0.0 ? gndAmpOf(d.r) : uGndAmp.x) / 0.16, 0.45, 2.8);
+        float rowPhH = uv.y / rowSpH;
         float rowSeeH = (1.0 - smoothstep(0.22, 0.55, fwidth(rowPhH))) * edgeFadeH;
         float profH = 0.5 + 0.5 * cos(6.2832 * rowPhH);
-        float slopeH = -sin(6.2832 * rowPhH);
-        col = g_soil * (0.86 + 0.08 * profH * rowSeeH) * (1.0 + patchy);
+        float slopeH = -sin(6.2832 * rowPhH) * gainH;
+        col = g_soil * (0.86 + 0.08 * profH * rowSeeH) * (1.0 + patchy) * mix(1.0, 0.82 + 0.18 * profH, clamp(gainH - 1.0, 0.0, 1.0));
         gTilt = acrossW * slopeH * 0.72 * rowSeeH;
         gRough = 0.94;
         canopyHere = false;
@@ -4462,6 +4465,8 @@ function reloadStageStore() {
   const booted = bootFieldStageSource(localStorage, null);
   bindPlayableClocks();
   paintStageChrome(workshopSourceNote(booted, blocks));
+  paintSubbar();
+  if (ctxOpen) paintContext();
   return booted;
 }
 function useRepoStages() {
