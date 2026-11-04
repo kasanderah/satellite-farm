@@ -128,7 +128,7 @@ function readout(order, unit) {
   else if (order?.phase === 'turn') doing = '地头转弯';
   else if (order?.phase === 'work') doing = job?.name || '作业';
   else if (!home) doing = '返回机库';
-  const moving = !!order || !home;
+  const moving = (!!order || !home) && !unit?.navFail;
   const rated = order?.phase === 'work' ? (machine?.workSpeed || 0) : (machine?.cruiseSpeed || 0);
   return {
     speed: moving && !ctx.paused() ? rated : 0,
@@ -427,6 +427,33 @@ function claimSoft(_farm, field, job) {
   return true;
 }
 
+function releaseUnlinkedCruise() {
+  if (!farm) return;
+  for (const order of [...farm.orders]) {
+    if (order.phase !== 'cruise') continue;
+    if (rigFor(order.machineId)) continue;
+    const machine = machineOf(order.machineId);
+    if (machine) {
+      machine.busy = false;
+      if (order.hitchId) {
+        const hitch = farm.machines.find(item => item.id === order.hitchId);
+        if (hitch) hitch.busy = false;
+      }
+    }
+    const field = farm.fields.get(order.fieldId);
+    if (field && field.lock === order.id) field.lock = null;
+    farm.orders = farm.orders.filter(item => item !== order);
+    const job = JOBS[order.jobId];
+    farm.queue.push({
+      id: farm.seq++,
+      fieldId: order.fieldId,
+      jobId: order.jobId,
+      caps: job?.caps ? job.caps.slice() : [],
+      lane: order.lane || 'plant',
+    });
+  }
+}
+
 export function tickSlice(dt) {
   if (!farm || !ctx || !(dt > 0)) return;
   for (const unit of driveRigs()) {
@@ -437,6 +464,7 @@ export function tickSlice(dt) {
       unit.navRetryDue = true;
     }
   }
+  releaseUnlinkedCruise();
   stepFarm(farm, dt, {
     eta(_farm, order) {
       const f = meshOf(order.fieldId);
@@ -558,15 +586,23 @@ export function dispatchBoard() {
     if (field?.prep) return '整地';
     return '—';
   };
-  const phaseName = (phase) => (phase === 'cruise' ? '开往' : phase === 'turn' ? '转弯' : phase === 'work' ? '作业中' : phase || '—');
+  const phaseName = (order) => {
+    const rig = rigFor(order.machineId);
+    if (order.phase === 'cruise' && !rig) return '待派';
+    if (order.phase === 'cruise' && rig?.navFail) return '绕不过去';
+    if (order.phase === 'cruise') return '开往';
+    if (order.phase === 'turn') return '转弯';
+    if (order.phase === 'work') return '作业中';
+    return order.phase || '—';
+  };
   const orders = farm.orders.map(order => ({
     id: order.id,
     crop: cropName(order.fieldId),
     job: jobName(order.jobId),
     kind: kindOf(order.jobId),
     field: fieldName(order.fieldId),
-    machine: rigFor(order.machineId)?.label || order.machineId,
-    status: phaseName(order.phase),
+    machine: rigFor(order.machineId)?.label || '待派',
+    status: phaseName(order),
     bucket: 'run',
   }));
   const queue = farm.queue.map(item => ({

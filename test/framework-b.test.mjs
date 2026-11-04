@@ -903,6 +903,29 @@ test('回库待机放下软单和未开工硬单，正在做的硬单做完才�
   assert.equal(STANDBY_SECONDS > 0, true);
 });
 
+test('生长刚好到点时，开往的车仍会起步', () => {
+  const farm = createFarm();
+  addMachine(farm, fastOmni({ id: 'omni-1' }));
+  addField(farm, { id: 'ripe', length: 128, width: 128, ground: 'general', look: 'sown' });
+  addField(farm, { id: 'far', length: 128, width: 128, ground: 'general', look: 'general' });
+  const ripe = farm.fields.get('ripe');
+  ripe.plant = {
+    cropId: 'lastika', stageId: 'seedling', clock: true, grow: 2, need: 2, yieldMul: 1, soft: {},
+  };
+  farm.queue.push({ id: 1, fieldId: 'far', jobId: 'plow', caps: ['犁田'], lane: 'prep' });
+  let moved = 0;
+  stepFarm(farm, 5, {
+    eta() { return 40; },
+    cruise(_farm, _order, slice) { moved += slice; },
+    travel() { return 40; },
+  });
+  const order = farm.orders.find(item => item.fieldId === 'far');
+  assert.ok(order);
+  assert.equal(order.phase, 'cruise');
+  assert.ok(moved > 1, `cruise time ${moved}`);
+  assert.notEqual(ripe.plant?.stageId, 'seedling');
+});
+
 test('电尽后空闲万能机补满，第六单和收拾都会继续派', () => {
   const farm = createFarm();
   const omni = addMachine(farm, { ...OMNI, id: 'omni', caps: OMNI.caps.slice(), energyLeft: OMNI.energyKwh });
@@ -927,7 +950,7 @@ test('电尽后空闲万能机补满，第六单和收拾都会继续派', () =>
 });
 
 test('拉斯提卡阶段和版本戳来自同一份定义', () => {
-  assert.equal(HUD_VERSION, '环穗 v6.35.4');
+  assert.equal(HUD_VERSION, '环穗 v6.35.5');
   const doc = parseFieldStageDoc(structuredClone(lastikaRaw));
   const windows = jobWindows(doc, alignFieldCalendar(doc)).filter(item => item.op.kind === 'optional');
   assert.deepEqual(windows.map(item => item.op.id), ['topdress', 'spray', 'hill']);

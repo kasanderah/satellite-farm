@@ -1500,17 +1500,33 @@ export function stepFarm(farm, dt, env = null) {
         }
       }
     }
-    let horizon = Infinity;
+    let machineH = Infinity;
     for (const order of farm.orders) {
-      if (order.phase === 'cruise') horizon = Math.min(horizon, env.eta(farm, order));
-      if (order.phase === 'work') horizon = Math.min(horizon, secondsLeft(farm, order), secondsToTurn(farm, order));
-      if (order.phase === 'turn') horizon = Math.min(horizon, Math.max(0, TURN_SECONDS - (order.turnT || 0)));
+      if (order.phase === 'cruise') machineH = Math.min(machineH, env.eta(farm, order));
+      if (order.phase === 'work') machineH = Math.min(machineH, secondsLeft(farm, order), secondsToTurn(farm, order));
+      if (order.phase === 'turn') machineH = Math.min(machineH, Math.max(0, TURN_SECONDS - (order.turnT || 0)));
     }
+    let growthH = Infinity;
     for (const field of farm.fields.values()) {
       const wait = growthLeft(field);
-      if (wait != null) horizon = Math.min(horizon, wait * DAY_SECONDS);
-      horizon = Math.min(horizon, softHorizon(field) * DAY_SECONDS, hardHorizon(field) * DAY_SECONDS);
+      if (wait != null) growthH = Math.min(growthH, wait * DAY_SECONDS);
+      growthH = Math.min(growthH, softHorizon(field) * DAY_SECONDS, hardHorizon(field) * DAY_SECONDS);
     }
+    // 生长刚好到点时余量是 0。若在这里直接停步，开往的车永远分不到时间，调度板却一直写「开往」。
+    if (!(growthH > 1e-6)) {
+      finishGrowth(farm);
+      touchSoft(farm);
+      growthH = Infinity;
+      for (const field of farm.fields.values()) {
+        const wait = growthLeft(field);
+        if (wait != null && wait > 1e-8) growthH = Math.min(growthH, wait * DAY_SECONDS);
+        const soft = softHorizon(field) * DAY_SECONDS;
+        const hard = hardHorizon(field) * DAY_SECONDS;
+        if (soft > 1e-6) growthH = Math.min(growthH, soft);
+        if (hard > 1e-6) growthH = Math.min(growthH, hard);
+      }
+    }
+    const horizon = Math.min(machineH, growthH);
     if (!isFinite(horizon)) {
       applyGrowth(farm, left, null);
       if (env?.idle) env.idle(farm, left);
