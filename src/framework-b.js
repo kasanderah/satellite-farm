@@ -1656,6 +1656,7 @@ export function describeField(farm, fieldId) {
         id: spec.job, name: spec.name, kind: 'soft',
         from: spec.from, to: spec.to, full: !!spec.full,
         status: active ? (work.phase === 'cruise' ? '开来' : work.phase === 'turn' ? '转弯' : '执行中') : (row?.status || '未执行'),
+        note: row?.note || '',
         pct: active ? pct : Math.round((row?.progress || 0) * 100),
       };
     }

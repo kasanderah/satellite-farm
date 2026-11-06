@@ -7,7 +7,7 @@ import {
 } from './framework-b.js';
 import { roadRoute, L, stores, economy } from './_shared.js';
 import { NAV_RETRY_S } from './build/nav.js';
-import { slotKey, claimJob, tickTrusses, syncSlots, trussSlots, tipOnce, listRigs, SPRAY_NEED, FERT_NEED, TRUSS_POWER } from './truss.js';
+import { slotKey, claimJob, tickTrusses, syncSlots, trussSlots, tipOnce, listRigs, decideTrussClaim, SPRAY_NEED, FERT_NEED, TRUSS_POWER, TRUSS_SPEED } from './truss.js';
 
 let farm = null;
 let ctx = null;
@@ -134,6 +134,7 @@ function readout(order, unit) {
     speed: moving && !ctx.paused() ? rated : 0,
     doing,
     frac: order ? order.progress : 0,
+    eta: order ? formatWallEta(orderSimSeconds(order)) : '',
     charge: unit?.charge ?? 1,
     job: order?.jobId || null,
     light: null,
@@ -399,32 +400,103 @@ function stockFor(jobId) {
 
 function claimSoft(_farm, field, job) {
   if (job.id !== 'spray' && job.id !== 'topdress') return false;
+  const book = field.plant?.soft?.[job.id];
+  const note = (text) => { if (book) book.note = text || ''; };
   const mesh = meshOf(field.id);
-  if (!mesh) return job.id === 'spray';
+  if (!mesh) {
+    const missed = decideTrussClaim({ bought: false, stockOk: true, powerOk: true, parked: false, jobId: job.id });
+    note(missed.tip);
+    return false;
+  }
   const key = slotKey(mesh.i, mesh.j, L.PER);
   const slots = trussSlots(ctx.fields, Math.floor(mesh.i / L.PER), Math.floor(mesh.j / L.PER), L.PER, ctx.length);
   syncSlots(slots);
   const slot = slots.find(item => item.key === key);
-  if (!slot?.bought) {
-    if (job.id === 'spray') tipOnce(key + ':none', '这行没有喷灌桁架，撒药派不出去');
-    return job.id === 'spray';
-  }
+  const rig = listRigs().find(item => item.key === key);
   const stock = stockFor(job.id);
-  if (!stock.ok) {
-    tipOnce(key + ':' + job.id, stock.tip);
-    return true;
-  }
-  if (economy.revenue < TRUSS_POWER) {
-    tipOnce(key + ':power', '电不够，桁架停在地头');
-    return true;
+  const decision = decideTrussClaim({
+    bought: !!slot?.bought,
+    stockOk: !slot?.bought || stock.ok,
+    stockTip: stock.tip,
+    powerOk: economy.revenue >= TRUSS_POWER,
+    parked: !!(rig && rig.phase === 'park' && !rig.job),
+    jobId: job.id,
+  });
+  if (!decision.ok) {
+    if (decision.tip) tipOnce(`${key}:${decision.reason}:${job.id}`, decision.tip);
+    note(decision.reason === 'none' && job.id === 'topdress' ? '' : decision.tip);
+    return false;
   }
   const head = ctx.fields.find(item => item.i === Math.floor(mesh.i / L.PER) * L.PER && item.j === mesh.j);
   const goalU = head ? (mesh.x0 - head.x0) : 0;
-  if (!claimJob(key, { fieldId: field.id, jobId: job.id, goalU, len: ctx.length })) return true;
+  if (!claimJob(key, { fieldId: field.id, jobId: job.id, goalU, len: ctx.length })) {
+    note('这行桁架还在干活');
+    tipOnce(`${key}:busy:${job.id}`, '这行桁架还在干活');
+    return false;
+  }
   stock.take();
   economy.revenue -= TRUSS_POWER;
+  note('');
   settleSoft(_farm, field.id, job.id, 0);
   return true;
+}
+
+export function formatWallEta(simSeconds, timeScale = economy.timeScale) {
+  const scale = Number(timeScale) > 0 ? Number(timeScale) : 1;
+  if (!(simSeconds >= 0) || !Number.isFinite(simSeconds)) return '';
+  const wall = simSeconds / scale;
+  if (wall < 1) return '剩余不足 1 秒（现实）';
+  if (wall < 90) return `剩余约 ${Math.round(wall)} 秒（现实）`;
+  const mins = wall / 60;
+  if (mins < 90) return `剩余约 ${Math.max(1, Math.round(mins))} 分（现实）`;
+  return `剩余约 ${Math.round(mins / 60)} 小时（现实）`;
+}
+
+function orderSimSeconds(order) {
+  const field = farm?.fields.get(order.fieldId);
+  const machine = machineOf(order.machineId);
+  if (!field || !machine) return null;
+  if (order.phase === 'turn') return Math.max(0, TURN_SECONDS - (order.turnT || 0));
+  if (order.phase === 'work') {
+    const span = order.width > 0 ? order.width : field.width;
+    const passes = Math.max(1, Math.ceil(field.width / span));
+    const remain = Math.max(0, 1 - (order.progress || 0)) * passes * field.length;
+    return machine.workSpeed > 0 ? remain / machine.workSpeed : null;
+  }
+  if (order.phase === 'cruise') {
+    const mesh = meshOf(order.fieldId);
+    const unit = rigFor(order.machineId);
+    if (!mesh || !unit || !(machine.cruiseSpeed > 0) || !order.pose) return null;
+    const at = worldPose(mesh, order.pose);
+    return roadLeft(unit, at.x, at.z) / machine.cruiseSpeed;
+  }
+  return null;
+}
+
+function trussSimSeconds(rig) {
+  if (!rig?.job || !(TRUSS_SPEED > 0)) return null;
+  const goal = Number(rig.job.goalU) || 0;
+  const len = Number(rig.job.len) || 0;
+  const here = Number(rig.u) || 0;
+  const left = rig.phase === 'go' ? Math.max(0, goal - here) + len : Math.max(0, goal + len - here);
+  return left / TRUSS_SPEED;
+}
+
+export function trussWallEta(rig) {
+  return formatWallEta(trussSimSeconds(rig));
+}
+
+function etaForFieldJob(mesh, job) {
+  if (!farm || !mesh) return '';
+  const id = fieldKey(mesh);
+  const order = farm.orders.find(item => item.fieldId === id && item.jobId === job.id);
+  if (order) return formatWallEta(orderSimSeconds(order));
+  const truss = listRigs().find(rig => rig.job && rig.job.fieldId === id && rig.job.jobId === job.id);
+  if (truss) return formatWallEta(trussSimSeconds(truss));
+  if (job.status === '未执行' || job.status === '排队' || job.status === '等待' || job.status === '可派') {
+    return job.status === '未执行' && job.note ? '' : '待派';
+  }
+  return '';
 }
 
 function releaseUnlinkedCruise() {
@@ -548,7 +620,10 @@ export function planNext(f, cropId) {
 
 export function dockOf(f) {
   if (!farm || !f?.owned) return null;
-  return describeField(farm, fieldKey(f));
+  const desc = describeField(farm, fieldKey(f));
+  if (!desc?.jobs) return desc;
+  desc.jobs = desc.jobs.map(job => ({ ...job, eta: etaForFieldJob(f, job) }));
+  return desc;
 }
 
 export function recallRig(rig) {
@@ -603,6 +678,7 @@ export function dispatchBoard() {
     field: fieldName(order.fieldId),
     machine: rigFor(order.machineId)?.label || '待派',
     status: phaseName(order),
+    eta: formatWallEta(orderSimSeconds(order)),
     bucket: 'run',
   }));
   const queue = farm.queue.map(item => ({
@@ -613,6 +689,7 @@ export function dispatchBoard() {
     field: fieldName(item.fieldId),
     machine: '待派',
     status: '排队',
+    eta: '待派',
     bucket: 'queue',
   }));
   const machines = driveRigs().map(rig => {

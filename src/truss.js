@@ -113,6 +113,18 @@ export function listRigs() {
   return [...rigs.values()];
 }
 
+// 只有真正派上才算接住。没买、物料不够、电不够、这台还在忙，都要让调用方继续重试，不能当成已处理。
+export function decideTrussClaim({ bought, stockOk, powerOk, parked, jobId, stockTip }) {
+  if (!bought) {
+    const name = jobId === 'topdress' ? '追肥' : '撒药';
+    return { ok: false, reason: 'none', tip: `这行没有喷灌桁架，${name}派不出去` };
+  }
+  if (!stockOk) return { ok: false, reason: 'stock', tip: stockTip || '物料不够，桁架停在地头' };
+  if (!powerOk) return { ok: false, reason: 'power', tip: '电不够，桁架停在地头' };
+  if (!parked) return { ok: false, reason: 'busy', tip: '这行桁架还在干活' };
+  return { ok: true, reason: 'go', tip: '' };
+}
+
 export function claimJob(key, job) {
   const rig = rigs.get(key);
   if (!rig || rig.phase !== 'park' || rig.job) return false;

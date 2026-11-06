@@ -24,7 +24,7 @@ import { surfaceKits, hitchOffset } from './surface-kits.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CULT_EMPTY } from './lab-catalog.js';
 import { makeColony } from './colony-art.js';
-import { bootSlice, tickSlice, prepField, plantCrop, dockOf, dropDrive, adoptBought, recallRig, resumeRig, rigStandby, dispatchBoard, syncOwnedFields } from './b-bind.js';
+import { bootSlice, tickSlice, prepField, plantCrop, dockOf, dropDrive, adoptBought, recallRig, resumeRig, rigStandby, dispatchBoard, syncOwnedFields, trussWallEta } from './b-bind.js';
 import { PLANT_CROPS, PREP_RECIPES, FIELD_BLOCKS, JOBS, stageDisplayStops } from './framework-b.js';
 import { HUD_VERSION } from './version.js';
 import {
@@ -3349,7 +3349,7 @@ function paintLock() {
   const where = r.f ? fieldCode(r.f) : '';
   el.classList.add('on');
   const batt = Math.round((info.charge ?? 1) * 100);
-  el.innerHTML = `<b>${rigTitle(r)}</b><small><em>${info.speed.toFixed(1)}</em> m/s · 电 ${batt}%${fleetWidth(r)}</small><small>${info.doing}${where ? ' · ' + where : ''}</small><div id="rigbar"><i style="width:${pct}%"></i></div><small>本趟 ${pct}%</small>`;
+  el.innerHTML = `<b>${rigTitle(r)}</b><small><em>${info.speed.toFixed(1)}</em> m/s · 电 ${batt}%${fleetWidth(r)}</small><small>${info.doing}${where ? ' · ' + where : ''}</small>${info.eta ? `<small>${info.eta}</small>` : ''}<div id="rigbar"><i style="width:${pct}%"></i></div><small>本趟 ${pct}%</small>`;
 }
 function refreshLayerProps() {
   buildPlotSection();
@@ -3461,7 +3461,7 @@ function paintDispatch(force) {
   const sig = JSON.stringify(board);
   if (!force && sig === dispatchSig) return;
   dispatchSig = sig;
-  const row = (item) => `<div class="sched ${item.kind === '软' ? 'soft' : 'hard'}" data-order="${item.id}" data-bucket="${item.bucket}"><span>${item.crop}</span><span>${item.job}</span><span>${item.kind}</span><span>${item.field}</span><span>${item.machine}</span><span>${item.status}</span></div>`;
+  const row = (item) => `<div class="sched ${item.kind === '软' ? 'soft' : 'hard'}" data-order="${item.id}" data-bucket="${item.bucket}"><span>${item.crop}</span><span>${item.job}</span><span>${item.kind}</span><span>${item.field}</span><span>${item.machine}</span><span>${item.status}${item.eta && item.bucket === 'run' ? ' · ' + item.eta : ''}</span></div>`;
   const list = [...board.orders, ...board.queue];
   const jobs = list.length ? list.map(row).join('') : '<p class="note">没有待派或进行中的工单。</p>';
   const machines = board.machines.length
@@ -4121,7 +4121,8 @@ function updateLabels(d) {
   if (!camS.deck) for (const rig of listRigs()) {
     if (rig.phase !== 'sweep' || !rig.job) continue;
     const name = rig.job.jobId === 'spray' ? '撒药' : '追肥';
-    want.push({ x: rig.x, z: rig.z, y: 6, pr: -1, a: 1, html: `<b>喷灌桁架</b><span>${name}</span>`, cls: 'veh' });
+    const eta = trussWallEta(rig);
+    want.push({ x: rig.x, z: rig.z, y: 6, pr: -1, a: 1, html: `<b>喷灌桁架</b><span>${name}${eta ? ' · ' + eta : ''}</span>`, cls: 'veh' });
   }
   if (cut.on && d < 2200) {
     const I = cutInner(), a = 1 - Math.min(1, Math.max(0, (d - 1500) / 500));
@@ -4278,7 +4279,11 @@ function jobRow(job) {
   const miss = job.status === '过期';
   const kind = job.kind === 'soft' ? '软' : job.kind === 'hard' ? '硬' : '';
   const span = job.full ? '全阶段' : (job.from != null && job.to != null ? `第 ${job.from}–${job.to} 日` : '');
-  return `<div class="jb${hot ? ' run' : ''}${miss ? ' miss' : ''}"><b>${kind ? kind + ' ' : ''}${job.name}</b><span>${job.status}${job.pct ? ' ' + job.pct + '%' : ''}${span ? ' · ' + span : ''}</span></div>`;
+  const why = job.note && job.status === '未执行' ? job.note : '';
+  const eta = job.eta && job.eta !== '待派' ? job.eta : '';
+  const wait = !why && !eta && (job.status === '排队' || job.status === '等待' || job.status === '可派') ? '待派' : '';
+  const tail = [why, eta, wait].filter(Boolean).join(' · ');
+  return `<div class="jb${hot ? ' run' : ''}${miss ? ' miss' : ''}"><b>${kind ? kind + ' ' : ''}${job.name}</b><span>${job.status}${job.pct ? ' ' + job.pct + '%' : ''}${span ? ' · ' + span : ''}${tail ? ' · ' + tail : ''}</span></div>`;
 }
 function paintStageBar(desc) {
   const host = $('stagebar');

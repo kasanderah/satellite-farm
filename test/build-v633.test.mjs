@@ -7,7 +7,8 @@ import { buyMachine, economy, resetGame, sellRig, garageBoard, sendRigHome, step
 import { inHubWedge, CELL } from '../src/modulus.js';
 import { OMNI } from '../src/framework-b.js';
 import { NAV_RETRY_S } from '../src/build/nav.js';
-import { trussSlots, buyTruss, clearTruss, TRUSS_PRICE, syncSlots, claimJob, tickTrusses, listRigs } from '../src/truss.js';
+import { trussSlots, buyTruss, clearTruss, TRUSS_PRICE, syncSlots, claimJob, tickTrusses, listRigs, decideTrussClaim } from '../src/truss.js';
+import { formatWallEta } from '../src/b-bind.js';
 
 test('道路按上下左右拼出直线、转角、丁字和十字', () => {
   const has = (cells) => (x, z) => cells.has(x + ',' + z);
@@ -110,6 +111,33 @@ test('一台桁架扫完自己这一行的第四个单元再回地头', () => {
   assert.equal(rig.phase, 'park');
   assert.ok(Math.abs(rig.x - (fields[0].x0 - 8)) < 0.5);
   clearTruss();
+});
+
+test('没买桁架、桁架正忙、成功派工三条都不吞单', () => {
+  const none = decideTrussClaim({ bought: false, stockOk: true, powerOk: true, parked: false, jobId: 'spray' });
+  assert.equal(none.ok, false);
+  assert.match(none.tip, /这行没有喷灌桁架，撒药派不出去/);
+  const top = decideTrussClaim({ bought: false, stockOk: true, powerOk: true, parked: false, jobId: 'topdress' });
+  assert.equal(top.ok, false);
+  assert.match(top.tip, /追肥派不出去/);
+  const busy = decideTrussClaim({ bought: true, stockOk: true, powerOk: true, parked: false, jobId: 'topdress' });
+  assert.equal(busy.ok, false);
+  assert.equal(busy.reason, 'busy');
+  const dry = decideTrussClaim({ bought: true, stockOk: false, powerOk: true, parked: true, jobId: 'spray', stockTip: '药不够，桁架不能撒药' });
+  assert.equal(dry.ok, false);
+  assert.equal(dry.reason, 'stock');
+  const go = decideTrussClaim({ bought: true, stockOk: true, powerOk: true, parked: true, jobId: 'spray' });
+  assert.equal(go.ok, true);
+  clearTruss();
+  const fields = [{ i: 0, j: 0, x0: 0, z0: 0 }];
+  buyTruss('0:0:0', () => true);
+  syncSlots(trussSlots(fields, 0, 0, 4, 40));
+  assert.equal(claimJob('0:0:0', { fieldId: 'a', jobId: 'spray', goalU: 0, len: 40 }), true);
+  assert.equal(claimJob('0:0:0', { fieldId: 'b', jobId: 'topdress', goalU: 0, len: 40 }), false);
+  clearTruss();
+  assert.equal(formatWallEta(80, 1), '剩余约 80 秒（现实）');
+  assert.equal(formatWallEta(80, 10), '剩余约 8 秒（现实）');
+  assert.equal(formatWallEta(120, 1), '剩余约 2 分（现实）');
 });
 
 test('一行只能买一台桁架', () => {
