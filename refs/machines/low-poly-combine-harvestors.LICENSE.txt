@@ -1,0 +1,10 @@
+Source: https://sketchfab.com/3d-models/low-poly-combine-harvestors-84b8a341aabc421b8f7268c3a4b173f1
+Author: iedalton
+Title: Low Poly Combine Harvestors
+License: Creative Commons Attribution 4.0 International (CC BY 4.0)
+License URL: https://creativecommons.org/licenses/by/4.0/
+
+File in this repo: refs/machines/low-poly-combine-harvestors.glb
+Use: development placeholder for Ringsheaf / 环穗 farm-machine workshop preview.
+Formal release: remake; if this file remains in a build, credit iedalton + model page + CC BY 4.0.
+Downloaded: 2026-10-13
