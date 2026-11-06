@@ -1,5 +1,8 @@
-// 喷灌桁架。一个地块四行，每行西端地头一台。
-// 这一台负责该行连续 4 个单元的撒药和追肥，从地头旁第一格扫到第四格。没派活就停在地头，不进车库。
+// 喷灌桁架。列是环周（南北，x），行是轴向（东西，z）。
+// 桁架沿行展开（梁在 z），沿列行进（在 x 上从地头扫过连续 4 个单元）。
+// 一个地块四行，每行西端地头一台。没派活就停在地头，不进车库。
+export const TRUSS_TRAVEL = 'x';
+export const TRUSS_SPAN = 'z';
 export const TRUSS_PRICE = 6000;
 export const TRUSS_ROWS = 4;
 export const TRUSS_SPEED = 6;
@@ -61,7 +64,9 @@ export function trussSlots(fields, bi, bj, per, fieldLen) {
       x0: head.x0,
       z0: head.z0,
       len,
-      along: 'x',
+      along: TRUSS_TRAVEL,
+      travel: TRUSS_TRAVEL,
+      span: TRUSS_SPAN,
       rot: 0,
       x: head.x0 - 8,
       z: head.z0 + len / 2,
@@ -116,7 +121,7 @@ export function listRigs() {
 // 只有真正派上才算接住。没买、物料不够、电不够、这台还在忙，都要让调用方继续重试，不能当成已处理。
 export function decideTrussClaim({ bought, stockOk, powerOk, parked, jobId, stockTip }) {
   if (!bought) {
-    const name = jobId === 'topdress' ? '追肥' : '撒药';
+    const name = jobId === 'topdress' ? '追肥' : jobId === 'irrigate' ? '喷灌' : '撒药';
     return { ok: false, reason: 'none', tip: `这行没有喷灌桁架，${name}派不出去` };
   }
   if (!stockOk) return { ok: false, reason: 'stock', tip: stockTip || '物料不够，桁架停在地头' };

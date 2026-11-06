@@ -10,6 +10,7 @@
 import { DAY_SECONDS } from './world-clock.js';
 import { CELL, cellsFromLegacyMps, mpsFromCells } from './modulus.js';
 import { FIELD_BLOCK_LIST, prepSteps, blockBlurb } from './field-blocks.js';
+import { moistureDelta } from './manual-jobs.js';
 
 export const HUB_PLOT = 'C0';
 
@@ -68,6 +69,7 @@ export const JOBS = {
   topdress: { id: 'topdress', name: '追肥', kind: 'soft', caps: ['追肥'], look: '不影响', brush: { ...BRUSH_OFF, look: 'mature' } },
   spray: { id: 'spray', name: '撒药', kind: 'soft', caps: ['撒药'], look: '不影响', brush: { ...BRUSH_OFF, look: 'mature' } },
   hill: { id: 'hill', name: '培土', kind: 'soft', caps: ['培土'], look: '不影响', brush: { ...BRUSH_OFF, look: 'mature' } },
+  irrigate: { id: 'irrigate', name: '喷灌', kind: 'soft', caps: ['喷灌'], manual: true, look: '不影响', brush: { ...BRUSH_OFF, look: '不影响' } },
 };
 
 export const PREP_RECIPES = {};
@@ -178,7 +180,7 @@ export const OMNI = {
   className: '自走机',
   integral: true,
   name: '万能农机',
-  caps: ['犁田', '播种', '收割', '收拾', '追肥', '培土'],
+  caps: ['犁田', '播种', '收割', '收拾', '追肥', '培土', '喷灌'],
   origin: 3.2,
   // 1 格宽。1× 下 32 格/现实分钟：32 趟走完 32 格的田，大约半小时。
   width: CELL,
@@ -529,6 +531,7 @@ function clearCrop(farm, field) {
   field.plant = null;
   field.prep = null;
   field.ridgeScale = 1;
+  field.manual = [];
 }
 
 export function requestPrep(farm, fieldId, recipeId = 'clear_general') {
@@ -1254,6 +1257,14 @@ function finishOrder(farm, order) {
     maybeStandby(farm, machine);
     return;
   }
+  if (job?.id === 'irrigate') {
+    const delta = moistureDelta('irrigate');
+    if (field) field.moisture = Math.max(0, Math.min(100, (Number(field.moisture) || 36) + delta));
+    releaseOrder(farm, order);
+    pushEvent(farm, { type: 'job-complete', fieldId: field?.id, jobId: job.id, look: '不影响', lane: 'manual', progress: 1, moisture: field?.moisture });
+    maybeStandby(farm, machine);
+    return;
+  }
   if (job?.kind === 'soft') {
     const row = field?.plant?.soft?.[order.jobId];
     let painted = null;
@@ -1390,29 +1401,66 @@ function touchSoft(farm) {
   }
 }
 
+// 窗内的阶段软作业能派走时先派。派不走（没桁架、机器正忙）不挡住手动喷灌。
+// 同一块田同时只出一单。喷灌不看田面和阶段。
 function queueSoft(farm, env) {
   for (const field of farm.fields.values()) {
-    const book = field.plant?.soft;
-    if (!book || !field.plant.clock || field.lock) continue;
+    if (field.lock) continue;
     if (farm.orders.some(item => item.fieldId === field.id)) continue;
     if (farm.queue.some(item => item.fieldId === field.id)) continue;
-    const age = growthAge(field);
-    const open = Object.entries(book).filter(([, row]) => row.status === '未执行' && windowOpen(row, age));
-    for (const [jobId] of open) {
-      const job = JOBS[jobId];
-      if (!job) continue;
-      if (env?.claimSoft?.(farm, field, job)) break;
-      if (!chooseMachine(farm, job.caps)) continue;
-      farm.queue.push({
-        id: farm.seq++,
-        fieldId: field.id,
-        jobId: job.id,
-        caps: job.caps.slice(),
-        lane: 'soft',
-      });
-      break;
+    let held = false;
+    const book = field.plant?.soft;
+    if (book && field.plant.clock) {
+      const age = growthAge(field);
+      const open = Object.entries(book).filter(([, row]) => row.status === '未执行' && windowOpen(row, age));
+      for (const [jobId] of open) {
+        const job = JOBS[jobId];
+        if (!job) continue;
+        if (env?.claimSoft?.(farm, field, job)) { held = true; break; }
+        if (!chooseMachine(farm, job.caps)) continue;
+        farm.queue.push({
+          id: farm.seq++,
+          fieldId: field.id,
+          jobId: job.id,
+          caps: job.caps.slice(),
+          lane: 'soft',
+        });
+        held = true;
+        break;
+      }
     }
+    if (held) continue;
+    const nextId = (field.manual || []).find(id => JOBS[id]);
+    if (!nextId) continue;
+    const job = JOBS[nextId];
+    if (env?.claimSoft?.(farm, field, job)) {
+      field.manual = field.manual.filter(id => id !== nextId);
+      continue;
+    }
+    if (!chooseMachine(farm, job.caps)) continue;
+    farm.queue.push({
+      id: farm.seq++,
+      fieldId: field.id,
+      jobId: job.id,
+      caps: job.caps.slice(),
+      lane: 'manual',
+    });
+    field.manual = field.manual.filter(id => id !== nextId);
   }
+}
+
+export function requestManual(farm, fieldId, jobId = 'irrigate') {
+  const field = farm.fields.get(fieldId);
+  const job = JOBS[jobId];
+  if (!field || !job) return { ok: false, reason: 'field' };
+  if (field.lock || farm.orders.some(item => item.fieldId === fieldId)) return { ok: false, reason: 'lock' };
+  if (!field.manual) field.manual = [];
+  if (field.manual.includes(jobId) || farm.queue.some(item => item.fieldId === fieldId && item.jobId === jobId)) {
+    return { ok: true, queued: true, jobId };
+  }
+  field.manual.push(jobId);
+  pushEvent(farm, { type: 'request', lane: 'manual', fieldId, jobId });
+  return { ok: true, queued: true, jobId };
 }
 
 function softHorizon(field) {
@@ -1710,6 +1758,7 @@ export function describeField(farm, fieldId) {
   const actions = [
     { id: 'prep', name: '整地', enabled: !locked },
     { id: 'plant', name: '种植', enabled: !locked && !field.plant && !!FIELD_BLOCKS[field.ground] },
+    { id: 'irrigate', name: '喷灌', enabled: !locked && !(field.manual || []).includes('irrigate') },
   ];
   const chips = barStages.map(item => ({ name: item.name, on: item.on }));
   const bar = work ? work.progress : (field.plant?.clock && field.plant.need ? field.plant.grow / field.plant.need : 0);

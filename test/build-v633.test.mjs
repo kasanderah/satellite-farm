@@ -2,12 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { roadMaskAt, roadShape, ROAD_E, ROAD_N, ROAD_W, ROAD_S } from '../src/build/roads.js';
 import { planRoute } from '../src/build/nav.js';
-import { placeWork, eraseWork, clearWorks, roadMask } from '../src/build/works.js';
+import { placeWork, eraseWork, clearWorks, roadMask, tickWorks, faceOut } from '../src/build/works.js';
 import { buyMachine, economy, resetGame, sellRig, garageBoard, sendRigHome, step, rigs } from '../src/_shared.js';
 import { inHubWedge, CELL } from '../src/modulus.js';
 import { OMNI } from '../src/framework-b.js';
 import { NAV_RETRY_S } from '../src/build/nav.js';
-import { trussSlots, buyTruss, clearTruss, TRUSS_PRICE, syncSlots, claimJob, tickTrusses, listRigs, decideTrussClaim } from '../src/truss.js';
+import { trussSlots, buyTruss, clearTruss, TRUSS_PRICE, syncSlots, claimJob, tickTrusses, listRigs, decideTrussClaim, TRUSS_TRAVEL, TRUSS_SPAN } from '../src/truss.js';
+import { normalizeManualJobs, moistureDelta } from '../src/manual-jobs.js';
 import { formatWallEta } from '../src/b-bind.js';
 
 test('道路按上下左右拼出直线、转角、丁字和十字', () => {
@@ -42,7 +43,9 @@ test('挡住后先停下，到点才重新出发', () => {
   resetGame();
   clearWorks();
   economy.revenue = 200000;
-  assert.equal(placeWork('garage', 220, 0, 0).ok, true);
+  const garage = placeWork('garage', 220, 0, 0);
+  assert.equal(garage.ok, true);
+  tickWorks(garage.piece.need);
   const bought = buyMachine('tractor');
   assert.equal(bought.ok, true, bought.reason);
   const rig = rigs.find(r => r.id === bought.id);
@@ -140,6 +143,37 @@ test('没买桁架、桁架正忙、成功派工三条都不吞单', () => {
   assert.equal(formatWallEta(120, 1), '剩余约 2 分（现实）');
 });
 
+test('桁架沿东西展开、沿南北走过四个单元', () => {
+  assert.equal(TRUSS_TRAVEL, 'x');
+  assert.equal(TRUSS_SPAN, 'z');
+  const fields = [0, 1, 2, 3].map(i => ({ i, j: 0, x0: i * 147, z0: 20 }));
+  const slot = trussSlots(fields, 0, 0, 4, 134.4)[0];
+  assert.equal(slot.travel, 'x');
+  assert.equal(slot.span, 'z');
+  assert.equal(slot.x, fields[0].x0 - 8);
+  assert.equal(slot.z, 20 + 67.2);
+  const rigs = [];
+  clearTruss();
+  buyTruss(slot.key, () => true);
+  syncSlots(trussSlots(fields, 0, 0, 4, 134.4));
+  const goalU = fields[3].x0 - fields[0].x0;
+  assert.equal(claimJob(slot.key, { fieldId: 'far', jobId: 'spray', goalU, len: 134.4 }), true);
+  for (let i = 0; i < 80; i++) rigs.push(...tickTrusses(20));
+  assert.equal(listRigs()[0].phase === 'return' || listRigs()[0].phase === 'park', true);
+  clearTruss();
+});
+
+test('车库门口朝南，转 90 度后箭头朝西', () => {
+  assert.deepEqual(faceOut(0, 's'), [0, -1]);
+  assert.deepEqual(faceOut(1, 's'), [-1, 0]);
+});
+
+test('手动喷灌默认给含水率加 8', () => {
+  const jobs = normalizeManualJobs([{ id: 'irrigate', name: '喷灌', machines: ['truss', 'omni'], effect: 'moisture', delta: 8 }]);
+  assert.equal(jobs[0].id, 'irrigate');
+  assert.equal(moistureDelta('irrigate'), 8);
+});
+
 test('一行只能买一台桁架', () => {
   clearTruss();
   const fields = [{ i: 0, j: 0, x0: 0, z0: 0 }, { i: 0, j: 1, x0: 0, z0: 10 }];
@@ -165,6 +199,10 @@ test('车库车位不够不能买，有农机不能拆', () => {
   assert.equal(inHubWedge(spot.x, spot.z, 0), true);
   const garage = placeWork('garage', spot.x, spot.z, 0);
   assert.equal(garage.ok, true, garage.reason);
+  assert.equal(garageBoard().stalls, 0);
+  assert.equal(buyMachine('tractor').reason, 'stall');
+  tickWorks(garage.piece.need);
+  assert.equal(garage.piece.progress, 1);
   assert.equal(garageBoard().stalls, 3);
   const ids = [];
   for (let i = 0; i < 3; i++) {

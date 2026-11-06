@@ -5,7 +5,7 @@ import {
   GROW_DAYS, GROW_SECONDS, HUB_PLOT, plotAddress, lookG, fieldShader, hitchStub, workSweepLook,
   stageDisplayStops, stageTint, stageShadeG, growthAge, BRUSH_FADE_DAYS,
   maturityPercent, harvestAllowed, qualityNow, harvestWindow,
-  createFarm, addField, addMachine, mountHitch, chooseMachine, requestPrep, requestPlant, setNextCrop, stepFarm, fieldWork, describeField,
+  createFarm, addField, addMachine, mountHitch, chooseMachine, requestPrep, requestPlant, requestManual, setNextCrop, stepFarm, fieldWork, describeField,
   FIELD_BLOCKS, groundRow, standDensity, paintGroundOf, installFieldBlocks,
   recallMachine, releaseStandby, standbyClock, writePose, STANDBY_SECONDS, removePlayerMachine,
   installPlayerMachine,
@@ -618,7 +618,7 @@ test('种着的地可以整地清掉', () => {
   assert.equal(field.ground, 'general');
   assert.equal(field.look, 'general');
   const view = describeField(farm, 'a');
-  assert.deepEqual(view.actions.map(act => act.id), ['prep', 'plant']);
+  assert.deepEqual(view.actions.map(act => act.id), ['prep', 'plant', 'irrigate']);
   assert.equal(view.actions.every(act => act.enabled), true);
   assert.equal(view.canPlant, true);
 });
@@ -949,8 +949,39 @@ test('电尽后空闲万能机补满，第六单和收拾都会继续派', () =>
   assert.ok(tired.energyLeft < tired.energyKwh);
 });
 
+test('没种的地也能喷灌，做完含水率上升', () => {
+  const farm = createFarm();
+  addMachine(farm, fastOmni());
+  addField(farm, { id: 'a', length: 40, width: 16, ground: 'raw', look: 'raw', plot: 'P(0,0)' });
+  assert.equal(requestManual(farm, 'a', 'irrigate').ok, true);
+  for (let i = 0; i < 80; i++) stepFarm(farm, 2);
+  const field = farm.fields.get('a');
+  assert.ok(field.moisture > 36, String(field.moisture));
+  const desc = describeField(farm, 'a');
+  assert.equal(desc.actions.some(act => act.id === 'irrigate'), true);
+});
+
+test('窗内追肥能派时，先于手动喷灌', () => {
+  const farm = createFarm();
+  addMachine(farm, fastOmni());
+  addField(farm, { id: 'a', length: 40, width: 16, ground: 'general', look: 'sown', plot: 'P(0,0)' });
+  const field = farm.fields.get('a');
+  field.plant = {
+    cropId: 'lastika', stageId: 'develop', grow: 3.2, need: 6, clock: true, yieldMul: 1,
+    soft: {
+      spray: { status: '过期', from: 4, to: 6, progress: 0 },
+      topdress: { status: '未执行', from: 5, to: 6, progress: 0, yieldMul: 2, qualityAdd: 0 },
+    },
+  };
+  field.manual = ['irrigate'];
+  stepFarm(farm, 0.2);
+  const jobId = farm.orders[0]?.jobId || farm.queue[0]?.jobId;
+  assert.equal(jobId, 'topdress');
+  assert.ok(field.manual.includes('irrigate'));
+});
+
 test('拉斯提卡阶段和版本戳来自同一份定义', () => {
-  assert.equal(HUD_VERSION, '环穗 v6.35.6');
+  assert.equal(HUD_VERSION, '环穗 v6.36');
   const doc = parseFieldStageDoc(structuredClone(lastikaRaw));
   const windows = jobWindows(doc, alignFieldCalendar(doc)).filter(item => item.op.kind === 'optional');
   assert.deepEqual(windows.map(item => item.op.id), ['topdress', 'spray', 'hill']);

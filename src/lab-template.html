@@ -54,7 +54,12 @@ main.field-on #field-panel{display:grid;grid-template-rows:auto minmax(180px,32%
 #fs-purple{border-top:4px solid #8a4db3}
 .fs-zone{font-size:10px;letter-spacing:.16em;color:var(--mut);margin-bottom:4px}
 #brief-form{display:flex;flex-direction:column;gap:10px;min-height:0}
-#brief-form[hidden],#field-panel[hidden],#fieldbar[hidden],#machine-panel[hidden],#soil-panel[hidden]{display:none !important}
+#brief-form[hidden],#field-panel[hidden],#fieldbar[hidden],#machine-panel[hidden],#soil-panel[hidden],#manual-panel[hidden]{display:none !important}
+#manual-panel{display:flex;flex-direction:column;gap:8px;overflow:auto}
+#manual-panel fieldset{border:1px solid var(--line);padding:8px;display:grid;gap:6px}
+#manual-panel label{display:grid;gap:2px;font-size:11px;letter-spacing:.06em}
+#manual-panel input,#manual-panel select{font:inherit;color:var(--fg);background:transparent;border:1px solid var(--line);padding:4px 6px}
+#manual-panel button{font:inherit;color:var(--fg);background:transparent;border:1px solid var(--line);padding:4px 8px;cursor:pointer}
 main.block-on{grid-template-columns:200px 1fr 340px}
 main.block-on #view{display:flex;flex-direction:column;gap:12px;padding:12px;box-sizing:border-box;min-height:0}
 main.block-on #hint,main.block-on #states{display:none !important}
@@ -197,6 +202,7 @@ main.block-on #soil-panel{overscroll-behavior:contain}
     <div id="field-panel" class="fs" hidden></div>
     <div id="soil-panel" class="fs" hidden></div>
     <div id="machine-panel" class="fs" hidden></div>
+    <div id="manual-panel" class="fs" hidden></div>
   </aside>
 </main>
 <script>__BUNDLE__</script>

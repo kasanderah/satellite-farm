@@ -1,13 +1,15 @@
 // 把框架 B 接到环面上的一块田。旧的垄扫不读这里的工单。
 import {
   OMNI, TRACTOR, PLOW, JOBS, TURN_SECONDS, createFarm, addField, addMachine, mountHitch,
-  requestPrep, requestPlant, setNextCrop, stepFarm, describeField, plotAddress, growthAge, workSweepLook, paintGroundOf, PLANT_CROPS, FIELD_BLOCKS,
+  requestPrep, requestPlant, requestManual, setNextCrop, stepFarm, describeField, plotAddress, growthAge, workSweepLook, paintGroundOf, PLANT_CROPS, FIELD_BLOCKS,
   cycleDays, installPlayerMachine, removePlayerMachine, recallMachine, releaseStandby, standbyClock,
   settleSoft,
 } from './framework-b.js';
 import { roadRoute, L, stores, economy } from './_shared.js';
 import { NAV_RETRY_S } from './build/nav.js';
 import { slotKey, claimJob, tickTrusses, syncSlots, trussSlots, tipOnce, listRigs, decideTrussClaim, SPRAY_NEED, FERT_NEED, TRUSS_POWER, TRUSS_SPEED } from './truss.js';
+import { moistureDelta } from './manual-jobs.js';
+import { freshSoil } from './soil.js';
 
 let farm = null;
 let ctx = null;
@@ -398,8 +400,19 @@ function stockFor(jobId) {
   return { ok: true, take() { stores.fertilizer -= FERT_NEED; } };
 }
 
+function grantIrrigate(fieldId) {
+  const delta = moistureDelta('irrigate');
+  const sim = farm.fields.get(fieldId);
+  if (sim) sim.moisture = Math.max(0, Math.min(100, (Number(sim.moisture) || 36) + delta));
+  const mesh = meshOf(fieldId);
+  if (!mesh) return;
+  if (!mesh.soil) mesh.soil = freshSoil();
+  mesh.soil.moisture = sim?.moisture ?? mesh.soil.moisture;
+}
+
 function claimSoft(_farm, field, job) {
-  if (job.id !== 'spray' && job.id !== 'topdress') return false;
+  if (job.id !== 'spray' && job.id !== 'topdress' && job.id !== 'irrigate') return false;
+  const manual = job.id === 'irrigate';
   const book = field.plant?.soft?.[job.id];
   const note = (text) => { if (book) book.note = text || ''; };
   const mesh = meshOf(field.id);
@@ -413,7 +426,7 @@ function claimSoft(_farm, field, job) {
   syncSlots(slots);
   const slot = slots.find(item => item.key === key);
   const rig = listRigs().find(item => item.key === key);
-  const stock = stockFor(job.id);
+  const stock = manual ? { ok: true, tip: '', take() {} } : stockFor(job.id);
   const decision = decideTrussClaim({
     bought: !!slot?.bought,
     stockOk: !slot?.bought || stock.ok,
@@ -423,6 +436,7 @@ function claimSoft(_farm, field, job) {
     jobId: job.id,
   });
   if (!decision.ok) {
+    if (manual) return false;
     if (decision.tip) tipOnce(`${key}:${decision.reason}:${job.id}`, decision.tip);
     note(decision.reason === 'none' && job.id === 'topdress' ? '' : decision.tip);
     return false;
@@ -430,14 +444,16 @@ function claimSoft(_farm, field, job) {
   const head = ctx.fields.find(item => item.i === Math.floor(mesh.i / L.PER) * L.PER && item.j === mesh.j);
   const goalU = head ? (mesh.x0 - head.x0) : 0;
   if (!claimJob(key, { fieldId: field.id, jobId: job.id, goalU, len: ctx.length })) {
-    note('这行桁架还在干活');
-    tipOnce(`${key}:busy:${job.id}`, '这行桁架还在干活');
+    if (!manual) {
+      note('这行桁架还在干活');
+      tipOnce(`${key}:busy:${job.id}`, '这行桁架还在干活');
+    }
     return false;
   }
-  stock.take();
+  if (!manual) stock.take();
   economy.revenue -= TRUSS_POWER;
   note('');
-  settleSoft(_farm, field.id, job.id, 0);
+  if (!manual) settleSoft(_farm, field.id, job.id, 0);
   return true;
 }
 
@@ -589,9 +605,21 @@ export function tickSlice(dt) {
   }
   const finished = tickTrusses(dt);
   for (const rig of listRigs()) {
-    if (rig.phase === 'sweep' && rig.job) settleSoft(farm, rig.job.fieldId, rig.job.jobId, rig.progress || 0);
+    if (rig.phase === 'sweep' && rig.job && rig.job.jobId !== 'irrigate') settleSoft(farm, rig.job.fieldId, rig.job.jobId, rig.progress || 0);
   }
-  for (const item of finished) settleSoft(farm, item.fieldId, item.jobId, 1);
+  for (const item of finished) {
+    if (item.jobId === 'irrigate') grantIrrigate(item.fieldId);
+    else settleSoft(farm, item.fieldId, item.jobId, 1);
+  }
+  for (const ev of farm.events) {
+    if (ev.type !== 'job-complete' || ev.jobId !== 'irrigate' || ev._copied) continue;
+    ev._copied = true;
+    const mesh = meshOf(ev.fieldId);
+    const sim = farm.fields.get(ev.fieldId);
+    if (!mesh || sim?.moisture == null) continue;
+    if (!mesh.soil) mesh.soil = freshSoil();
+    mesh.soil.moisture = sim.moisture;
+  }
   for (const field of farm.fields.values()) {
     const book = field.plant?.soft;
     if (!book) continue;
@@ -613,6 +641,11 @@ export function plantCrop(f, cropId = 'lastika') {
   return requestPlant(farm, fieldKey(f), cropId);
 }
 
+export function requestIrrigate(f) {
+  if (!farm || !f) return { ok: false, reason: 'field' };
+  return requestManual(farm, fieldKey(f), 'irrigate');
+}
+
 export function planNext(f, cropId) {
   if (!farm || !f) return { ok: false, reason: 'field' };
   return setNextCrop(farm, fieldKey(f), cropId);
@@ -623,6 +656,24 @@ export function dockOf(f) {
   const desc = describeField(farm, fieldKey(f));
   if (!desc?.jobs) return desc;
   desc.jobs = desc.jobs.map(job => ({ ...job, eta: etaForFieldJob(f, job) }));
+  const id = fieldKey(f);
+  const sim = farm.fields.get(id);
+  const pending = (sim?.manual || []).includes('irrigate');
+  const order = farm.orders.find(item => item.fieldId === id && item.jobId === 'irrigate');
+  const truss = listRigs().find(rig => rig.job && rig.job.fieldId === id && rig.job.jobId === 'irrigate');
+  if (pending || order || truss) {
+    const running = order || truss;
+    desc.jobs.push({
+      id: 'irrigate',
+      name: '喷灌',
+      kind: 'soft',
+      manual: true,
+      status: running ? (order?.phase === 'cruise' ? '开来' : '执行中') : '排队',
+      pct: Math.round(((order?.progress ?? truss?.progress) || 0) * 100),
+      note: '',
+      eta: order ? formatWallEta(orderSimSeconds(order)) : (truss ? formatWallEta(trussSimSeconds(truss)) : '待派'),
+    });
+  }
   return desc;
 }
 

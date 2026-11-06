@@ -260,7 +260,7 @@ export const SHOP = shopRows();
 const START_FERTILIZER = FERT_PER_FIELD;
 const START_SPRAY = 6;
 const START_FEED = 2;
-export const stores = { seed: SEED_PER_FIELD, fertilizer: START_FERTILIZER, spray: START_SPRAY, feed: START_FEED, peel: 0, frass: 0, seed_soy: 0, seed_barley: 0, seedling_cabbage: 0 };
+export const stores = { seed: SEED_PER_FIELD, fertilizer: START_FERTILIZER, spray: START_SPRAY, feed: START_FEED, peel: 0, frass: 0, seed_soy: 0, seed_barley: 0, seedling_cabbage: 0, plate: 80 };
 // 培育层两种蛋白。天数取自发表的幼虫历期，牌价读产品表。
 // 蛴螬：白星花金龟 Protaetia brevitarsis 幼虫，30°C 发酵基质上幼虫期 64.8 日，这里记 65 日。
 // 黑水虻：Hermetia illucens，30°C 配方饲料上幼虫期 12.8 日，这里记 13 日。
@@ -1981,7 +1981,7 @@ export function rigReadout(r) {
   const garageAt = hubPad(3, 2);
   garageOrigin = { x: garageAt.x, z: garageAt.z };
   const stalls = [
-    { id: 0, kind: 'omni', machineId: 'omni', label: '万能农机', role: '自走一体', caps: ['犁田', '播种', '收割', '收拾', '追肥', '培土'], width: CELL, buyPrice: 24000, z: garageAt.z + 14 },
+    { id: 0, kind: 'omni', machineId: 'omni', label: '万能农机', role: '自走一体', caps: ['犁田', '播种', '收割', '收拾', '追肥', '培土', '喷灌'], width: CELL, buyPrice: 24000, z: garageAt.z + 14 },
     { id: 1, kind: 'tractor', machineId: 'tractor', label: '拖拉机', role: '拖拉机+犁', caps: ['犁田'], width: 12, impl: 'impl_subsoiler', buyPrice: 12000, z: garageAt.z + 32 },
     { id: 2, kind: 'plow', machineId: 'plow', label: '犁', role: '挂在拖拉机上', caps: ['犁田'], width: 12, buyPrice: 8000, z: garageAt.z + 50 },
   ];
@@ -2407,6 +2407,7 @@ export function resetGame() {
   stores.seed_soy = 0;
   stores.seed_barley = 0;
   stores.seedling_cabbage = 0;
+  stores.plate = 80;
   boom = null;
   workDrones.length = 0;
   nextDroneId = 1;
@@ -2502,13 +2503,13 @@ export function sellRig(id) {
   return { ok: true, pay, name, id };
 }
 
-export function buyMachine(kind) {
+export function buyMachine(kind, garageId = null) {
   const item = MACHINE_SHOP.find(m => m.id === kind);
   if (!item) return { ok: false, reason: 'kind' };
   const board = garageBoard();
   if (board.free < 1) return { ok: false, reason: 'stall', ...board, cost: item.price };
   if (!(economy.revenue >= item.price)) return { ok: false, reason: 'money', cost: item.price, ...board };
-  const r = addRig(kind);
+  const r = addRig(kind, { garageId });
   if (!r) return { ok: false, reason: 'stall', ...garageBoard(), cost: item.price };
   economy.revenue -= item.price;
   log.push({ type: 'buy', pay: item.price, name: item.name, n: 1, t: worldDay });
@@ -2662,7 +2663,7 @@ export function exportSnapshot() {
     works: exportWorks(),
     trusses: exportTruss(),
     timeScale: economy.timeScale,
-    stores: { seed: stores.seed, fertilizer: stores.fertilizer, spray: stores.spray, feed: stores.feed, peel: stores.peel, frass: stores.frass, seed_soy: stores.seed_soy || 0, seed_barley: stores.seed_barley || 0, seedling_cabbage: stores.seedling_cabbage || 0 },
+    stores: { seed: stores.seed, fertilizer: stores.fertilizer, spray: stores.spray, feed: stores.feed, peel: stores.peel, frass: stores.frass, seed_soy: stores.seed_soy || 0, seed_barley: stores.seed_barley || 0, seedling_cabbage: stores.seedling_cabbage || 0, plate: stores.plate || 0 },
     warehouse: warehouse.map(lot => ({ ...lot })),
     keepBuildings: true,
     buildings: buildings.map(b => ({ id: b.id, kind: b.kind, name: b.name, x: +b.x.toFixed(2), z: +b.z.toFixed(2), ang: b.ang || 0 })),
@@ -2809,6 +2810,7 @@ export function applySnapshot(data) {
     stores.seed_soy = Number.isFinite(+data.stores.seed_soy) ? +data.stores.seed_soy : 0;
     stores.seed_barley = Number.isFinite(+data.stores.seed_barley) ? +data.stores.seed_barley : 0;
     stores.seedling_cabbage = Number.isFinite(+data.stores.seedling_cabbage) ? +data.stores.seedling_cabbage : 0;
+    stores.plate = Number.isFinite(+data.stores.plate) ? +data.stores.plate : 80;
   }
   boom = null;
   if (data.timeScale) setTimeScale(data.timeScale);

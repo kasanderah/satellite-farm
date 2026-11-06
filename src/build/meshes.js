@@ -234,7 +234,7 @@ export function ghostMaterial(group) {
     if (!obj.isMesh) return;
     obj.material = obj.material.clone();
     obj.material.transparent = true;
-    obj.material.opacity = 0.72;
+    obj.material.opacity = 0.9;
     obj.material.depthWrite = false;
     obj.castShadow = false;
     obj.receiveShadow = false;
@@ -250,7 +250,7 @@ export function applyGhostTint(group, ok) {
     for (const mat of mats) {
       if (!mat.color) continue;
       if (!mat.userData.ghostBase) mat.userData.ghostBase = mat.color.clone();
-      mat.color.copy(mat.userData.ghostBase).lerp(tint, 0.72);
+      mat.color.copy(mat.userData.ghostBase).lerp(tint, 0.42);
       if (mat.emissive) {
         mat.emissive.copy(tint);
         mat.emissiveIntensity = ok ? 0.22 : 0.38;

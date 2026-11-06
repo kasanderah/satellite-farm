@@ -12,6 +12,7 @@ import {
 import { createFieldWorkshop } from './lab-field.js';
 import { createBlockWorkshop } from './lab-block.js';
 import { createMachineWorkshop } from './lab-machine-editor.js';
+import { createManualWorkshop } from './lab-manual.js';
 
 const $ = id => document.getElementById(id);
 const STORE = 'ringsheaf.assetlab.briefs';
@@ -29,6 +30,9 @@ const blockShop = createBlockWorkshop({
 });
 const machineShop = createMachineWorkshop({
   panel: $('machine-panel'),
+});
+const manualShop = createManualWorkshop({
+  panel: $('manual-panel'),
 });
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance', preserveDrawingBuffer: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
@@ -491,6 +495,7 @@ const BUILD = {
   'field-stage': () => fieldShop.build(),
   'field-block': () => buildUnit('field', 128),
   'machine-editor': () => machineShop.build(),
+  'manual-jobs': () => ({ group: new THREE.Group() }),
 };
 for (const entry of LAB_ENTRIES) {
   if (entry.road) BUILD[entry.id] = buildRoad;
@@ -580,10 +585,10 @@ function frameSpan(entry) {
 }
 
 function applyEditorChrome(kind) {
-  const on = kind === 'field' || kind === 'machine' || kind === 'block';
+  const on = kind === 'field' || kind === 'machine' || kind === 'block' || kind === 'manual';
   const main = document.querySelector('main');
   if (main) {
-    main.classList.toggle('field-on', kind === 'field' || kind === 'machine');
+    main.classList.toggle('field-on', kind === 'field' || kind === 'machine' || kind === 'manual');
     main.classList.toggle('block-on', kind === 'block');
     main.classList.remove('soil-on');
   }
@@ -602,10 +607,11 @@ function show(id) {
   const entry = LAB_ENTRIES.find(e => e.id === id) || LAB_ENTRIES[0];
   curId = entry.id;
   disposeStage();
-  const editor = entry.id === 'field-stage' ? 'field' : entry.id === 'field-block' ? 'block' : entry.id === 'machine-editor' ? 'machine' : '';
+  const editor = entry.id === 'field-stage' ? 'field' : entry.id === 'field-block' ? 'block' : entry.id === 'machine-editor' ? 'machine' : entry.id === 'manual-jobs' ? 'manual' : '';
   fieldShop.setActive(editor === 'field');
   blockShop.setActive(editor === 'block');
   machineShop.setActive(editor === 'machine');
+  manualShop.setActive(editor === 'manual');
   applyEditorChrome(editor);
   const built = BUILD[entry.id]();
   stage.add(built.group);

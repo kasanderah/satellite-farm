@@ -3,6 +3,7 @@ export const LAB_CLASSES = [
   { id: 'unit', label: '地块' },
   { id: 'field', label: '田间' },
   { id: 'machine', label: '农机' },
+  { id: 'manual', label: '手动作业' },
   { id: 'equip', label: '设备' },
   { id: 'rail', label: '轨道设备' },
   { id: 'ref', label: '参考·外部' },
@@ -230,6 +231,18 @@ export const LAB_ENTRIES = [
     size: `${m1(CULT_EMPTY.plot)} × ${m1(CULT_EMPTY.plot)} m · 四层`,
     span: 640,
     notes: HUB_PLOT_NOTES,
+  },
+  {
+    id: 'manual-jobs',
+    cls: 'manual',
+    name: '手动作业编辑器',
+    size: '喷灌 · 含水率',
+    span: 24,
+    notes: `手动作业编辑器。和阶段链上的软作业分开，玩家点了才进队。
+
+每条有 id、名称、适用机具（桁架 / 万能农机）、效果类型、效果量、耗料和说明。当前效果先做含水率增减。
+
+保存钥匙 ringsheaf.assetlab.manualJobs.v1。可玩页的「喷灌」读 id 为 irrigate 的那一条。窗内能派走的撒药、追肥优先；派不走才轮到手动喷灌。同一块田同时只出一单。`,
   },
   {
     id: 'machine-editor',

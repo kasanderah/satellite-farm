@@ -2,9 +2,16 @@
 import { CELL } from '../modulus.js';
 import { workSpec } from './catalog.js';
 
+function garageOpen(piece) {
+  return !!piece && (piece.progress == null || piece.progress >= 1 - 1e-6);
+}
+
 export function stallTotal(works) {
   let stalls = 0;
-  for (const piece of works) stalls += workSpec(piece.kind)?.stalls || 0;
+  for (const piece of works) {
+    if (!garageOpen(piece)) continue;
+    stalls += workSpec(piece.kind)?.stalls || 0;
+  }
   return stalls;
 }
 
@@ -26,12 +33,16 @@ export function stallPose(garage, index) {
 }
 
 export function claimStall(works, rigs, preferId, preferStall) {
-  const garages = works.filter(piece => (workSpec(piece.kind)?.stalls || 0) > 0);
+  const garages = works.filter(piece => garageOpen(piece) && (workSpec(piece.kind)?.stalls || 0) > 0);
   const used = (id, stall) => rigs.some(rig => rig.garageId === id && rig.stall === stall);
   const take = (garage, stall) => ({ garageId: garage.id, stall, ...stallPose(garage, stall) });
-  if (preferId != null && Number.isInteger(preferStall)) {
+  if (preferId != null) {
     const garage = garages.find(piece => piece.id === preferId);
-    if (garage && preferStall < (workSpec(garage.kind).stalls || 0) && !used(garage.id, preferStall)) return take(garage, preferStall);
+    if (!garage) return null;
+    const stalls = workSpec(garage.kind).stalls || 0;
+    if (Number.isInteger(preferStall) && preferStall < stalls && !used(garage.id, preferStall)) return take(garage, preferStall);
+    for (let stall = 0; stall < stalls; stall++) if (!used(garage.id, stall)) return take(garage, stall);
+    return null;
   }
   for (const garage of garages) {
     const stalls = workSpec(garage.kind).stalls || 0;

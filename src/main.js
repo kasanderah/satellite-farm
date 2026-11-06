@@ -24,7 +24,7 @@ import { surfaceKits, hitchOffset } from './surface-kits.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CULT_EMPTY } from './lab-catalog.js';
 import { makeColony } from './colony-art.js';
-import { bootSlice, tickSlice, prepField, plantCrop, dockOf, dropDrive, adoptBought, recallRig, resumeRig, rigStandby, dispatchBoard, syncOwnedFields, trussWallEta } from './b-bind.js';
+import { bootSlice, tickSlice, prepField, plantCrop, requestIrrigate, dockOf, dropDrive, adoptBought, recallRig, resumeRig, rigStandby, dispatchBoard, syncOwnedFields, trussWallEta } from './b-bind.js';
 import { PLANT_CROPS, PREP_RECIPES, FIELD_BLOCKS, JOBS, stageDisplayStops } from './framework-b.js';
 import { HUD_VERSION } from './version.js';
 import {
@@ -32,8 +32,9 @@ import {
   inHubWedge,
 } from './modulus.js';
 import { overlayCells } from './land-buy.js';
-import { BUILDINGS, ROADS as BUILD_ROADS } from './build/catalog.js';
-import { placeWork, eraseWork, listWorks, previewWork, roadMask, pieceUnder } from './build/works.js';
+import { BUILDINGS, ROADS as BUILD_ROADS, workSpec } from './build/catalog.js';
+import { placeWork, eraseWork, listWorks, previewWork, roadMask, pieceUnder, tickWorks, liftWork, dropLifted, restoreLifted, liftedWork, workReady } from './build/works.js';
+import { bootManualJobs } from './manual-jobs.js';
 import { createWorkMesh, ghostMaterial, applyGhostTint, createRoadMesh } from './build/meshes.js';
 import { footprint, worldCell, cellOrigin } from './build/placement.js';
 import { trussSlots, buyTruss, TRUSS_PRICE, listRigs, drainTips, syncSlots, slotKey, exportTruss } from './truss.js';
@@ -640,14 +641,7 @@ vec3 farmAlbedo(vec2 p){
     // 十字主通道：深色路面 + 虚线
     if (axis < 7.) { col = mix(g_metalDk, g_regoDk, 0.6) * (0.95 + 0.05 * n2); float dsh = step(0.5, fract((abs(hp.x) > abs(hp.y) ? hp.x : hp.y) / 12.)); col = mix(col, g_paper * 0.8, aaLine(axis, 0.18) * dsh); gRough = 0.75; }
     // 外圈：光伏 / 散热板阵列（成排深色面板，低粗糙度 → 低角度阳光下有掠射高光）
-    else if (cheb > 196. && cheb < 256.) {
-      vec2 q2 = hp; float along = abs(hp.x) > abs(hp.y) ? q2.y : q2.x; float acr = cheb - 196.;
-      float row = fract(acr / 6.); float seg = fract((along + 300.) / 44.);
-      float panel = step(0.12, row) * step(row, 0.7) * step(0.04, seg) * step(seg, 0.96);
-      if (panel > 0.5) { col = mix(g_deep, g_metalDk, 0.55) * (0.9 + 0.12 * hash12(floor(vec2(along / 2.2, acr / 6.)))); gRough = 0.22; gTilt = (abs(hp.x) > abs(hp.y) ? vec2(sign(hp.x), 0.) : vec2(0., sign(hp.y))) * 0.35; col *= 1. - 0.25 * aaLine(fract(along / 2.2) - 0.5, 0.02); }
-      else col *= 0.86;
-    }
-    col *= 1. - 0.2 * aaLine(cheb - 196., 0.4) - 0.2 * aaLine(cheb - 258., 0.6);
+    col *= 1. - 0.08 * aaLine(cheb - 196., 0.6);
   } else {                                           // 田块
     vec4 d = texelFetch(uField, fij, 0);
     if (d.r < -2.5) {                                // 蓄水池：深色水面，低粗糙度 → 反射天空与太阳高光
@@ -1540,7 +1534,7 @@ function collectGridCells(taken) {
   return cells;
 }
 const gridMat = curved(new THREE.MeshBasicMaterial({
-  color: 0xe7e1d6, transparent: true, opacity: 0.32, depthWrite: false, side: THREE.DoubleSide,
+  color: 0xe7e1d6, transparent: true, opacity: 0.14, depthWrite: false, side: THREE.DoubleSide,
   polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -3,
 }));
 const gridMesh = new THREE.Mesh(new THREE.BufferGeometry(), gridMat);
@@ -1554,11 +1548,28 @@ function refreshBuildGrid() {
   const y = 0.045;
   const inset = 0.16;
   const pos = [];
+  const hatch = (x0, z0, x1, z1) => {
+    const dx = x1 - x0, dz = z1 - z0;
+    const len = Math.hypot(dx, dz) || 1;
+    const nx = -dz / len * 0.028, nz = dx / len * 0.028;
+    pos.push(
+      x0 + nx, y, z0 + nz, x0 - nx, y, z0 - nz, x1 - nx, y, z1 - nz,
+      x0 + nx, y, z0 + nz, x1 - nx, y, z1 - nz, x1 + nx, y, z1 + nz,
+    );
+  };
   for (let i = 0; i < cells.length; i += 2) {
     const o = cellOrigin(cells[i], cells[i + 1]);
     const x0 = o.x + inset, x1 = o.x + CELL - inset;
     const z0 = o.z + inset, z1 = o.z + CELL - inset;
-    pos.push(x0, y, z0, x0, y, z1, x1, y, z1, x0, y, z0, x1, y, z1, x1, y, z0);
+    const span = (x1 - x0) + (z1 - z0);
+    for (let t = 0.7; t < span; t += 0.7) {
+      let ax = x0, az = z0 + t, bx = x0 + t, bz = z0;
+      if (az > z1) { ax += az - z1; az = z1; }
+      if (bx > x1) { bz += bx - x1; bx = x1; }
+      if (ax >= x1 || bz >= z1) continue;
+      if (Math.hypot(bx - ax, bz - az) < 0.25) continue;
+      hatch(ax, az, bx, bz);
+    }
   }
   gridMesh.geometry.dispose();
   const geo = new THREE.BufferGeometry();
@@ -1587,7 +1598,7 @@ ghostRoot.name = 'build-ghost';
 ghostRoot.visible = false;
 scene.add(ghostRoot);
 const footMat = curved(new THREE.MeshBasicMaterial({
-  vertexColors: true, transparent: true, opacity: 0.62, depthWrite: false, side: THREE.DoubleSide,
+  vertexColors: true, transparent: true, opacity: 0.42, depthWrite: false, side: THREE.DoubleSide,
   polygonOffset: true, polygonOffsetFactor: -8, polygonOffsetUnits: -8,
 }));
 const footMesh = new THREE.Mesh(new THREE.BufferGeometry(), footMat);
@@ -1650,6 +1661,22 @@ function paintFootprint(preview) {
   mark(maxX, minZ, 1, -1);
   mark(minX, maxZ, -1, 1);
   mark(maxX, maxZ, 1, 1);
+  const ROAD_ARROW = { green: new THREE.Color(0xb6e37a), yellow: new THREE.Color(0xffd36a), red: new THREE.Color(0xff6a4a) };
+  const ROAD_INK = new THREE.Color(0x1c1a17);
+  for (const road of preview.roads || []) {
+    const at = cellOrigin(road.gx, road.gz);
+    const cx = at.x + CELL * 0.5, cz = at.z + CELL * 0.5;
+    const len = 1.35;
+    const dx = road.dx, dz = road.dz;
+    const paintArrow = (half, y, color) => {
+      const ox = -dz * half, oz = dx * half;
+      const tipx = cx + dx * len * 0.62, tipz = cz + dz * len * 0.62;
+      const bx = cx - dx * len * 0.42, bz = cz - dz * len * 0.42;
+      pushColored(pos, col, [tipx, y, tipz, bx + ox, y, bz + oz, bx - ox, y, bz - oz], color);
+    };
+    paintArrow(0.62, ye + 0.03, ROAD_INK);
+    paintArrow(0.4, ye + 0.06, ROAD_ARROW[road.state] || ROAD_ARROW.yellow);
+  }
   footMesh.geometry.dispose();
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
@@ -1701,7 +1728,7 @@ function syncTruss() {
   const padMat = new THREE.MeshStandardMaterial({ color: 0x3a3834, roughness: 0.8, metalness: 0.2 });
   for (const slot of slots) {
     if (slot.bought) continue;
-    const pad = new THREE.Mesh(new THREE.BoxGeometry(7, 0.12, 2.2), padMat);
+    const pad = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.12, 22), padMat);
     pad.position.set(slot.x, 0.08, slot.z);
     pad.name = 'pad-' + slot.key;
     pad.userData.ownGeo = true;
@@ -1733,7 +1760,17 @@ function mountWork(piece) {
   mesh.position.set(piece.x, 0, piece.z);
   mesh.rotation.y = piece.rot * Math.PI / 2;
   mesh.userData.workId = piece.id;
+  const grown = piece.progress == null ? 1 : piece.progress;
+  mesh.scale.y = grown >= 1 ? 1 : 0.12 + 0.88 * grown;
   workRoot.add(mesh);
+}
+function poseWorks() {
+  for (const mesh of workRoot.children) {
+    const piece = listWorks().find(item => item.id === mesh.userData.workId);
+    if (!piece) continue;
+    const grown = piece.progress == null ? 1 : piece.progress;
+    mesh.scale.y = grown >= 1 ? 1 : 0.12 + 0.88 * grown;
+  }
 }
 function hideGhost() {
   ghostRoot.visible = false;
@@ -1772,19 +1809,76 @@ function updateGhost(cx, cy) {
   applyGhostTint(ghostRoot, !!preview.ok);
   paintFootprint(preview);
 }
+const buildThumbs = new Map();
+function buildingThumb(item) {
+  if (!item || item.id === 'erase') return '';
+  if (buildThumbs.has(item.id)) return buildThumbs.get(item.id);
+  const canvas = document.createElement('canvas');
+  canvas.width = 72;
+  canvas.height = 52;
+  const g = canvas.getContext('2d');
+  g.clearRect(0, 0, 72, 52);
+  const bw = Math.max(16, Math.min(60, 10 + item.w * 6));
+  const bh = Math.max(12, Math.min(36, 8 + item.h * 5));
+  const x = (72 - bw) / 2;
+  const y = 44 - bh;
+  g.fillStyle = '#6f6a61';
+  g.fillRect(x, y, bw, bh);
+  g.fillStyle = '#3a3834';
+  g.fillRect(x, y + bh - 3, bw, 3);
+  if (item.id === 'tank') {
+    g.beginPath();
+    g.fillStyle = '#8d9896';
+    g.arc(36, 24, 12, 0, Math.PI * 2);
+    g.fill();
+  } else if (item.role === 'garage' || item.id === 'hangar') {
+    g.fillStyle = '#2a2927';
+    const doors = item.stalls || 3;
+    for (let i = 0; i < doors; i++) g.fillRect(x + 3 + i * (bw / doors), y + bh * 0.35, bw / doors - 3, bh * 0.45);
+  } else if (item.kind === 'road') {
+    g.strokeStyle = '#cfc6b8';
+    g.lineWidth = 3;
+    g.beginPath();
+    g.moveTo(10, 26);
+    g.lineTo(62, 26);
+    g.stroke();
+  } else {
+    g.fillStyle = '#b7c0c2';
+    g.fillRect(x + bw * 0.2, y + 4, bw * 0.45, 3);
+  }
+  const url = canvas.toDataURL('image/png');
+  buildThumbs.set(item.id, url);
+  return url;
+}
+function buildTip(item) {
+  if (!item || item.id === 'erase') return '拆掉点中的建筑。车库里还有车时拆不掉。';
+  const mats = (item.materials || []).filter(row => row.n > 0).map(row => `${row.name} ${row.n}`).join('、') || '不耗材料';
+  const door = (item.roadFaces || []).length ? '门口那面要服务路' : '不要求贴路';
+  return `${item.blurb || item.name} 占地 ${item.w}×${item.h} 格。施工 ${item.buildDays || 0} 日。造价 ${item.cost || 0}。${mats}。${door}`;
+}
 function paintBuildBar() {
   const el = $('buildbar');
   if (!el) return;
-  const icon = (item) => `<button type="button" data-build="${item.id}" class="${buildTool === item.id ? 'on' : ''}"><i style="width:${10 + item.w * 6}px;height:${8 + item.h * 6}px"></i><b>${item.name}</b></button>`;
+  const icon = (item) => {
+    const thumb = buildingThumb(item);
+    const box = thumb
+      ? `<i style="width:36px;height:26px;border:0;background:url(${thumb}) center/contain no-repeat"></i>`
+      : `<i style="width:${10 + (item.w || 1) * 6}px;height:${8 + (item.h || 1) * 6}px"></i>`;
+    return `<button type="button" data-build="${item.id}" class="${buildTool === item.id ? 'on' : ''}"${tipAttr(buildTip(item))}>${box}<b>${item.name}</b></button>`;
+  };
   const board = garageBoard();
   el.innerHTML = `<div class="grp"><span>建筑</span>${BUILDINGS.map(icon).join('')}</div><div class="grp"><span>道路</span>${BUILD_ROADS.map(icon).join('')}</div><div class="grp">${icon({ id: 'erase', name: '拆除', w: 1, h: 1 })}</div><div class="grp"><span>车位 ${board.used}/${board.stalls}</span></div>`;
   el.classList.toggle('on', mode === 'build');
+  syncTip();
 }
 function syncBuildView() {
   const on = mode === 'build';
   if (on) refreshBuildGrid();
   gridMesh.visible = on;
-  if (!on) { buildTool = null; buildRot = 0; hideGhost(); }
+  if (!on) {
+    if (liftedWork()) { restoreLifted(); rebuildWorks(); }
+    buildTool = null; buildRot = 0; hideGhost();
+  }
   paintBuildBar();
 }
 function armBuild(id) {
@@ -1809,11 +1903,34 @@ function layAt(x, z, quiet) {
     }
     return;
   }
+  if (liftedWork()) {
+    const moved = dropLifted(x, z, buildRot);
+    if (!moved.ok) {
+      if (!quiet) toast(moved.reason === 'zone' ? '要落在建造区里' : moved.reason === 'block' ? '和已有占地重叠' : '不能放');
+      return;
+    }
+    buildTool = null;
+    buildRot = 0;
+    hideGhost();
+    rebuildWorks();
+    if (!quiet) toast(workReady(moved.piece) ? '已挪到新位置' : '施工中的建筑已挪走');
+    paintBuildBar();
+    saveSoon();
+    return;
+  }
+  const spec = workSpec(buildTool);
+  const cost = spec?.cost || 0;
+  const plates = (spec?.materials || []).reduce((sum, row) => sum + (row.id === 'plate' ? row.n : 0), 0);
+  if (economy.revenue < cost) { if (!quiet) toast('营收不够'); return; }
+  if ((stores.plate || 0) < plates) { if (!quiet) toast('板材不够'); return; }
   const placed = placeWork(buildTool, x, z, buildRot);
   if (!placed.ok) {
     if (!quiet) toast(placed.reason === 'zone' ? '要落在建造区里' : placed.reason === 'block' ? '和已有占地重叠' : '不能放');
     return;
   }
+  economy.revenue -= cost;
+  stores.plate = (stores.plate || 0) - plates;
+  if (!quiet) toast(placed.piece.progress >= 1 ? `放下${spec?.name || ''}` : `${spec?.name || '建筑'}开工 · ${spec?.buildDays || 0} 日`);
   if (placed.piece.kind === 'service') {
     for (const piece of listWorks()) {
       if (piece.kind !== 'service') continue;
@@ -1826,7 +1943,7 @@ function layAt(x, z, quiet) {
       mountWork(piece);
     }
   } else mountWork(placed.piece);
-  if (placed.piece.kind === 'garage' && !quiet) toast(`车库 ${garageBoard().stalls} 个车位。停着农机时不能拆。`);
+  if (placed.piece.kind === 'garage' && workReady(placed.piece) && !quiet) toast(`车库 ${garageBoard().stalls} 个车位。停着农机时不能拆。`);
   refreshBuildGrid();
   paintBuildBar();
   saveSoon();
@@ -2424,7 +2541,7 @@ function applyDeckView() {
   document.body.classList.toggle('underground', on);
 }
 // 交互：左键平移 / 右键旋转 / 滚轮缩放 / WASD / QE / N 昼夜 / M 地图模式 / H 隐藏界面
-let drag = null, ptr = null, rightArm = null, selected = null, selectedRig = null, selNote = '', plantOpen = false, prepOpen = false;
+let drag = null, ptr = null, rightArm = null, selected = null, selectedRig = null, selectedWork = null, selNote = '', plantOpen = false, prepOpen = false;
 let camLock = false;
 let lockFocus = null;
 let mode = 'look', subTool = null, watchRig = null, pickedLot = null, pickedStack = null, shopPick = 'seed', rigPick = 'tractor', cropPick = 'potato', deckTank = 0, deckBlock = null, deckHub = false, buildAct = 'place', buildKind = 'warehouse', buildPick = null, millPlace = false;
@@ -2459,7 +2576,16 @@ function ownedFields() {
 function selectionKind() {
   if (pickedRigs.size) return 'rig';
   if (ownedFields().length) return 'field';
+  if (selectedWork) return 'work';
   return null;
+}
+function selectOnlyWork(piece) {
+  pickedFields.clear();
+  pickedRigs.clear();
+  selectedRig = null;
+  selectField(null, '');
+  selectedWork = piece || null;
+  updateDock();
 }
 function rigBody(r) {
   const tractor = r.kind === 'tractor' || !!r.impl;
@@ -2504,6 +2630,7 @@ function clearSelection() {
   pickedFields.clear();
   pickedRigs.clear();
   selectedRig = null;
+  selectedWork = null;
   selectField(null, '');
   closePlanMenu();
   updateDock();
@@ -2570,6 +2697,7 @@ function landWhy(f) {
 function selectOnlyField(f) {
   pickedRigs.clear();
   selectedRig = null;
+  selectedWork = null;
   if (!camLock) watchRig = null;
   pickedFields.clear();
   if (mode === 'scheme') {
@@ -2592,6 +2720,7 @@ function toggleField(f) {
 }
 function selectOnlyRig(r, lock) {
   pickedFields.clear();
+  selectedWork = null;
   selectField(null, '');
   pickedRigs.clear();
   pickedRigs.add(r.id);
@@ -2672,6 +2801,11 @@ function onLeftClick(cx, cy, shift) {
     else selectOnlyRig(rig, false);
     return;
   }
+  const piece = ground ? pieceUnder(ground.x, ground.z) : null;
+  if (piece && piece.kind !== 'service') {
+    selectOnlyWork(piece);
+    return;
+  }
   const f = fieldFromScreen(cx, cy);
   if (!f) { if (!shift) exitToDefault(); return; }
   if (shift && f.owned) { toggleField(f); return; }
@@ -2706,6 +2840,15 @@ function resumeCurrent() {
   updateDock();
 }
 function contextItems() {
+  if (selectionKind() === 'work' && selectedWork) {
+    const parked = rigs.filter(r => r.garageId === selectedWork.id).length;
+    const blocked = parked > 0;
+    return [
+      { id: 'relayout', name: blocked ? '重新摆放（里面有车）' : '重新摆放', enabled: !blocked },
+      { id: 'erase-work', name: blocked ? '拆除（里面有车）' : '拆除', enabled: !blocked },
+      { id: 'clear', name: '取消选择', enabled: true },
+    ];
+  }
   if (selectionKind() === 'rig') {
     const items = rigActions(selectedRig).map(it => (
       it.id === 'sell' && it.enabled ? { ...it, name: `出售 · +${fmt(machineSellPrice(selectedRig))}` } : it
@@ -2790,13 +2933,35 @@ function paintContext() {
   }).join('');
   syncTip();
 }
+function beginRelayout() {
+  const piece = selectedWork && listWorks().some(item => item.id === selectedWork.id) ? selectedWork : null;
+  if (!piece) return;
+  const lifted = liftWork(piece.id);
+  if (!lifted.ok) { toast(lifted.reason === 'occupied' ? '里面还有车，先卖出再挪' : '挪不了'); return; }
+  selectedWork = null;
+  setMode('build');
+  buildTool = piece.kind;
+  buildRot = piece.rot || 0;
+  showGhost(piece.kind);
+  rebuildWorks();
+  paintBuildBar();
+  toast('点新位置。右键或 Esc 放回原地');
+}
 function onRightClick(cx, cy) {
   if (mode === 'build') {
+    if (liftedWork()) { restoreLifted(); rebuildWorks(); }
     if (buildTool) { buildTool = null; buildRot = 0; hideGhost(); paintBuildBar(); }
     return;
   }
   if (viewLayer !== 'surface') return;
   const rig = pickRigScreen(cx, cy);
+  const ground = rig ? null : pickFlat(cx, cy);
+  const piece = ground ? pieceUnder(ground.x, ground.z) : null;
+  if (!rig && piece && piece.kind !== 'service') {
+    selectOnlyWork(piece);
+    openContext(cx, cy);
+    return;
+  }
   const f = rig ? null : fieldFromScreen(cx, cy);
   const fieldsOn = selectionKind() === 'field' && pickedFields.size > 0;
   const rigsOn = selectionKind() === 'rig' && pickedRigs.size > 0;
@@ -3071,6 +3236,13 @@ document.getElementById('planmenu').addEventListener('click', e => {
   else if (ctx.dataset.ctx === 'recall') recallCurrent();
   else if (ctx.dataset.ctx === 'resume') resumeCurrent();
   else if (ctx.dataset.ctx === 'clear') exitToDefault();
+  else if (ctx.dataset.ctx === 'relayout') beginRelayout();
+  else if (ctx.dataset.ctx === 'erase-work' && selectedWork) {
+    const at = selectedWork;
+    const gone = eraseWork(at.x, at.z);
+    if (!gone.ok) toast('拆不掉');
+    else { selectedWork = null; rebuildWorks(); toast('已拆除'); updateDock(); }
+  }
 });
 addEventListener('pointerdown', e => {
   const menu = $('planmenu');
@@ -3106,6 +3278,13 @@ addEventListener('pointerup', e => {
     $('marquee').classList.remove('on');
     if (!moved) {
       const rig = mode !== 'scheme' ? pickRigScreen(drag.x0, drag.y0) : null;
+      const ground = rig ? null : pickFlat(drag.x0, drag.y0);
+      const piece = ground ? pieceUnder(ground.x, ground.z) : null;
+      if (!rig && piece && piece.kind !== 'service') {
+        selectOnlyWork(piece);
+        drag = null; ptr = null;
+        return;
+      }
       if (rig && selectionKind() !== 'field') {
         if (drag.shift) toggleRig(rig);
         else selectOnlyRig(rig, false);
@@ -3237,6 +3416,7 @@ addEventListener('keydown', e => {
   if (e.key === 'F4') { e.preventDefault(); convertEquip(); }
   if (e.key === 'v' || e.key === 'V') toggleViewer();
   if (e.key === 'Escape') {
+    if (liftedWork()) { restoreLifted(); buildTool = null; buildRot = 0; hideGhost(); rebuildWorks(); paintBuildBar(); toast('建筑放回原地'); return; }
     if (mode === 'build' && buildTool) { buildTool = null; buildRot = 0; hideGhost(); paintBuildBar(); return; }
     if (subTool) { closeSubTool(); return; }
     if (prepOpen || plantOpen) { closeToolMenus(); updateDock(); return; }
@@ -4087,6 +4267,8 @@ function tickFieldSoil() {
   soilStamp = day;
 }
 loadSoilCurves();
+bootManualJobs(typeof localStorage !== 'undefined' ? localStorage : null);
+addEventListener('focus', () => bootManualJobs(localStorage));
 addEventListener('focus', loadSoilCurves);
 function updateLabels(d) {
   const want = [];
@@ -4118,9 +4300,15 @@ function updateLabels(d) {
     const near = Math.min(1, Math.max(0.35, (1600 - d) / 700));
     want.push({ x: r.x, z: r.z, y: 6, pr: mark ? -1 : 1, a: mark ? 1 : near, html, cls: 'veh' });
   }
+  if (!camS.deck) for (const piece of listWorks()) {
+    if (workReady(piece)) continue;
+    const spec = workSpec(piece.kind);
+    const pct = Math.round((piece.progress || 0) * 100);
+    want.push({ x: piece.x, z: piece.z, y: 8, pr: -1, a: 1, html: `<b>${spec?.name || '建筑'}</b><span>施工 ${pct}%</span>`, cls: 'veh' });
+  }
   if (!camS.deck) for (const rig of listRigs()) {
     if (rig.phase !== 'sweep' || !rig.job) continue;
-    const name = rig.job.jobId === 'spray' ? '撒药' : '追肥';
+    const name = rig.job.jobId === 'spray' ? '撒药' : rig.job.jobId === 'irrigate' ? '喷灌' : '追肥';
     const eta = trussWallEta(rig);
     want.push({ x: rig.x, z: rig.z, y: 6, pr: -1, a: 1, html: `<b>喷灌桁架</b><span>${name}${eta ? ' · ' + eta : ''}</span>`, cls: 'veh' });
   }
@@ -4278,7 +4466,7 @@ function jobRow(job) {
   const hot = job.status === '执行中' || job.status === '开来' || job.status === '转弯' || job.status === '等待' || job.status === '可派';
   const miss = job.status === '过期';
   const kind = job.kind === 'soft' ? '软' : job.kind === 'hard' ? '硬' : '';
-  const span = job.full ? '全阶段' : (job.from != null && job.to != null ? `第 ${job.from}–${job.to} 日` : '');
+  const span = job.manual ? '手动' : job.full ? '全阶段' : (job.from != null && job.to != null ? `第 ${job.from}–${job.to} 日` : '');
   const why = job.note && job.status === '未执行' ? job.note : '';
   const eta = job.eta && job.eta !== '待派' ? job.eta : '';
   const wait = !why && !eta && (job.status === '排队' || job.status === '等待' || job.status === '可派') ? '待派' : '';
@@ -4353,8 +4541,62 @@ function commitUnitName() {
   updateDock();
   saveSoon();
 }
+function plateNeed(spec) {
+  return (spec?.materials || []).reduce((sum, row) => sum + (row.id === 'plate' ? row.n : 0), 0);
+}
+function paintWorkDock(piece) {
+  const el = $('dock');
+  const spec = workSpec(piece.kind);
+  if (!el || !spec) return;
+  const show = viewLayer === 'surface' && (mode === 'look' || mode === 'plan' || mode === 'machines' || mode === 'build' || mode === 'dispatch' || mode === 'scheme');
+  if (!show) { el.classList.remove('on'); return; }
+  el.classList.add('on');
+  const ready = workReady(piece);
+  const pct = Math.round((piece.progress == null ? 1 : piece.progress) * 100);
+  const title = $('selid');
+  if (title) { title.hidden = false; title.textContent = spec.name; }
+  const meta = $('unit-meta');
+  if (meta) {
+    meta.hidden = false;
+    meta.innerHTML = `占地 ${spec.w}×${spec.h} 格 · ${ready ? '已完工' : `施工 ${pct}%`}<br>造价 ${spec.cost || 0} · 板材 ${plateNeed(spec)} · ${spec.buildDays || 0} 日`;
+  }
+  const sum = $('crop-sum');
+  if (sum) sum.textContent = spec.blurb || spec.name;
+  const label = $('dock-jobs-lab');
+  if (label) label.textContent = spec.role === 'garage' ? '车库' : '建筑';
+  const jobsHost = $('dock-jobs');
+  if (jobsHost) {
+    if (!ready) jobsHost.innerHTML = `<div class="jb run"><b>施工</b><span>${pct}% · 约 ${spec.buildDays || 0} 日</span><i style="display:block;height:4px;margin-top:4px;background:var(--line)"><b style="display:block;height:4px;width:${pct}%;background:var(--sig)"></b></i></div>`;
+    else if (spec.role === 'garage') {
+      const here = rigs.filter(r => r.garageId === piece.id);
+      const free = Math.max(0, (spec.stalls || 0) - here.length);
+      const rows = [`<div class="jb"><b>车位</b><span>空 ${free} / ${spec.stalls || 0}</span></div>`];
+      for (const rig of here) rows.push(`<div class="jb"><b>${rig.label || rig.kind}</b><span>停在这</span></div>`);
+      jobsHost.innerHTML = rows.join('');
+    } else jobsHost.innerHTML = '<div class="jb"><b>完工</b><span>可以当这座建筑用</span></div>';
+  }
+  const bar = $('stagebar');
+  if (bar) bar.innerHTML = ready ? '<span>完工</span>' : `<span>施工 ${pct}%</span>`;
+  const ops = $('dock-ops');
+  if (ops) {
+    if (spec.role === 'garage' && ready) {
+      const here = rigs.filter(r => r.garageId === piece.id);
+      const free = Math.max(0, (spec.stalls || 0) - here.length);
+      const sell = here.map(rig => `<button type="button" data-act="sell-rig" data-rig="${rig.id}"><b>出售 ${rig.label || rig.kind}</b></button>`).join('');
+      ops.style.gridTemplateColumns = '1fr 1fr';
+      ops.innerHTML = `<button type="button" data-act="buy-omni"${free ? '' : ' disabled'}><b>买万能农机</b></button><button type="button" data-act="buy-tractor"${free ? '' : ' disabled'}><b>买拖拉机</b></button>${sell}`;
+    } else if (spec.role === 'garage') {
+      ops.innerHTML = '<button type="button" disabled><b>完工后才能买车</b></button>';
+    } else ops.innerHTML = '';
+  }
+}
 function updateDock() {
   const el = $('dock');
+  if (selectedWork && !pickedRigs.size && !ownedFields().length) {
+    const live = listWorks().find(item => item.id === selectedWork.id);
+    if (!live) { selectedWork = null; }
+    else { paintWorkDock(live); return; }
+  }
   const list = ownedFields();
   const many = list.length > 1;
   const rigOnly = !list.length && selectedRig;
@@ -4587,6 +4829,25 @@ $('dock').addEventListener('pointerdown', (e) => {
   else if (btn.dataset.act === 'sell') sellCurrentRig();
   else if (btn.dataset.act === 'recall') recallCurrent();
   else if (btn.dataset.act === 'resume') resumeCurrent();
+  else if (btn.dataset.act === 'irrigate') {
+    const r = requestIrrigate(selected);
+    if (!r.ok) toast(r.reason === 'lock' ? '这块还在作业' : '不能喷灌');
+    else toast('喷灌已记下。窗内能派走的撒药、追肥先走');
+    updateDock();
+  } else if (btn.dataset.act === 'buy-omni' || btn.dataset.act === 'buy-tractor') {
+    const kind = btn.dataset.act === 'buy-omni' ? 'omni' : 'tractor';
+    const bought = buyMachine(kind, selectedWork?.id);
+    if (!bought.ok) toast(bought.reason === 'stall' ? '这座车库没有空位，或还没完工' : bought.reason === 'money' ? '营收不够' : '买不了');
+    else toast(`−${fmt(bought.cost)} ${bought.name}`);
+    updateDock();
+    paintKpi();
+  } else if (btn.dataset.act === 'sell-rig') {
+    const sold = sellRig(+btn.dataset.rig);
+    if (!sold.ok) toast(sold.reason === 'busy' ? '这台正在作业' : '卖不了');
+    else toast(`出售 ${sold.name} · +${fmt(sold.pay)}`);
+    updateDock();
+    paintKpi();
+  }
 });
 $('dock').addEventListener('pointerover', (e) => {
   const seg = e.target.closest('[data-stage]');
@@ -4916,7 +5177,7 @@ if (!VIEW && !Q.has('fresh')) {
   if (holdSave) offerUnreadableSave();
 }
 function bindSlice() {
-  onAfterStep(tickSlice);
+  onAfterStep((dt) => { tickSlice(dt); tickWorks(dt); poseWorks(); });
   bootSlice({
     fields, rigs, focus,
     length: L.FIELD, width: L.FIELD,
