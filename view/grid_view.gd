@@ -5,11 +5,12 @@ const Spatial = preload("res://sim/spatial.gd")
 
 signal cell_pressed(x: int, y: int)
 
-## 2:1 oblique tiles. Tops stay readable; the near edges drop into a short skirt.
-const HALF_W := 30
-const HALF_H := 15
-const SKIRT := 12
-const HEADROOM := 40
+## 2:1 oblique tiles, sized to fill the play area beside the side panel.
+const HALF_W := 58
+const HALF_H := 29
+const SKIRT := 20
+const HEADROOM := 64
+const PX := 2
 
 const TERRAIN := {
 	"ocean": Color("163e66"),
@@ -171,10 +172,10 @@ func _draw() -> void:
 		_draw_tile(int(cell.x), int(cell.y))
 	for bolt in _bolts:
 		var at: Vector2 = bolt.a.lerp(bolt.b, clampf(float(bolt.t), 0.0, 1.0))
-		draw_rect(Rect2(at.x - 3, at.y - 3, 6, 6), Color("f2d16b"))
+		draw_rect(Rect2(at.x - 4 * PX, at.y - 4 * PX, 8 * PX, 8 * PX), Color("f2d16b"))
 	for ghost in _ghosts:
 		var life := clampf(float(ghost.life) / 0.28, 0.0, 1.0)
-		var size := 8.0 + (1.0 - life) * 10.0
+		var size := 14.0 + (1.0 - life) * 18.0
 		var at: Vector2 = ghost.at
 		draw_rect(Rect2(at.x - size * 0.5, at.y - size * 0.5, size, size), Color(ghost.color.r, ghost.color.g, ghost.color.b, life))
 
@@ -191,9 +192,9 @@ func _draw_tile(x: int, y: int) -> void:
 		_skirt(center, 1, _skirt_color(terrain))
 	_fill_iso(center, HALF_W, HALF_H, fill)
 	_lip(center, fill.darkened(0.28))
-	_stroke_iso(center, HALF_W, HALF_H, Color(0, 0, 0, 0.45), 1)
+	_stroke_iso(center, HALF_W, HALF_H, Color(0, 0, 0, 0.45), PX)
 	if terrain == "ocean":
-		draw_rect(Rect2(center.x - 8, center.y - 1, 16, 2), fill.lightened(0.18))
+		draw_rect(Rect2(center.x - 14, center.y - 2, 28, 4), fill.lightened(0.18))
 	_draw_plate(x, y, center)
 	var look := _mark_look(x, y)
 	if look.fill.a > 0.0:
@@ -213,7 +214,7 @@ func _draw_plate(x: int, y: int, center: Vector2) -> void:
 	if Spatial.is_cc(_state, x, y):
 		var cc: Dictionary = _state.command_center
 		var plate := Color("f2d16b") if not bool(cc.core_exposed) else Color("ff5d3a")
-		_fill_iso(center + Vector2(0, -2), 16, 8, plate.darkened(0.15))
+		_fill_iso(center + Vector2(0, -4), 32, 16, plate.darkened(0.15))
 		return
 	var grid := Spatial.grid_at(_state, x, y)
 	if grid.is_empty():
@@ -225,12 +226,12 @@ func _draw_plate(x: int, y: int, center: Vector2) -> void:
 		plate = plate.lerp(Color("24556e"), 0.45)
 	if float(grid.construct_remaining) > 0.0:
 		plate = plate.darkened(0.35)
-	_fill_iso(center + Vector2(0, -2), 16, 8, plate)
+	_fill_iso(center + Vector2(0, -4), 32, 16, plate)
 	if float(grid.construct_total) > 0.0 and float(grid.construct_remaining) > 0.0:
 		var done := 1.0 - float(grid.construct_remaining) / float(grid.construct_total)
-		_bar(center + Vector2(0, 8), done, 20.0)
+		_bar(center + Vector2(0, 14), done, 40.0)
 	elif _key(x, y) == str(_marks.get("selected", "")):
-		_bar(center + Vector2(0, 8), float(grid.hp) / maxf(1.0, float(grid.max_hp)), 20.0)
+		_bar(center + Vector2(0, 14), float(grid.hp) / maxf(1.0, float(grid.max_hp)), 40.0)
 
 
 func _draw_contents(x: int, y: int, center: Vector2) -> void:
@@ -250,32 +251,32 @@ func _draw_contents(x: int, y: int, center: Vector2) -> void:
 		var bdef := Catalog.building(str(building.def_id))
 		var shift := Vector2.ZERO
 		if split:
-			shift = Vector2(12, 2) if str(item.role) == "intercept" or str(bdef.get("role", "")) == "weapon" else Vector2(-12, 2)
+			shift = Vector2(22, 4) if str(item.role) == "intercept" or str(bdef.get("role", "")) == "weapon" else Vector2(-22, 4)
 		var building_id := str(building.def_id)
 		var dim := float(building.construct_remaining) > 0.0
 		if str(building.slot_role) == "peace" and not Spatial.facility_exposed(_state, building):
 			dim = true
-		var top := _blit(center + Vector2(0, 10) + shift, _sprite_rows(building_id), _sprite_colors(building_id), 2, dim)
+		var top := _blit(center + Vector2(0, 18) + shift, _sprite_rows(building_id), _sprite_colors(building_id), 4, dim)
 		if float(building.construct_remaining) > 0.0:
-			_blit(Vector2(center.x + shift.x, top - 2.0), _SCAFFOLD, {"y": Color("e0c56a")}, 2, false)
+			_blit(Vector2(center.x + shift.x, top - 4.0), _SCAFFOLD, {"y": Color("e0c56a")}, 4, false)
 	if Spatial.cover_blocks(_state, x, y):
-		_blit(center + Vector2(0, 12), _RUBBLE, {"k": Color("3b2424"), "s": Color("6a5348")}, 2, false)
+		_blit(center + Vector2(0, 22), _RUBBLE, {"k": Color("3b2424"), "s": Color("6a5348")}, 4, false)
 	if Spatial.is_cc(_state, x, y):
 		var exposed := bool(_state.command_center.core_exposed)
 		var rows := _CC_OPEN if exposed else _CC
-		var top := _blit(center + Vector2(0, 14), rows, _cc_colors(), 3, false)
+		var top := _blit(center + Vector2(0, 26), rows, _cc_colors(), 5, false)
 		var wall := float(_state.command_center.wall_hp) / maxf(1.0, float(_state.command_center.wall_max))
 		var core := float(_state.command_center.core_hp) / maxf(1.0, float(_state.command_center.core_max))
-		_bar(Vector2(center.x, top - 4), wall if int(_state.command_center.wall_hp) > 0 else core, 18.0)
+		_bar(Vector2(center.x, top - 6), wall if int(_state.command_center.wall_hp) > 0 else core, 36.0)
 	var monster := Spatial.monster_at(_state, x, y)
 	if not monster.is_empty() and int(monster.x) == x and int(monster.y) == y:
 		var shift := _foot_shift(monster.footprint)
-		var top := _blit(center + Vector2(0, 12) + shift, _sprite_rows(str(monster.def_id)), _sprite_colors(str(monster.def_id)), 2, false)
-		_bar(Vector2(center.x + shift.x, top - 4), float(monster.hp) / maxf(1.0, float(monster.max_hp)), 18.0)
+		var top := _blit(center + Vector2(0, 22) + shift, _sprite_rows(str(monster.def_id)), _sprite_colors(str(monster.def_id)), 4, false)
+		_bar(Vector2(center.x + shift.x, top - 6), float(monster.hp) / maxf(1.0, float(monster.max_hp)), 36.0)
 	var mech := Spatial.mech_at(_state, x, y)
 	if not mech.is_empty():
-		var top := _blit(center + Vector2(0, 14), _sprite_rows("warden"), _sprite_colors("warden"), 2, false)
-		_bar(Vector2(center.x, top - 4), float(mech.hp) / maxf(1.0, float(mech.max_hp)), 18.0)
+		var top := _blit(center + Vector2(0, 26), _sprite_rows("warden"), _sprite_colors("warden"), 4, false)
+		_bar(Vector2(center.x, top - 6), float(mech.hp) / maxf(1.0, float(mech.max_hp)), 36.0)
 
 
 func _mark_look(x: int, y: int) -> Dictionary:
@@ -387,9 +388,9 @@ func _center(x: int, y: int) -> Vector2:
 func _drop(x: int, y: int) -> int:
 	var terrain := str(Spatial.cell_at(_state, x, y).get("terrain", "plain"))
 	if terrain == "ocean":
-		return 6
+		return 10
 	if terrain == "coast":
-		return 3
+		return 5
 	return 0
 
 
