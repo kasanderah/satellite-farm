@@ -12,8 +12,10 @@ var grid_view: Control
 var hud: VBoxContainer
 var tool := ""
 var mode := ""
+var focus := ""
 var mech_id := -1
 var turret_id := -1
+var focus_building_id := -1
 var push_dir := Vector2i(1, 0)
 var selected := Vector2i(-1, -1)
 var last_reason := ""
@@ -75,21 +77,27 @@ func _build() -> void:
 	margin.add_child(row)
 	var board := VBoxContainer.new()
 	board.add_theme_constant_override("separation", 6)
+	board.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	board.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	row.add_child(board)
 	var title := Label.new()
-	title.text = "武装城市    海域在北，城区在南（岸线朝向是占位）"
+	title.text = "武装城市"
+	title.add_theme_font_size_override("font_size", 20)
 	board.add_child(title)
 	grid_view = GridViewScript.new()
+	grid_view.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	grid_view.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	board.add_child(grid_view)
 	grid_view.cell_pressed.connect(_on_cell)
 	var legend := Label.new()
-	legend.text = "色块：指 指挥中心　升 升降网格　轻 轻质网格　宅 电 库 炮　甲 机体　礁/盐/渊 怪物　骸 覆盖"
+	legend.text = "斜向俯视的占位像素。奶油色哨卫是机体，低矮的是怪物，小房子是建筑。"
 	legend.add_theme_font_size_override("font_size", 13)
 	board.add_child(legend)
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.custom_minimum_size = Vector2(460, 0)
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	row.add_child(scroll)
 	hud = HudScript.new()
 	hud.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -107,32 +115,27 @@ func _on_action(action: String) -> void:
 	if action.begins_with("tool:"):
 		tool = action.substr(5)
 		mode = ""
-		last_reason = "点击城区格子放置。"
+		last_reason = "再点要铺的城区格子。"
+		return
+	if action.begins_with("build_here:"):
+		if selected.x < 0:
+			last_reason = "先点一格。"
+			return
+		_place_at(action.substr(11), selected.x, selected.y)
+		return
+	if action.begins_with("select_mech:"):
+		_select_mech(int(action.substr(12)))
+		return
+	if action.begins_with("push_now:"):
+		_set_dir(action.substr(9))
+		_push_selected()
 		return
 	if action.begins_with("dir:"):
-		match action:
-			"dir:e":
-				push_dir = Vector2i(1, 0)
-			"dir:w":
-				push_dir = Vector2i(-1, 0)
-			"dir:s":
-				push_dir = Vector2i(0, 1)
-			"dir:n":
-				push_dir = Vector2i(0, -1)
-		last_reason = "推动方向已设为 %s。" % action.substr(4)
+		_set_dir(action.substr(4))
+		last_reason = "推动方向已设好。再点目标格。"
 		return
 	if action.begins_with("mode:"):
-		mode = action.substr(5)
-		tool = ""
-		if mode == "move" or mode == "attack":
-			var mech := _deployed_mech()
-			if not mech.is_empty():
-				mech_id = int(mech.id)
-		elif mode == "fire" or mode == "fire_push":
-			var weapon := _first_weapon()
-			if not weapon.is_empty():
-				turret_id = int(weapon.id)
-		last_reason = "再点击目标格。"
+		_arm_mode(action.substr(5))
 		return
 	if action.begins_with("labor:"):
 		var parts := action.split(":")
@@ -162,72 +165,222 @@ func _on_action(action: String) -> void:
 		"order_mech":
 			_run({"type": "order_mech"})
 		"end_turn":
+			mode = ""
 			_run({"type": "end_turn"})
 		"deploy":
 			var ready := _ready_mech()
 			if ready.is_empty():
 				last_reason = "没有可部署的机体。"
 			else:
-				_run({"type": "deploy_mech", "mech_id": int(ready.id), "x": selected.x, "y": selected.y})
-		"push":
-			var mech := _deployed_mech()
-			if mech.is_empty():
-				last_reason = "先让机体出场，或点选场上的机体。"
-			else:
-				_run({
-					"type": "mech_push",
-					"mech_id": int(mech.id),
-					"dir_x": push_dir.x,
-					"dir_y": push_dir.y,
-				})
+				mech_id = int(ready.id)
+				focus = "mech"
+				_run({"type": "deploy_mech", "mech_id": mech_id, "x": selected.x, "y": selected.y})
+				if last_reason == "":
+					mode = ""
+					_select_here(selected.x, selected.y)
+					_refresh([])
 		"recall":
-			var mech := _deployed_mech()
-			if mech.is_empty():
+			var home := _deployed_mech()
+			if home.is_empty():
 				last_reason = "没有在场机体。"
 			else:
-				_run({"type": "recall_mech", "mech_id": int(mech.id)})
+				_run({"type": "recall_mech", "mech_id": int(home.id)})
 		"blast":
-			var mech := _deployed_mech()
-			if mech.is_empty():
+			var blasting := _deployed_mech()
+			if blasting.is_empty():
 				last_reason = "没有在场机体。"
 			else:
-				_run({"type": "blast_recover", "mech_id": int(mech.id)})
+				_run({"type": "blast_recover", "mech_id": int(blasting.id)})
 
 
 func _on_cell(x: int, y: int) -> void:
-	selected = Vector2i(x, y)
 	var phase := str(state.phase)
 	if tool != "" and (phase == "peace" or phase == "warning"):
-		var kind := "place_grid" if tool == "light" or tool == "lift" else "place_building"
-		_run({"type": kind, "def_id": tool, "x": x, "y": y})
+		_place_at(tool, x, y)
 		return
-	if phase == "combat" and state.combat != null and str(state.combat.side) == "player":
-		if mode == "move" and mech_id >= 0:
-			_run({"type": "move_mech", "mech_id": mech_id, "x": x, "y": y})
+	if _player_turn() and _try_mode(x, y):
+		return
+	_select_here(x, y)
+	mode = ""
+	tool = ""
+	_refresh([])
+
+
+func _place_at(def_id: String, x: int, y: int) -> void:
+	var kind := "place_grid" if def_id == "light" or def_id == "lift" else "place_building"
+	_run({"type": kind, "def_id": def_id, "x": x, "y": y})
+	if last_reason == "":
+		tool = ""
+		mode = ""
+		_select_here(x, y)
+		_refresh([])
+
+
+func _try_mode(x: int, y: int) -> bool:
+	if mode == "deploy" and mech_id >= 0:
+		_run({"type": "deploy_mech", "mech_id": mech_id, "x": x, "y": y})
+		if last_reason == "":
+			mode = ""
+			_select_here(x, y)
+			_refresh([])
+		return true
+	if mode == "move" and mech_id >= 0:
+		_run({"type": "move_mech", "mech_id": mech_id, "x": x, "y": y})
+		if last_reason == "":
+			mode = ""
+			_select_here(x, y)
+			_refresh([])
+		return true
+	if mode == "attack" and mech_id >= 0:
+		_run({"type": "mech_attack", "mech_id": mech_id, "x": x, "y": y})
+		if last_reason == "":
+			mode = ""
+		return true
+	if (mode == "fire" or mode == "fire_push") and turret_id >= 0:
+		_run({
+			"type": "turret_fire",
+			"building_id": turret_id,
+			"x": x,
+			"y": y,
+			"mode": "push" if mode == "fire_push" else "damage",
+			"dir_x": push_dir.x,
+			"dir_y": push_dir.y,
+		})
+		if last_reason == "":
+			mode = ""
+		return true
+	return false
+
+
+func _arm_mode(next: String) -> void:
+	tool = ""
+	if next == "move" or next == "attack" or next == "push":
+		var mech := _deployed_mech()
+		if mech.is_empty():
+			mode = ""
+			last_reason = "先点场上的机体。"
 			return
-		if mode == "attack" and mech_id >= 0:
-			_run({"type": "mech_attack", "mech_id": mech_id, "x": x, "y": y})
+		mech_id = int(mech.id)
+		focus = "mech"
+		mode = next
+		if next == "move":
+			last_reason = "再点能去的格子。"
+		elif next == "attack":
+			last_reason = "再点相邻的怪物。"
+		else:
+			last_reason = "再点推动方向。"
+		return
+	if next == "fire" or next == "fire_push":
+		if focus_building_id < 0:
+			mode = ""
+			last_reason = "先点一门炮。"
 			return
-		if (mode == "fire" or mode == "fire_push") and turret_id >= 0:
-			_run({
-				"type": "turret_fire",
-				"building_id": turret_id,
-				"x": x,
-				"y": y,
-				"mode": "push" if mode == "fire_push" else "damage",
-				"dir_x": push_dir.x,
-				"dir_y": push_dir.y,
-			})
-			return
+		turret_id = focus_building_id
+		mode = next
+		last_reason = "再点射程内的怪物。" if next == "fire" else "可先改方向，再点怪物。"
+		return
+	mode = ""
+
+
+func _select_mech(id: int) -> void:
+	var mech := Spatial.mech_by_id(state, id)
+	if mech.is_empty():
+		last_reason = "没有这架机体。"
+		return
+	mech_id = id
+	focus = "mech"
+	focus_building_id = -1
+	tool = ""
+	if str(mech.status) == "ready":
+		mode = "deploy"
+		last_reason = "已选中待命机体。再点升降网格。"
+	elif str(mech.status) == "deployed":
+		mode = ""
+		selected = Vector2i(int(mech.x), int(mech.y))
+		last_reason = "已选中机体。再点动作。"
+	else:
+		mode = ""
+		last_reason = "机体还不能出动。"
+
+
+func _select_here(x: int, y: int) -> void:
+	selected = Vector2i(x, y)
+	var phase := str(state.phase)
 	var mech := Spatial.mech_at(state, x, y)
 	if not mech.is_empty():
 		mech_id = int(mech.id)
-		last_reason = "已选中机体。"
-	var weapon := _weapon_at(x, y)
-	if not weapon.is_empty():
-		turret_id = int(weapon.id)
-		if mech.is_empty():
-			last_reason = "已选中炮台。"
+		focus = "mech"
+		focus_building_id = -1
+		last_reason = "已选中机体。再点动作。"
+		return
+	var monster := Spatial.monster_at(state, x, y)
+	if not monster.is_empty():
+		focus = "monster"
+		focus_building_id = -1
+		last_reason = ""
+		return
+	if _player_turn():
+		var weapon := _weapon_at(x, y)
+		if not weapon.is_empty() and Spatial.facility_exposed(state, weapon):
+			turret_id = int(weapon.id)
+			focus_building_id = int(weapon.id)
+			focus = "building"
+			last_reason = "已选中炮台。再点射击或推动。"
+			return
+	if Spatial.is_cc(state, x, y):
+		focus = "cc"
+		focus_building_id = -1
+		last_reason = ""
+		return
+	var grid := Spatial.grid_at(state, x, y)
+	if not grid.is_empty():
+		focus = "grid"
+		focus_building_id = _first_building_on(grid)
+		if float(grid.construct_remaining) > 0.0:
+			last_reason = "网格还在施工。完工后才会出现建筑。"
+		elif bool(grid.ruined):
+			last_reason = "网格已毁。"
+		elif phase == "peace" or phase == "warning":
+			last_reason = "点下面的建筑，放到这一格。"
+		else:
+			last_reason = ""
+		return
+	focus = "tile"
+	focus_building_id = -1
+	var cell := Spatial.cell_at(state, x, y)
+	if (phase == "peace" or phase == "warning") and str(cell.get("region", "")) == "city" and str(cell.get("terrain", "")) == "plain" and not Spatial.cover_blocks(state, x, y):
+		last_reason = "空地。可以铺网格。"
+	elif str(cell.get("region", "")) == "sea":
+		last_reason = "海域不能铺网格。"
+	else:
+		last_reason = ""
+
+
+func _push_selected() -> void:
+	var mech := _deployed_mech()
+	if mech.is_empty():
+		last_reason = "先让机体出场，或点选场上的机体。"
+		return
+	_run({
+		"type": "mech_push",
+		"mech_id": int(mech.id),
+		"dir_x": push_dir.x,
+		"dir_y": push_dir.y,
+	})
+	if last_reason == "":
+		mode = ""
+
+
+func _set_dir(tag: String) -> void:
+	match tag:
+		"e":
+			push_dir = Vector2i(1, 0)
+		"w":
+			push_dir = Vector2i(-1, 0)
+		"s":
+			push_dir = Vector2i(0, 1)
+		"n":
+			push_dir = Vector2i(0, -1)
 
 
 func _run(cmd: Dictionary) -> void:
@@ -253,6 +406,8 @@ func _marks() -> Dictionary:
 	var move: Array = []
 	var attack: Array = []
 	var reach: Array = []
+	var aim: Array = []
+	var ports: Array = []
 	if state.combat != null:
 		var rows: Array = state.combat.intents if str(state.combat.side) == "player" else state.combat.queue
 		for intent in rows:
@@ -269,11 +424,39 @@ func _marks() -> Dictionary:
 			for key in dist.keys():
 				if int(dist[key]) > 0:
 					reach.append(str(key))
+	elif mode == "attack" and mech_id >= 0:
+		var mech := Spatial.mech_by_id(state, mech_id)
+		if str(mech.get("status", "")) == "deployed":
+			for monster in state.monsters:
+				if int(monster.hp) <= 0 or int(monster.x) < 0:
+					continue
+				for cell in Spatial.footprint_cells(int(monster.x), int(monster.y), monster.footprint):
+					if Spatial.manhattan(int(mech.x), int(mech.y), int(cell.x), int(cell.y)) == 1:
+						aim.append("%d,%d" % [int(cell.x), int(cell.y)])
+	elif (mode == "fire" or mode == "fire_push") and turret_id >= 0:
+		var building := Spatial.building_by_id(state, turret_id)
+		var def := Catalog.building(str(building.get("def_id", "")))
+		var grid := Spatial.grid_by_id(state, int(building.get("grid_id", -1)))
+		if not def.is_empty() and not grid.is_empty():
+			var weapon_range := int(def.weapon.range)
+			for monster in state.monsters:
+				if int(monster.hp) <= 0 or int(monster.x) < 0:
+					continue
+				for cell in Spatial.footprint_cells(int(monster.x), int(monster.y), monster.footprint):
+					var dist := Spatial.manhattan(int(grid.x), int(grid.y), int(cell.x), int(cell.y))
+					if dist > 0 and dist <= weapon_range:
+						aim.append("%d,%d" % [int(cell.x), int(cell.y)])
+	elif mode == "deploy":
+		for grid in state.grids:
+			if Spatial.is_deploy_port(state, int(grid.x), int(grid.y)):
+				ports.append("%d,%d" % [int(grid.x), int(grid.y)])
 	return {
 		"selected": "" if selected.x < 0 else "%d,%d" % [selected.x, selected.y],
 		"move": move,
 		"attack": attack,
 		"reach": reach,
+		"aim": aim,
+		"ports": ports,
 	}
 
 
@@ -296,13 +479,224 @@ func _view_model() -> Dictionary:
 		"status": status,
 		"detail": detail,
 		"reason": last_reason,
-		"inspector": _inspect(),
+		"card_title": _card_title(),
+		"card_meta": _card_meta(),
 		"intents": _intent_text(),
 		"log": "\n".join(state.log),
-		"actions": _actions(),
-		"labor": _labor_actions(),
+		"groups": _action_groups(),
 		"signature": _signature(),
 	}
+
+
+func _card_title() -> String:
+	if focus == "mech":
+		var mech := Spatial.mech_by_id(state, mech_id)
+		if not mech.is_empty():
+			return str(mech.name)
+	if selected.x < 0:
+		return "尚未选择"
+	if focus == "monster":
+		var monster := Spatial.monster_at(state, selected.x, selected.y)
+		if not monster.is_empty():
+			return str(monster.name)
+	if focus == "cc":
+		return "指挥中心"
+	if focus == "building":
+		var building := Spatial.building_by_id(state, focus_building_id)
+		if not building.is_empty():
+			var def := Catalog.building(str(building.def_id))
+			return str(def.get("name", "建筑"))
+	if focus == "grid":
+		var grid := Spatial.grid_at(state, selected.x, selected.y)
+		if not grid.is_empty():
+			return str(Spatial.grid_def_for(grid).get("name", "网格"))
+	return _ground_name()
+
+
+func _card_meta() -> String:
+	if selected.x < 0 and focus != "mech":
+		return "点城区空地，这里只出现铺网格。点机体或建筑后，再点它的动作。"
+	var lines: Array = []
+	if focus == "mech":
+		var mech := Spatial.mech_by_id(state, mech_id)
+		if not mech.is_empty():
+			var status_text := "在场"
+			if str(mech.status) == "ready":
+				status_text = "待命"
+			elif str(mech.status) != "deployed":
+				status_text = str(mech.status)
+			lines.append("生命 %d/%d　%s" % [int(mech.hp), int(mech.max_hp), status_text])
+			if str(mech.status) == "ready":
+				lines.append("再点一座完工的升降网格。")
+			elif str(mech.status) == "deployed":
+				lines.append("位置 (%d,%d)。先点动作，再点目标格。" % [int(mech.x), int(mech.y)])
+	if selected.x >= 0:
+		lines.append(_inspect())
+	return "\n".join(lines)
+
+
+func _ground_name() -> String:
+	var cell := Spatial.cell_at(state, selected.x, selected.y)
+	if cell.is_empty():
+		return "超出棋盘"
+	if Spatial.cover_blocks(state, selected.x, selected.y):
+		return "覆盖"
+	if str(cell.region) == "sea":
+		return "岸线" if str(cell.terrain) == "coast" else "海域"
+	return "空地"
+
+
+func _action_groups() -> Array:
+	var groups: Array = []
+	var phase := str(state.phase)
+	if phase == "bad_end":
+		return groups
+	_add_group(groups, "铺网格", _grid_actions())
+	_add_group(groups, "建造", _building_actions())
+	_add_group(groups, "机体", _mech_actions())
+	_add_group(groups, "炮台", _turret_actions())
+	_add_group(groups, "部署", _deploy_actions())
+	_add_group(groups, "待命", _roster_actions())
+	_add_group(groups, "方向", _direction_actions())
+	if tool != "" or mode != "":
+		_add_group(groups, "选择", [{"id": "cancel", "text": "取消"}])
+	if phase == "peace" or phase == "warning":
+		_add_group(groups, "时间", [
+			{"id": "pause", "text": "暂停"},
+			{"id": "speed1", "text": "1 倍"},
+			{"id": "speed2", "text": "2 倍"},
+		])
+		if phase == "peace" and not bool(state.campaign.evaluated):
+			_add_group(groups, "阶段", [{"id": "warn", "text": "开始预警"}])
+		if phase == "warning":
+			_add_group(groups, "阶段", [{"id": "engage", "text": "提前迎击"}])
+		var prep: Array = [{"id": "recruit", "text": "招募驾驶员"}]
+		if not Spatial.completed_hangar(state).is_empty():
+			prep.append({"id": "order_mech", "text": "开工机体"})
+		_add_group(groups, "整备", prep)
+		if focus == "cc" and int(state.command_center.upgrade_level) < 1:
+			_add_group(groups, "指挥中心", [{"id": "upgrade", "text": "升级指挥中心"}])
+		_add_group(groups, "工班", _labor_actions())
+	elif _player_turn():
+		_add_group(groups, "回合", [{"id": "end_turn", "text": "结束回合"}])
+	return groups
+
+
+func _add_group(groups: Array, title: String, actions: Array) -> void:
+	if actions.is_empty():
+		return
+	groups.append({"title": title, "actions": actions})
+
+
+func _grid_actions() -> Array:
+	if focus != "tile" or not _build_phase():
+		return []
+	if not _open_ground(selected.x, selected.y):
+		return []
+	return [
+		{"id": "build_here:light", "text": "轻质网格"},
+		{"id": "build_here:lift", "text": "升降网格"},
+	]
+
+
+func _building_actions() -> Array:
+	if focus != "grid" or not _build_phase():
+		return []
+	var grid := Spatial.grid_at(state, selected.x, selected.y)
+	if grid.is_empty() or bool(grid.ruined) or float(grid.construct_remaining) > 0.0:
+		return []
+	if Spatial.cover_blocks(state, selected.x, selected.y):
+		return []
+	var actions: Array = []
+	var seen := {}
+	for slot in grid.slots:
+		if int(slot.building_id) >= 0:
+			continue
+		for def_id in slot.accepts:
+			var id := str(def_id)
+			if seen.has(id):
+				continue
+			seen[id] = true
+			var def := Catalog.building(id)
+			if def.is_empty():
+				continue
+			actions.append({"id": "build_here:%s" % id, "text": str(def.name)})
+	return actions
+
+
+func _mech_actions() -> Array:
+	if focus != "mech" or not _player_turn():
+		return []
+	var mech := Spatial.mech_by_id(state, mech_id)
+	if mech.is_empty() or str(mech.status) != "deployed":
+		return []
+	var actions: Array = []
+	if not _spent("moved", int(mech.id)):
+		actions.append({"id": "mode:move", "text": "移动"})
+	if not _spent("acted", int(mech.id)):
+		actions.append({"id": "mode:attack", "text": "近战"})
+		actions.append({"id": "mode:push", "text": "推动"})
+	if Spatial.is_deploy_port(state, int(mech.x), int(mech.y)):
+		actions.append({"id": "recall", "text": "从部署口撤离"})
+	actions.append({"id": "blast", "text": "爆破回收"})
+	return actions
+
+
+func _turret_actions() -> Array:
+	if focus != "building" or not _player_turn() or focus_building_id < 0:
+		return []
+	var building := Spatial.building_by_id(state, focus_building_id)
+	if building.is_empty() or float(building.construct_remaining) > 0.0 or int(building.hp) <= 0:
+		return []
+	if not Spatial.facility_exposed(state, building):
+		return []
+	var def := Catalog.building(str(building.def_id))
+	if def.is_empty() or str(def.role) != "weapon":
+		return []
+	if _spent("fired", int(building.id)):
+		return []
+	return [
+		{"id": "mode:fire", "text": "射击"},
+		{"id": "mode:fire_push", "text": "推动射击"},
+	]
+
+
+func _deploy_actions() -> Array:
+	if not _player_turn() or not Spatial.is_deploy_port(state, selected.x, selected.y):
+		return []
+	var ready := _ready_mech()
+	if ready.is_empty():
+		return []
+	return [{"id": "deploy", "text": "部署%s到这一格" % str(ready.name)}]
+
+
+func _roster_actions() -> Array:
+	if not _player_turn():
+		return []
+	var actions: Array = []
+	for mech in state.mechs:
+		if str(mech.status) != "ready":
+			continue
+		actions.append({"id": "select_mech:%d" % int(mech.id), "text": "选中待命的%s" % str(mech.name)})
+	return actions
+
+
+func _direction_actions() -> Array:
+	if mode == "push":
+		return [
+			{"id": "push_now:n", "text": "向北推"},
+			{"id": "push_now:e", "text": "向东推"},
+			{"id": "push_now:s", "text": "向南推"},
+			{"id": "push_now:w", "text": "向西推"},
+		]
+	if mode == "fire_push":
+		return [
+			{"id": "dir:n", "text": "推往北"},
+			{"id": "dir:e", "text": "推往东"},
+			{"id": "dir:s", "text": "推往南"},
+			{"id": "dir:w", "text": "推往西"},
+		]
+	return []
 
 
 func _banner() -> String:
@@ -317,19 +711,19 @@ func _banner() -> String:
 			int(score.pilots_accounted), int(score.pilots_unaccounted),
 			int(score.cover_segments_left),
 		]
-	return "切片占位数值。同一张棋盘，和平建设，海上接敌后进入回合。"
+	return "先建城，再迎击。第一波预警不会马上开始。"
 
 
 func _hint() -> String:
 	match str(state.phase):
 		"peace":
-			return "可暂停。轻质网格便宜但只有一个槽；升降网格较慢，能同时放和平建筑和炮台，并作为部署口。住房下沉后仍算数。清尸只在和平时间进行，清完也不是通关。"
+			return "点城区空地只铺网格，网格完工后再点那一格才出现建筑。时间、整备、工班分开。上面的和平时间走完，或你自己开始预警，怪物才会来。"
 		"warning":
-			return "预警中仍可建设。倒计时结束，或点「提前迎击」，敌人会出现在海域并开始回合。"
+			return "预警里仍可施工。倒计时结束，或点「提前迎击」，敌人才出现在海域。"
 		"combat":
 			if state.combat != null and str(state.combat.side) == "enemy":
-				return "敌方正在执行刚才看到的意图。攻击锁在格子上，不会临时改瞄。"
-			return "黄框是敌方下一步，红框是攻击格。绿框是机体可达格。炮台手动开火，立即结算，每轮一次，并锁定已用功率。T1 之后士气会下降。"
+				return "敌方正在执行已经亮出的意图。工班和施工都停着。"
+			return "先点机体或炮台，再点它的动作，然后点目标格。绿边是能走的格子，橙边是你的目标。黄边是敌方下一步，红边是攻击格。"
 		"bad_end":
 			return "失败只来自核心被摧毁。走进中心格本身不是失败。"
 		_:
@@ -345,7 +739,7 @@ func _phase_detail() -> String:
 	if float(state.campaign.recovery_left) > 0.0:
 		return "恢复窗口 %.0f 秒" % float(state.campaign.recovery_left)
 	if not bool(state.campaign.started):
-		return "距离自动预警 %.0f 秒" % maxf(0.0, float(state.campaign.auto_arm_at) - float(state.clock.seconds))
+		return "距离第一波预警 %.0f 秒" % maxf(0.0, float(state.campaign.auto_arm_at) - float(state.clock.seconds))
 	return "波次 %d/%d" % [mini(int(state.campaign.wave_index) + 1, state.campaign.waves.size()), state.campaign.waves.size()]
 
 
@@ -431,63 +825,17 @@ func _inspect() -> String:
 	return "\n".join(lines)
 
 
-func _actions() -> Array:
-	var phase := str(state.phase)
-	var actions: Array = []
-	if phase == "bad_end":
-		return actions
-	if phase == "peace" or phase == "warning":
-		actions.append_array([
-			{"id": "pause", "text": "暂停"},
-			{"id": "speed1", "text": "1 倍"},
-			{"id": "speed2", "text": "2 倍"},
-			{"id": "tool:light", "text": "铺轻质网格"},
-			{"id": "tool:lift", "text": "铺升降网格"},
-			{"id": "tool:housing_light", "text": "轻住宅"},
-			{"id": "tool:housing", "text": "集合住宅"},
-			{"id": "tool:power", "text": "街角电厂"},
-			{"id": "tool:hangar", "text": "机库"},
-			{"id": "tool:turret_light", "text": "轻炮位"},
-			{"id": "tool:turret", "text": "城防炮"},
-			{"id": "recruit", "text": "招募驾驶员"},
-			{"id": "order_mech", "text": "开工机体"},
-			{"id": "upgrade", "text": "升级指挥中心"},
-			{"id": "cancel", "text": "取消选择"},
-		])
-		if phase == "peace" and not bool(state.campaign.evaluated):
-			actions.append({"id": "warn", "text": "开始预警"})
-		if phase == "warning":
-			actions.append({"id": "engage", "text": "提前迎击"})
-	elif phase == "combat" and state.combat != null and str(state.combat.side) == "player":
-		actions.append_array([
-			{"id": "end_turn", "text": "结束回合"},
-			{"id": "mode:move", "text": "移动机体"},
-			{"id": "mode:attack", "text": "机体近战"},
-			{"id": "push", "text": "按方向推动"},
-			{"id": "mode:fire", "text": "炮台射击"},
-			{"id": "mode:fire_push", "text": "炮台推动"},
-			{"id": "dir:n", "text": "方向 北"},
-			{"id": "dir:s", "text": "方向 南"},
-			{"id": "dir:w", "text": "方向 西"},
-			{"id": "dir:e", "text": "方向 东"},
-			{"id": "deploy", "text": "部署到所选格"},
-			{"id": "recall", "text": "部署口撤离"},
-			{"id": "blast", "text": "爆破回收"},
-			{"id": "cancel", "text": "取消选择"},
-		])
-	return actions
-
-
 func _labor_actions() -> Array:
-	if str(state.phase) == "combat" or str(state.phase) == "bad_end":
-		return [{"id": "noop", "text": "战斗中工班冻结"}]
+	if not _build_phase():
+		return []
 	var rows: Array = []
 	for crew in state.labor.crews:
 		var task: Dictionary = crew.task
-		rows.append({
-			"id": "labor:%d:idle:-1" % int(crew.id),
-			"text": "工班 %d 当前 %s → 改空闲" % [int(crew.id), str(task.kind)],
-		})
+		if str(task.kind) != "idle":
+			rows.append({
+				"id": "labor:%d:idle:-1" % int(crew.id),
+				"text": "工班 %d 改为空闲" % int(crew.id),
+			})
 		for cover in state.covers:
 			if Spatial.uncleared_segments(cover) <= 0:
 				continue
@@ -500,23 +848,87 @@ func _labor_actions() -> Array:
 				continue
 			rows.append({
 				"id": "labor:%d:build_mech:%d" % [int(crew.id), int(mech.id)],
-				"text": "工班 %d 建造 %s（剩 %.0f）" % [int(crew.id), str(mech.name), float(mech.build_remaining)],
+				"text": "工班 %d 建造 %s" % [int(crew.id), str(mech.name)],
 			})
 	return rows
 
 
 func _signature() -> String:
-	var parts: Array = [str(state.phase), tool, mode, str(mech_id), str(turret_id), str(push_dir)]
+	var parts: Array = [
+		str(state.revision), str(state.phase), tool, mode, focus,
+		str(mech_id), str(turret_id), str(focus_building_id), str(selected), str(push_dir),
+	]
 	if state.combat != null:
 		parts.append(str(state.combat.side))
 		parts.append(str(state.combat.round))
+		parts.append(_id_line(state.combat.moved))
+		parts.append(_id_line(state.combat.acted))
+		parts.append(_id_line(state.combat.fired))
 	parts.append(str(state.campaign.evaluated))
-	parts.append(str(state.covers.size()))
-	parts.append(str(state.mechs.size()))
+	parts.append(str(int(state.command_center.upgrade_level)))
+	if selected.x >= 0:
+		var grid := Spatial.grid_at(state, selected.x, selected.y)
+		if grid.is_empty():
+			parts.append("nogrid")
+		else:
+			parts.append(str(float(grid.construct_remaining) > 0.0))
+			for slot in grid.slots:
+				parts.append(str(slot.building_id))
 	for crew in state.labor.crews:
 		parts.append(str(crew.task.kind))
 		parts.append(str(crew.task.target_id))
 	return "|".join(parts)
+
+
+func _id_line(items: Array) -> String:
+	var bits: Array = []
+	for item in items:
+		bits.append(str(item))
+	return ",".join(bits)
+
+
+func _player_turn() -> bool:
+	return str(state.phase) == "combat" and state.combat != null and str(state.combat.side) == "player"
+
+
+func _build_phase() -> bool:
+	var phase := str(state.phase)
+	return phase == "peace" or phase == "warning"
+
+
+func _open_ground(x: int, y: int) -> bool:
+	var cell := Spatial.cell_at(state, x, y)
+	if cell.is_empty():
+		return false
+	if str(cell.region) != "city" or str(cell.terrain) != "plain":
+		return false
+	if Spatial.is_cc(state, x, y):
+		return false
+	if not Spatial.grid_at(state, x, y).is_empty():
+		return false
+	if Spatial.cover_blocks(state, x, y):
+		return false
+	return true
+
+
+func _spent(bucket: String, id: int) -> bool:
+	if state.combat == null:
+		return false
+	return _listed(state.combat.get(bucket, []), id)
+
+
+func _listed(items: Array, id: int) -> bool:
+	for item in items:
+		if int(item) == id:
+			return true
+	return false
+
+
+func _first_building_on(grid: Dictionary) -> int:
+	for slot in grid.slots:
+		if int(slot.building_id) >= 0:
+			return int(slot.building_id)
+	return -1
 
 
 func _ready_mech() -> Dictionary:
@@ -538,16 +950,6 @@ func _deployed_mech() -> Dictionary:
 	for mech in state.mechs:
 		if str(mech.status) == "deployed":
 			return mech
-	return {}
-
-
-func _first_weapon() -> Dictionary:
-	for building in state.buildings:
-		var def := Catalog.building(str(building.get("def_id", "")))
-		if def.is_empty() or str(def.role) != "weapon":
-			continue
-		if Spatial.facility_exposed(state, building):
-			return building
 	return {}
 
 
@@ -577,4 +979,3 @@ func _apply_theme() -> void:
 		theme.default_font = system
 	theme.default_font_size = 15
 	self.theme = theme
-

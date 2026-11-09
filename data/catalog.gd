@@ -65,6 +65,7 @@ static func _build() -> Dictionary:
 			"command_center": {"x": 4, "y": 13},
 			"orientation_note": "岸线朝向是占位：海域在北，城区在南，尚未定稿。",
 		},
+		# auto_arm_at is only the opening peace before the first warning.
 		"economy": {
 			"start_money": 200,
 			"start_pop": 18,
@@ -72,7 +73,7 @@ static func _build() -> Dictionary:
 			"tax_per_pop_per_sec": 0.06,
 			"pop_growth_per_sec": 0.35,
 			"recovery_seconds": 14.0,
-			"auto_arm_at": 24.0,
+			"auto_arm_at": 120.0,
 			"blast_grid_damage": 9,
 		},
 		"labor": {
