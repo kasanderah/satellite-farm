@@ -119,7 +119,7 @@ func _build() -> void:
 	board_scroll.add_child(grid_view)
 	grid_view.cell_pressed.connect(_on_cell)
 	legend_label = Label.new()
-	legend_label.text = "斜向俯视的占位像素。滚轮或 -/= 缩放。山地不能铺，礁石在海里。"
+	legend_label.text = "斜向俯视。滚轮或 -/= 缩放。山地不能铺，礁石在海里。"
 	legend_label.add_theme_font_size_override("font_size", 13)
 	board.add_child(legend_label)
 	var scroll := ScrollContainer.new()

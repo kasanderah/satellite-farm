@@ -10,18 +10,25 @@ const TILE_W := 56
 const TILE_H := 43
 const HALF_W := 28
 const HALF_H := 21
-const SKIRT := 8
+const WALL_H := 64
 const HEADROOM := 48
 const PX := 1
 const ACTOR_SCALE := 2
+## Side art is shorter for sand and water. The whole tile drops by the same amount so water sits lower.
+const SINK_SAND := 4
+const SINK_WATER := 7
 
-const TERRAIN := {
-	"ocean": Color("163e66"),
-	"coast": Color("2f7c78"),
-	"reef": Color("2f6a62"),
-	"plain": Color("5f7d52"),
-	"mountain": Color("6e675c"),
-}
+var TOP_NATURAL: Texture2D
+var TOP_LIGHT: Texture2D
+var TOP_HEAVY: Texture2D
+var TOP_SAND: Texture2D
+var TOP_SAND_HI: Texture2D
+var TOP_WATER: Texture2D
+var TOP_WATER_HI: Texture2D
+var WALL_HIGH: Texture2D
+var WALL_MID: Texture2D
+var WALL_LOW: Texture2D
+var MOUNTAIN: Texture2D
 
 var pixel_scale := 1
 var design_size := Vector2.ZERO
@@ -55,6 +62,8 @@ func setup(state: Dictionary) -> void:
 	_h = int(state.board.h)
 	_cells = _w * _h
 	_order = _sorted_cells()
+	texture_filter = TEXTURE_FILTER_NEAREST
+	_load_art()
 	_layout()
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	_tip_box = PanelContainer.new()
@@ -198,18 +207,15 @@ func _draw() -> void:
 func _draw_tile(x: int, y: int) -> void:
 	var center := _center(x, y)
 	var terrain := str(Spatial.cell_at(_state, x, y).get("terrain", "plain"))
-	var fill: Color = TERRAIN.get(terrain, TERRAIN.plain)
+	var kind := _visual_kind(x, y)
 	var grid := Spatial.grid_at(_state, x, y)
-	if not grid.is_empty() and float(grid.construct_remaining) > 0.0:
-		fill = Color("d4892a")
-	elif (x + y) % 2 == 1:
-		fill = fill.lightened(0.05)
-	if y == _h - 1:
-		_skirt(center, -1, _skirt_color(terrain))
-	if x == _w - 1:
-		_skirt(center, 1, _skirt_color(terrain))
-	_paint_tile(center, fill, true)
-	_draw_terrain_mark(center, terrain, fill)
+	var constructing := not grid.is_empty() and float(grid.construct_remaining) > 0.0
+	_draw_walls(x, y, center, kind)
+	_draw_surface(center, kind, x, y)
+	if constructing:
+		_paint_tile(center, Color("d4892a"), false)
+	if terrain == "reef":
+		_draw_reef(center)
 	_draw_plate(x, y, center)
 	var look := _mark_look(x, y)
 	if look.fill.a > 0.0:
@@ -379,7 +385,7 @@ func _layout() -> void:
 			min_x = minf(min_x, raw.x - HALF_W)
 			max_x = maxf(max_x, raw.x + HALF_W)
 			min_y = minf(min_y, raw.y - HALF_H - HEADROOM)
-			max_y = maxf(max_y, raw.y + HALF_H + SKIRT)
+			max_y = maxf(max_y, raw.y + WALL_H)
 	_origin = Vector2(round(10.0 - min_x), round(10.0 - min_y))
 	design_size = Vector2(round(max_x - min_x + 24.0), round(max_y - min_y + 24.0))
 	custom_minimum_size = design_size * float(pixel_scale)
@@ -407,21 +413,161 @@ func _center(x: int, y: int) -> Vector2:
 
 
 func _bob(x: int, y: int) -> float:
-	var terrain := str(Spatial.cell_at(_state, x, y).get("terrain", "plain"))
-	if terrain != "ocean" and terrain != "coast" and terrain != "reef":
+	if _visual_kind(x, y) != "water":
 		return 0.0
 	return sin(_wave * 2.2 + float(x) * 0.85 + float(y) * 0.45) * 2.0
 
 
 func _drop(x: int, y: int) -> int:
+	return _sink(_visual_kind(x, y))
+
+
+## natural / light / heavy / mountain share the high wall. Sand is a step down. Water is lower still.
+func _visual_kind(x: int, y: int) -> String:
 	var terrain := str(Spatial.cell_at(_state, x, y).get("terrain", "plain"))
-	if terrain == "ocean":
-		return 4
-	if terrain == "coast" or terrain == "reef":
-		return 2
 	if terrain == "mountain":
-		return -2
+		return "mountain"
+	if terrain == "ocean" or terrain == "coast" or terrain == "reef":
+		return "water"
+	if terrain == "plain" and _beside_water(x, y):
+		return "sand"
+	return _plain_mix(x, y)
+
+
+func _plain_mix(x: int, y: int) -> String:
+	var seed := int(_state.get("seed", 1))
+	var n := absi((x * 13 + y * 29 + seed * 7) % 5)
+	if n == 0:
+		return "light"
+	if n == 1:
+		return "heavy"
+	return "natural"
+
+
+func _tier(kind: String) -> int:
+	if kind == "water":
+		return 0
+	if kind == "sand":
+		return 1
+	return 2
+
+
+func _sink(kind: String) -> int:
+	if kind == "water":
+		return SINK_WATER
+	if kind == "sand":
+		return SINK_SAND
 	return 0
+
+
+func _beside_water(x: int, y: int) -> bool:
+	for step in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+		var nx := x + int(step.x)
+		var ny := y + int(step.y)
+		if nx < 0 or ny < 0 or nx >= _w or ny >= _h:
+			continue
+		var terrain := str(Spatial.cell_at(_state, nx, ny).get("terrain", ""))
+		if terrain == "ocean" or terrain == "coast" or terrain == "reef":
+			return true
+	return false
+
+
+func _back_higher(x: int, y: int) -> bool:
+	var mine := _tier(_visual_kind(x, y))
+	for step in [Vector2i(-1, 0), Vector2i(0, -1)]:
+		var nx := x + int(step.x)
+		var ny := y + int(step.y)
+		if nx < 0 or ny < 0 or nx >= _w or ny >= _h:
+			continue
+		if _tier(_visual_kind(nx, ny)) > mine:
+			return true
+	return false
+
+
+func _face_open(x: int, y: int, dx: int, dy: int) -> bool:
+	var nx := x + dx
+	var ny := y + dy
+	if nx < 0 or ny < 0 or nx >= _w or ny >= _h:
+		return true
+	return _tier(_visual_kind(nx, ny)) < _tier(_visual_kind(x, y))
+
+
+func _wall_texture(kind: String) -> Texture2D:
+	if kind == "water":
+		return WALL_LOW
+	if kind == "sand":
+		return WALL_MID
+	return WALL_HIGH
+
+
+func _top_texture(kind: String, x: int, y: int) -> Texture2D:
+	var raised := _back_higher(x, y)
+	match kind:
+		"light":
+			return TOP_LIGHT
+		"heavy":
+			return TOP_HEAVY
+		"sand":
+			return TOP_SAND_HI if raised else TOP_SAND
+		"water":
+			return TOP_WATER_HI if raised else TOP_WATER
+		_:
+			return TOP_NATURAL
+
+
+func _draw_walls(x: int, y: int, center: Vector2, kind: String) -> void:
+	var tex := _wall_texture(kind)
+	var sink := _sink(kind)
+	var ox := int(round(center.x)) - HALF_W
+	var oy := int(round(center.y)) - sink
+	var left := _face_open(x, y, 0, 1)
+	var right := _face_open(x, y, 1, 0)
+	if left and right:
+		draw_texture_rect(tex, Rect2(ox, oy, TILE_W, WALL_H), false)
+	elif left:
+		draw_texture_rect_region(tex, Rect2(ox, oy, HALF_W, WALL_H), Rect2(0, 0, HALF_W, WALL_H))
+	elif right:
+		draw_texture_rect_region(tex, Rect2(ox + HALF_W, oy, HALF_W, WALL_H), Rect2(HALF_W, 0, HALF_W, WALL_H))
+
+
+func _draw_surface(center: Vector2, kind: String, x: int, y: int) -> void:
+	var ox := int(round(center.x)) - HALF_W
+	if kind == "mountain":
+		# Image row 64 is the diamond's widest line, so the peak sits above the cell.
+		draw_texture_rect(MOUNTAIN, Rect2(ox, int(round(center.y)) - 64, TILE_W, 86), false)
+		return
+	var tex := _top_texture(kind, x, y)
+	draw_texture_rect(tex, Rect2(ox, int(round(center.y)) - HALF_H, TILE_W, TILE_H), false)
+
+
+func _load_art() -> void:
+	TOP_NATURAL = _load_tex("res://assets/tiles/top_natural.png")
+	TOP_LIGHT = _load_tex("res://assets/tiles/top_light.png")
+	TOP_HEAVY = _load_tex("res://assets/tiles/top_heavy.png")
+	TOP_SAND = _load_tex("res://assets/tiles/top_sand.png")
+	TOP_SAND_HI = _load_tex("res://assets/tiles/top_sand_hi.png")
+	TOP_WATER = _load_tex("res://assets/tiles/top_water.png")
+	TOP_WATER_HI = _load_tex("res://assets/tiles/top_water_hi.png")
+	WALL_HIGH = _load_tex("res://assets/tiles/wall_high.png")
+	WALL_MID = _load_tex("res://assets/tiles/wall_mid.png")
+	WALL_LOW = _load_tex("res://assets/tiles/wall_low.png")
+	MOUNTAIN = _load_tex("res://assets/tiles/mountain.png")
+
+
+func _load_tex(path: String) -> Texture2D:
+	var image := Image.new()
+	var err := image.load(path)
+	if err != OK:
+		push_error("地块贴图读不出来：%s" % path)
+		return ImageTexture.new()
+	return ImageTexture.create_from_image(image)
+
+
+func _draw_reef(center: Vector2) -> void:
+	var cx := int(round(center.x))
+	var cy := int(round(center.y))
+	draw_rect(Rect2(cx - 7, cy - 4, 5, 3), Color("e7d7a8"))
+	draw_rect(Rect2(cx + 2, cy + 1, 4, 3), Color("cbb892"))
 
 
 func _pick(at: Vector2) -> Vector2i:
@@ -504,40 +650,6 @@ func _row_half(i: int, half_w: int, half_h: int, height: int) -> int:
 	if i < half_h:
 		return int((i + 1) * half_w / float(half_h))
 	return int((height - i) * half_w / float(half_h))
-
-
-func _skirt(center: Vector2, side: int, color: Color) -> void:
-	var mid := center + Vector2(side * HALF_W, 0)
-	var bottom := center + Vector2(0, HALF_H)
-	var mid_down := mid + Vector2(0, SKIRT)
-	var bottom_down := bottom + Vector2(0, SKIRT)
-	draw_colored_polygon(PackedVector2Array([mid, bottom, bottom_down, mid_down]), color)
-
-
-func _draw_terrain_mark(center: Vector2, terrain: String, fill: Color) -> void:
-	var cx := int(round(center.x))
-	var cy := int(round(center.y))
-	if terrain == "ocean" or terrain == "coast" or terrain == "reef":
-		var crest := fill.lightened(0.2)
-		draw_rect(Rect2(cx - 8, cy - 1, 6, 2), crest)
-		draw_rect(Rect2(cx + 3, cy + 2, 5, 2), crest)
-	if terrain == "reef":
-		draw_rect(Rect2(cx - 7, cy - 4, 5, 3), Color("e7d7a8"))
-		draw_rect(Rect2(cx + 2, cy + 1, 4, 3), Color("cbb892"))
-	elif terrain == "mountain":
-		draw_rect(Rect2(cx - 7, cy - 6, 14, 5), Color("8d867c"))
-		draw_rect(Rect2(cx - 3, cy - 12, 6, 7), Color("d9d3c5"))
-		draw_rect(Rect2(cx - 1, cy - 15, 2, 4), Color("f4f1ea"))
-
-
-func _skirt_color(terrain: String) -> Color:
-	if terrain == "ocean":
-		return Color("0f2c44")
-	if terrain == "coast" or terrain == "reef":
-		return Color("1a4544")
-	if terrain == "mountain":
-		return Color("3f3b36")
-	return Color("3e4638")
 
 
 func _bar(at: Vector2, ratio: float, width: float) -> void:
