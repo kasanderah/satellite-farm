@@ -63,6 +63,7 @@ func engage(state: Dictionary) -> Dictionary:
 
 func _run() -> void:
 	_test_board()
+	_test_days_and_minutes()
 	_test_place_and_slots()
 	_test_economy_and_save()
 	_test_warning_spawns_at_sea()
@@ -100,6 +101,31 @@ func _test_board() -> void:
 	check(not denied.ok and int(state.revision) == rev, "海域不能铺网格，非法命令不改 revision")
 	denied = Commands.apply(state, {"type": "place_grid", "def_id": "light", "x": 4, "y": 13})
 	check(not denied.ok and int(state.revision) == rev, "指挥中心不能被覆盖")
+
+
+func _test_days_and_minutes() -> void:
+	var state := GameState.new_game(3)
+	check(int(state.clock.day) == 0, "开局停在和平第一日")
+	var placed := Commands.apply(state, {"type": "place_grid", "def_id": "lift", "x": 3, "y": 12})
+	check(placed.ok and float(state.grids[0].construct_remaining) > 0.0, "铺下的网格要等这一日结束")
+	var first := Commands.apply(state, {"type": "end_day"})
+	check(first.ok and str(state.phase) == "peace", "结束本日仍是和平")
+	check(float(state.grids[0].construct_remaining) == 0.0, "结束本日后施工才结算")
+	check(int(state.clock.day) == 1, "结束本日进入下一天")
+	for _i in 3:
+		var stayed := Commands.apply(state, {"type": "end_day"})
+		check(stayed.ok and str(state.phase) == "peace", "第五个和平日结束前不会预警")
+	check(int(state.clock.day) == 4, "结束四次本日之后还在第五个和平日")
+	var fifth := Commands.apply(state, {"type": "end_day"})
+	check(fifth.ok and str(state.phase) == "warning", "第五个和平日结束后才进入预警")
+	var not_minute := Commands.apply(state, {"type": "end_turn"})
+	check(not not_minute.ok, "预警日不能结束战斗分钟")
+	var began := Commands.apply(state, {"type": "begin_combat"})
+	check(began.ok and int(state.combat.round) == 1, "迎击从第一分钟开始")
+	var not_day := Commands.apply(state, {"type": "end_day"})
+	check(not not_day.ok and int(state.clock.day) == 5, "战斗中不能结束一天")
+	var minute := Commands.apply(state, {"type": "end_turn"})
+	check(minute.ok and str(state.combat.side) == "enemy" and int(state.combat.round) == 1, "结束这一分钟后才轮到敌方")
 
 
 func _test_place_and_slots() -> void:

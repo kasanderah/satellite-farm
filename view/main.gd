@@ -20,6 +20,7 @@ var push_dir := Vector2i(1, 0)
 var selected := Vector2i(-1, -1)
 var last_reason := ""
 var enemy_wait := 0.0
+var turn_label: Label
 
 
 func _ready() -> void:
@@ -36,10 +37,7 @@ func _process(delta: float) -> void:
 	var events: Array = []
 	var phase := str(state.phase)
 	var stepped := {}
-	if phase == "peace" or phase == "warning":
-		stepped = Commands.advance(state, delta)
-		events = stepped.events
-	elif phase == "combat" and state.combat != null and str(state.combat.side) == "enemy":
+	if phase == "combat" and state.combat != null and str(state.combat.side) == "enemy":
 		enemy_wait += delta
 		if enemy_wait >= 0.42:
 			enemy_wait = 0.0
@@ -52,12 +50,13 @@ func _process(delta: float) -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
-		if event.keycode == KEY_SPACE and str(state.phase) == "combat":
-			_on_action("end_turn")
+		if event.keycode == KEY_SPACE:
+			if str(state.phase) == "combat":
+				_on_action("end_turn")
+			elif str(state.phase) == "peace" or str(state.phase) == "warning":
+				_on_action("end_day")
 		elif event.keycode == KEY_ESCAPE:
 			_on_action("cancel")
-		elif event.keycode == KEY_P:
-			_on_action("pause")
 
 
 func _build() -> void:
@@ -84,6 +83,11 @@ func _build() -> void:
 	title.text = "武装城市"
 	title.add_theme_font_size_override("font_size", 20)
 	board.add_child(title)
+	turn_label = Label.new()
+	turn_label.text = "和平 1月1日"
+	turn_label.add_theme_font_size_override("font_size", 22)
+	turn_label.add_theme_color_override("font_color", Color("f2d16b"))
+	board.add_child(turn_label)
 	grid_view = GridViewScript.new()
 	grid_view.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	grid_view.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
@@ -148,12 +152,8 @@ func _on_action(action: String) -> void:
 			})
 		return
 	match action:
-		"pause":
-			_run({"type": "set_clock", "paused": true, "scale": float(state.clock.scale)})
-		"speed1":
-			_run({"type": "set_clock", "paused": false, "scale": 1.0})
-		"speed2":
-			_run({"type": "set_clock", "paused": false, "scale": 2.0})
+		"end_day":
+			_run({"type": "end_day"})
 		"warn":
 			_run({"type": "start_warning"})
 		"engage":
@@ -399,6 +399,8 @@ func _refresh(events: Array) -> void:
 	grid_view.sync(state, _marks())
 	if not events.is_empty():
 		grid_view.play(events)
+	if turn_label != null:
+		turn_label.text = _turn_label()
 	hud.refresh(_view_model())
 
 
@@ -463,12 +465,13 @@ func _marks() -> Dictionary:
 func _view_model() -> Dictionary:
 	var econ: Dictionary = state.economy
 	var cap := Spatial.housing_capacity(state)
-	var phase := str(state.phase)
 	var status := "金钱 %d    人口 %d/%d    士气 %d    科研 %d" % [
 		int(econ.money), int(econ.population), cap, int(econ.morale), int(econ.research)
 	]
-	var clock := "暂停" if bool(state.clock.paused) else "%d 倍" % int(state.clock.scale)
-	var detail := "阶段 %s　%s　%s" % [phase, clock, _phase_detail()]
+	var detail := _turn_label()
+	var extra := _phase_detail()
+	if extra != "":
+		detail += "　" + extra
 	detail += "\n" + _power_line()
 	detail += "\n" + _rule_line()
 	if int(state.campaign.segments_cleared) > 0:
@@ -562,9 +565,7 @@ func _action_groups() -> Array:
 		_add_group(groups, "选择", [{"id": "cancel", "text": "取消"}])
 	if phase == "peace" or phase == "warning":
 		_add_group(groups, "时间", [
-			{"id": "pause", "text": "暂停"},
-			{"id": "speed1", "text": "1 倍"},
-			{"id": "speed2", "text": "2 倍"},
+			{"id": "end_day", "text": "结束本日"},
 		])
 		if phase == "peace" and not bool(state.campaign.evaluated):
 			_add_group(groups, "阶段", [{"id": "warn", "text": "开始预警"}])
@@ -578,7 +579,7 @@ func _action_groups() -> Array:
 			_add_group(groups, "指挥中心", [{"id": "upgrade", "text": "升级指挥中心"}])
 		_add_group(groups, "工班", _labor_actions())
 	elif _player_turn():
-		_add_group(groups, "回合", [{"id": "end_turn", "text": "结束回合"}])
+		_add_group(groups, "分钟", [{"id": "end_turn", "text": "结束这一分钟"}])
 	return groups
 
 
@@ -704,26 +705,27 @@ func _banner() -> String:
 		return "Bad End：核心被摧毁，全城与入侵者同归于尽。这不是胜利。"
 	if bool(state.campaign.evaluated) and state.campaign.evaluation != null:
 		var score: Dictionary = state.campaign.evaluation
-		return "评定　人口 %s　伤亡 %s　网格 %d/%d　设施 %d/%d　机师在册 %d　失联 %d。尸骸剩余 %d，不影响评定。" % [
+		return "%s\n评定　人口 %s　伤亡 %s　网格 %d/%d　设施 %d/%d　机师在册 %d　失联 %d。尸骸剩余 %d，不影响评定。" % [
+			_turn_label(),
 			str(score.population), str(score.casualties),
 			int(score.grid_hp), int(score.grid_max),
 			int(score.building_hp), int(score.building_max),
 			int(score.pilots_accounted), int(score.pilots_unaccounted),
 			int(score.cover_segments_left),
 		]
-	return "先建城，再迎击。第一波预警不会马上开始。"
+	return _turn_label()
 
 
 func _hint() -> String:
 	match str(state.phase):
 		"peace":
-			return "点城区空地只铺网格，网格完工后再点那一格才出现建筑。时间、整备、工班分开。上面的和平时间走完，或你自己开始预警，怪物才会来。"
+			return "点城区空地只铺网格，网格完工后再点那一格才出现建筑。时间不会自己走。点「结束本日」进入下一天。开局有五个和平日，第一波预警要等这些日子结束，也可以自己开始预警。"
 		"warning":
-			return "预警里仍可施工。倒计时结束，或点「提前迎击」，敌人才出现在海域。"
+			return "预警里仍可施工。点「结束本日」推进这一日。预警日走完，或点「提前迎击」，敌人才出现在海域。"
 		"combat":
 			if state.combat != null and str(state.combat.side) == "enemy":
-				return "敌方正在执行已经亮出的意图。工班和施工都停着。"
-			return "先点机体或炮台，再点它的动作，然后点目标格。绿边是能走的格子，橙边是你的目标。黄边是敌方下一步，红边是攻击格。"
+				return "敌方正在执行这一分钟里已经亮出的意图。工班和施工都停着。"
+			return "先点机体或炮台，再点它的动作，然后点目标格。一分钟是一个回合，点「结束这一分钟」后敌方才行动。绿边是能走的格子，橙边是你的目标。黄边是敌方下一步，红边是攻击格。"
 		"bad_end":
 			return "失败只来自核心被摧毁。走进中心格本身不是失败。"
 		_:
@@ -731,16 +733,46 @@ func _hint() -> String:
 
 
 func _phase_detail() -> String:
+	var span := _day_span()
 	if str(state.phase) == "warning" and state.warning != null:
-		return "%s　%.0f 秒" % [str(state.warning.wave_name), float(state.warning.seconds_left)]
+		var warn_days := maxi(1, ceili(float(state.warning.seconds_left) / span))
+		return "%s　再结束 %d 日进入迎击" % [str(state.warning.wave_name), warn_days]
 	if str(state.phase) == "combat" and state.combat != null:
-		var side := "玩家" if str(state.combat.side) == "player" else "敌方"
-		return "第 %d 回合　%s　T1=%d" % [int(state.combat.round), side, int(state.combat.t1)]
+		return "T1=%d" % int(state.combat.t1)
 	if float(state.campaign.recovery_left) > 0.0:
-		return "恢复窗口 %.0f 秒" % float(state.campaign.recovery_left)
+		var recover_days := maxi(1, ceili(float(state.campaign.recovery_left) / span))
+		return "恢复　再结束 %d 日" % recover_days
 	if not bool(state.campaign.started):
-		return "距离第一波预警 %.0f 秒" % maxf(0.0, float(state.campaign.auto_arm_at) - float(state.clock.seconds))
+		var left := maxf(0.0, float(state.campaign.auto_arm_at) - float(state.clock.seconds))
+		return "再结束 %d 日进入第一波预警" % ceili(left / span)
 	return "波次 %d/%d" % [mini(int(state.campaign.wave_index) + 1, state.campaign.waves.size()), state.campaign.waves.size()]
+
+
+func _turn_label() -> String:
+	var phase := str(state.phase)
+	if phase == "combat" and state.combat != null:
+		var side := "玩家" if str(state.combat.side) == "player" else "敌方"
+		return "迎击 第%d分钟　%s" % [int(state.combat.round), side]
+	if phase == "bad_end":
+		return "终局"
+	if phase == "warning":
+		return "预警 %s" % _date_text()
+	return "和平 %s" % _date_text()
+
+
+func _date_text() -> String:
+	var index := int(state.clock.get("day", 0))
+	var number := index + 1
+	var month := int((number - 1) / 30) + 1
+	var day := int((number - 1) % 30) + 1
+	return "%d月%d日" % [month, day]
+
+
+func _day_span() -> float:
+	var span := float(state.clock.get("seconds_per_day", 24.0))
+	if span <= 0.0:
+		return 24.0
+	return span
 
 
 func _power_line() -> String:

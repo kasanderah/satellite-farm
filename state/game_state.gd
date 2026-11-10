@@ -33,7 +33,13 @@ static func new_game(seed_value: int = 1) -> Dictionary:
 		"difficulty": 1,
 		"rng_state": seed_value,
 		"phase": "peace",
-		"clock": {"seconds": 0.0, "paused": false, "scale": 1.0},
+		"clock": {
+			"seconds": 0.0,
+			"paused": false,
+			"scale": 1.0,
+			"day": 0,
+			"seconds_per_day": float(econ.seconds_per_day),
+		},
 		"economy": {
 			"money": float(econ.start_money),
 			"population": float(econ.start_pop),
