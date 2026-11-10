@@ -5,12 +5,15 @@ const Spatial = preload("res://sim/spatial.gd")
 
 signal cell_pressed(x: int, y: int)
 
-## 2:1 oblique tiles, sized to fill the play area beside the side panel.
-const HALF_W := 58
-const HALF_H := 29
-const SKIRT := 20
-const HEADROOM := 64
-const PX := 2
+## Chunky pixel diamonds, 56 wide and 43 tall. Actors are a standing layer above the tile.
+const TILE_W := 56
+const TILE_H := 43
+const HALF_W := 28
+const HALF_H := 21
+const SKIRT := 8
+const HEADROOM := 48
+const PX := 1
+const ACTOR_SCALE := 2
 
 const TERRAIN := {
 	"ocean": Color("163e66"),
@@ -190,31 +193,29 @@ func _draw_tile(x: int, y: int) -> void:
 		_skirt(center, -1, _skirt_color(terrain))
 	if x == _w - 1:
 		_skirt(center, 1, _skirt_color(terrain))
-	_fill_iso(center, HALF_W, HALF_H, fill)
-	_lip(center, fill.darkened(0.28))
-	_stroke_iso(center, HALF_W, HALF_H, Color(0, 0, 0, 0.45), PX)
+	_paint_tile(center, fill, true)
 	if terrain == "ocean":
-		draw_rect(Rect2(center.x - 14, center.y - 2, 28, 4), fill.lightened(0.18))
+		draw_rect(Rect2(center.x - 8, center.y - 1, 16, 2), fill.lightened(0.18))
 	_draw_plate(x, y, center)
 	var look := _mark_look(x, y)
 	if look.fill.a > 0.0:
-		_fill_iso(center, HALF_W - 4, HALF_H - 2, look.fill)
-	_draw_contents(x, y, center)
+		_paint_tile(center, look.fill, false)
 	if look.stroke.a > 0.0:
-		_stroke_iso(center, HALF_W, HALF_H, look.stroke, int(look.thick))
+		_stroke_tile(center, look.stroke, int(look.thick))
 	var key := _key(x, y)
 	if _flashes.has(key):
 		var flash: Dictionary = _flashes[key]
 		var alpha := clampf(float(flash.life) / 0.28, 0.0, 0.7)
 		var tint: Color = flash.color
-		_fill_iso(center, HALF_W - 6, HALF_H - 3, Color(tint.r, tint.g, tint.b, alpha))
+		_paint_tile(center, Color(tint.r, tint.g, tint.b, alpha), false)
+	_draw_contents(x, y, center)
 
 
 func _draw_plate(x: int, y: int, center: Vector2) -> void:
 	if Spatial.is_cc(_state, x, y):
 		var cc: Dictionary = _state.command_center
 		var plate := Color("f2d16b") if not bool(cc.core_exposed) else Color("ff5d3a")
-		_fill_iso(center + Vector2(0, -4), 32, 16, plate.darkened(0.15))
+		_fill_iso(center + Vector2(0, 2), 16, 7, plate.darkened(0.15))
 		return
 	var grid := Spatial.grid_at(_state, x, y)
 	if grid.is_empty():
@@ -226,12 +227,12 @@ func _draw_plate(x: int, y: int, center: Vector2) -> void:
 		plate = plate.lerp(Color("24556e"), 0.45)
 	if float(grid.construct_remaining) > 0.0:
 		plate = plate.darkened(0.35)
-	_fill_iso(center + Vector2(0, -4), 32, 16, plate)
+	_fill_iso(center + Vector2(0, 2), 16, 7, plate)
 	if float(grid.construct_total) > 0.0 and float(grid.construct_remaining) > 0.0:
 		var done := 1.0 - float(grid.construct_remaining) / float(grid.construct_total)
-		_bar(center + Vector2(0, 14), done, 40.0)
+		_bar(center + Vector2(0, 12), done, 28.0)
 	elif _key(x, y) == str(_marks.get("selected", "")):
-		_bar(center + Vector2(0, 14), float(grid.hp) / maxf(1.0, float(grid.max_hp)), 40.0)
+		_bar(center + Vector2(0, 12), float(grid.hp) / maxf(1.0, float(grid.max_hp)), 28.0)
 
 
 func _draw_contents(x: int, y: int, center: Vector2) -> void:
@@ -251,32 +252,32 @@ func _draw_contents(x: int, y: int, center: Vector2) -> void:
 		var bdef := Catalog.building(str(building.def_id))
 		var shift := Vector2.ZERO
 		if split:
-			shift = Vector2(22, 4) if str(item.role) == "intercept" or str(bdef.get("role", "")) == "weapon" else Vector2(-22, 4)
+			shift = Vector2(12, 0) if str(item.role) == "intercept" or str(bdef.get("role", "")) == "weapon" else Vector2(-12, 0)
 		var building_id := str(building.def_id)
 		var dim := float(building.construct_remaining) > 0.0
 		if str(building.slot_role) == "peace" and not Spatial.facility_exposed(_state, building):
 			dim = true
-		var top := _blit(center + Vector2(0, 18) + shift, _sprite_rows(building_id), _sprite_colors(building_id), 4, dim)
+		var top := _blit(_stand(center, shift), _sprite_rows(building_id), _sprite_colors(building_id), ACTOR_SCALE, dim)
 		if float(building.construct_remaining) > 0.0:
-			_blit(Vector2(center.x + shift.x, top - 4.0), _SCAFFOLD, {"y": Color("e0c56a")}, 4, false)
+			_blit(Vector2(center.x + shift.x, top - 2.0), _SCAFFOLD, {"y": Color("e0c56a")}, ACTOR_SCALE, false)
 	if Spatial.cover_blocks(_state, x, y):
-		_blit(center + Vector2(0, 22), _RUBBLE, {"k": Color("3b2424"), "s": Color("6a5348")}, 4, false)
+		_blit(center + Vector2(0, 14), _RUBBLE, {"k": Color("3b2424"), "s": Color("6a5348")}, ACTOR_SCALE, false)
 	if Spatial.is_cc(_state, x, y):
 		var exposed := bool(_state.command_center.core_exposed)
 		var rows := _CC_OPEN if exposed else _CC
-		var top := _blit(center + Vector2(0, 26), rows, _cc_colors(), 5, false)
+		var top := _blit(_stand(center), rows, _cc_colors(), ACTOR_SCALE, false)
 		var wall := float(_state.command_center.wall_hp) / maxf(1.0, float(_state.command_center.wall_max))
 		var core := float(_state.command_center.core_hp) / maxf(1.0, float(_state.command_center.core_max))
-		_bar(Vector2(center.x, top - 6), wall if int(_state.command_center.wall_hp) > 0 else core, 36.0)
+		_bar(Vector2(center.x, top - 4), wall if int(_state.command_center.wall_hp) > 0 else core, 24.0)
 	var monster := Spatial.monster_at(_state, x, y)
 	if not monster.is_empty() and int(monster.x) == x and int(monster.y) == y:
 		var shift := _foot_shift(monster.footprint)
-		var top := _blit(center + Vector2(0, 22) + shift, _sprite_rows(str(monster.def_id)), _sprite_colors(str(monster.def_id)), 4, false)
-		_bar(Vector2(center.x + shift.x, top - 6), float(monster.hp) / maxf(1.0, float(monster.max_hp)), 36.0)
+		var top := _blit(_stand(center, shift), _sprite_rows(str(monster.def_id)), _sprite_colors(str(monster.def_id)), ACTOR_SCALE, false)
+		_bar(Vector2(center.x + shift.x, top - 4), float(monster.hp) / maxf(1.0, float(monster.max_hp)), 24.0)
 	var mech := Spatial.mech_at(_state, x, y)
 	if not mech.is_empty():
-		var top := _blit(center + Vector2(0, 26), _sprite_rows("warden"), _sprite_colors("warden"), 4, false)
-		_bar(Vector2(center.x, top - 6), float(mech.hp) / maxf(1.0, float(mech.max_hp)), 36.0)
+		var top := _blit(_stand(center), _sprite_rows("warden"), _sprite_colors("warden"), ACTOR_SCALE, false)
+		_bar(Vector2(center.x, top - 4), float(mech.hp) / maxf(1.0, float(mech.max_hp)), 24.0)
 
 
 func _mark_look(x: int, y: int) -> Dictionary:
@@ -388,9 +389,9 @@ func _center(x: int, y: int) -> Vector2:
 func _drop(x: int, y: int) -> int:
 	var terrain := str(Spatial.cell_at(_state, x, y).get("terrain", "plain"))
 	if terrain == "ocean":
-		return 10
+		return 4
 	if terrain == "coast":
-		return 5
+		return 2
 	return 0
 
 
@@ -416,6 +417,47 @@ func _hit(x: int, y: int, at: Vector2) -> bool:
 	return dx * HALF_H + dy * HALF_W <= HALF_W * HALF_H
 
 
+func _stand(center: Vector2, shift: Vector2 = Vector2.ZERO) -> Vector2:
+	return center + shift
+
+
+func _paint_tile(center: Vector2, fill: Color, outlined: bool) -> void:
+	var top_y := int(round(center.y)) - HALF_H
+	var cx := int(round(center.x))
+	var front := fill.darkened(0.28)
+	var edge := Color(0, 0, 0, 0.6)
+	for i in TILE_H:
+		var half := _tile_half(i)
+		var y := top_y + i
+		var row_color := front if i >= TILE_H - 8 else fill
+		draw_rect(Rect2(cx - half, y, half * 2, 1), row_color)
+		if not outlined:
+			continue
+		draw_rect(Rect2(cx - half, y, 1, 1), edge)
+		draw_rect(Rect2(cx + half - 1, y, 1, 1), edge)
+		if i < 2 or i >= TILE_H - 2:
+			draw_rect(Rect2(cx - half, y, half * 2, 1), edge)
+
+
+func _stroke_tile(center: Vector2, color: Color, thick: int) -> void:
+	var top_y := int(round(center.y)) - HALF_H
+	var cx := int(round(center.x))
+	for i in TILE_H:
+		var half := _tile_half(i)
+		var y := top_y + i
+		for t in thick:
+			draw_rect(Rect2(cx - half + t, y, 1, 1), color)
+			draw_rect(Rect2(cx + half - 1 - t, y, 1, 1), color)
+		if i < thick or i >= TILE_H - thick:
+			draw_rect(Rect2(cx - half, y, max(half * 2, 1), 1), color)
+
+
+func _tile_half(i: int) -> int:
+	var dist := absi(i - HALF_H)
+	var half := int(round(float(HALF_W) * float(HALF_H + 1 - dist) / float(HALF_H + 1)))
+	return clampi(half, 1, HALF_W)
+
+
 func _fill_iso(center: Vector2, half_w: int, half_h: int, color: Color) -> void:
 	if half_h <= 0 or half_w <= 0:
 		return
@@ -427,31 +469,6 @@ func _fill_iso(center: Vector2, half_w: int, half_h: int, color: Color) -> void:
 		if half <= 0:
 			continue
 		draw_rect(Rect2(cx - half, top_y + i, half * 2, 1), color)
-
-
-func _lip(center: Vector2, color: Color) -> void:
-	var top_y := int(round(center.y)) - HALF_H
-	var cx := int(round(center.x))
-	var height := HALF_H * 2
-	for i in range(height - 3, height):
-		var half := _row_half(i, HALF_W, HALF_H, height)
-		draw_rect(Rect2(cx - half, top_y + i, half * 2, 1), color)
-
-
-func _stroke_iso(center: Vector2, half_w: int, half_h: int, color: Color, thick: int) -> void:
-	var top_y := int(round(center.y)) - half_h
-	var cx := int(round(center.x))
-	var height := half_h * 2
-	for i in height:
-		var half := _row_half(i, half_w, half_h, height)
-		if half <= 0:
-			continue
-		var y := top_y + i
-		for t in thick:
-			draw_rect(Rect2(cx - half + t, y, 1, 1), color)
-			draw_rect(Rect2(cx + half - 1 - t, y, 1, 1), color)
-		if i < thick or i >= height - thick:
-			draw_rect(Rect2(cx - half, y, max(half * 2, 1), 1), color)
 
 
 func _row_half(i: int, half_w: int, half_h: int, height: int) -> int:
@@ -608,83 +625,188 @@ func _cc_colors() -> Dictionary:
 
 
 var _WARDEN := PackedStringArray([
-	".....a.....",
-	"....aaa....",
-	"...aabaa...",
-	"...aaaaa...",
-	"....aaa....",
-	"...aa.aa...",
-	"...a...a...",
-	"...a...a...",
-	"....a.a....",
+	"......a......",
+	".....aba.....",
+	"....aaaaa....",
+	".....aba.....",
+	"....aacaa....",
+	"...aaacaaa...",
+	"...aaccacaa..",
+	"....aacaa....",
+	".....aca.....",
+	".....aca.....",
+	"....aa.aa....",
+	"....a...a....",
+	"....a...a....",
+	"...aa...aa...",
+	"...a.....a...",
+	"..aa.....aa..",
+	"..a.......a..",
+	"...aa...aa...",
 ])
 var _HOUSE_SMALL := PackedStringArray([
-	"....g....",
-	"...ggg...",
-	"..ggggg..",
-	"..wwdww..",
-	"..wwwww..",
-	"..wwwww..",
+	"......g......",
+	".....ggg.....",
+	"....ggggg....",
+	"...ggggggg...",
+	"...gwwwwwg...",
+	"...gwdddwg...",
+	"...gwwwwwg...",
+	"...gwwwwwg...",
+	"...gwdddwg...",
+	"...gwwwwwg...",
+	"...gwwwwwg...",
+	"...ddddddd...",
+	"....ddddd....",
+	".....ddd.....",
+	".....ddd.....",
+	"......d......",
 ])
 var _HOUSE := PackedStringArray([
-	"....g....",
-	"...ggg...",
-	"..ggggg..",
-	"..ggggg..",
-	"..wwdww..",
-	"..wwwww..",
-	"..wdwdw..",
-	"..wwwww..",
+	"......g......",
+	".....ggg.....",
+	"....ggggg....",
+	"...ggggggg...",
+	"..ggggggggg..",
+	"..gwwwwwwwg..",
+	"..gwwdwdwwg..",
+	"..gwwwwwwwg..",
+	"..gwwwwwwwg..",
+	"..gwdwwdwwg..",
+	"..gwwwwwwwg..",
+	"..gwwwwwwwg..",
+	"..gwwdwdwwg..",
+	"..gwwwwwwwg..",
+	"..ddddddddd..",
+	"...ddddddd...",
+	"....ddddd....",
+	".....ddd.....",
 ])
 var _POWER := PackedStringArray([
-	"...c.c...",
-	"..ckkkc..",
-	"...yyy...",
-	"..yyyyy..",
-	"..ykkky..",
-	"..yyyyy..",
+	".....c.c.....",
+	"....ckkkc....",
+	".....yyy.....",
+	"....yyyyy....",
+	"...yyyyyyy...",
+	"...yykkkyy...",
+	"...yyyyyyy...",
+	"...yykkkyy...",
+	"...yyyyyyy...",
+	"...yykkkyy...",
+	"...yyyyyyy...",
+	"....yyyyy....",
+	".....yyy.....",
+	"....kkkkk....",
+	"...kkkkkkk...",
+	"..kkkkkkkkk..",
 ])
 var _HANGAR := PackedStringArray([
-	".ppppppp.",
-	"ppppppppp",
-	"pwwdwdwwp",
-	"pwwwwwwwp",
-	"pdddddddp",
+	"..ppppppppp..",
+	".ppppppppppp.",
+	"ppppppppppppp",
+	"pwwwwdwdwwwwp",
+	"pwwwwwwwwwwwp",
+	"pwwddwwwwddwp",
+	"pwwwwwwwwwwwp",
+	"pwwwwwwwwwwwp",
+	"pwwddwwwwddwp",
+	"pwwwwwwwwwwwp",
+	"pdddddddddddp",
+	"pdddddddddddp",
+	".ddddddddddd.",
+	"..ddddddddd..",
+	"...ddddddd...",
+	"....ddddd....",
 ])
 var _TURRET_SMALL := PackedStringArray([
-	"....o....",
-	"..boooo..",
-	"....o....",
-	"...ooo...",
-	"...mmm...",
+	"......o......",
+	".....ooo.....",
+	"....boooob...",
+	"......o......",
+	".....ooo.....",
+	"....ooooo....",
+	"....oomoo....",
+	".....ooo.....",
+	"....ooooo....",
+	"....mmmmm....",
+	"...mmmmmmm...",
+	"..mmmmmmmmm..",
+	"...mmmmmmm...",
+	"....mmmmm....",
+	".....mmm.....",
+	"......m......",
 ])
 var _TURRET := PackedStringArray([
-	"...r.....",
-	"..brrrr..",
-	"...rrk...",
-	"...rrr...",
-	"...mmm...",
-	"..mmmmm..",
+	"......r......",
+	".....rrr.....",
+	"....brrrrb...",
+	"....rrrkrr...",
+	".....rrr.....",
+	"....rrrrr....",
+	"....rrmrr....",
+	".....rrr.....",
+	"....rrrrr....",
+	"....mmmmm....",
+	"...mmmmmmm...",
+	"..mmmmmmmmm..",
+	"...mmmmmmm...",
+	"....mmmmm....",
+	".....mmm.....",
+	"......m......",
 ])
 var _REEF := PackedStringArray([
-	"..rrrrrr..",
-	".rhmmmmhr.",
-	".rmmmmmmr.",
-	"rrrmmmmmrr",
-	".rrrrrrrr.",
+	"....rrrrrr....",
+	"...rhhhhhr....",
+	"..rhmmmmmmhr..",
+	"..rmmmmmmmmr..",
+	".rrrmmmmmmmrr.",
+	".rrmmmmmmmmrr.",
+	"..rmmmmmmmmr..",
+	"..rrrrrrrrrr..",
+	"...rrrrrrrr...",
+	"....rrrrrr....",
+	".....rrrr.....",
+	"......rr......",
+	".....rrrr.....",
+	"....rrrrrr....",
+	"...rrrrrrrr...",
+	"..rrrrrrrrrr..",
 ])
 var _SALT := PackedStringArray([
-	"k.......k",
-	"kk.....kk",
-	".ksssssk.",
-	"..ksssk..",
-	"...kkk...",
+	"k...........k",
+	"kk.........kk",
+	"kkk.......kkk",
+	".kkssssssskk.",
+	"..ksssssssk..",
+	"...ksssssk...",
+	"....ksssk....",
+	".....kkk.....",
+	"......k......",
+	".....kkk.....",
+	"....kkkkk....",
+	".....kkk.....",
+	"....kkkkk....",
+	"...kkkkkkk...",
+	"....kkkkk....",
+	".....kkk.....",
 ])
 var _ABYSS := PackedStringArray([
-	".s.s.s.s.s.s.",
-	"nnsssssssssnn",
-	"nnneeeeeeennn",
-	".nnssssssssn.",
+	"...s.s.s.s...",
+	"..sssssssss..",
+	".nnsssssssnn.",
+	"nnneeeeeeeenn",
+	"nnneeeeeeeenn",
+	".nnsssssssnn.",
+	"..nnsssssnn..",
+	"...nnsssnn...",
+	"....nnnnn....",
+	".....nnn.....",
+	"......n......",
+	".....nnn.....",
+	"....nnnnn....",
+	"...nnnnnnn...",
+	"....nnnnn....",
+	".....nnn.....",
 ])
 var _RUBBLE := PackedStringArray([
 	".k.s.k.",
@@ -697,18 +819,42 @@ var _SCAFFOLD := PackedStringArray([
 	".y.y.",
 ])
 var _CC := PackedStringArray([
-	"..ggggg..",
-	".gwwkwwg.",
-	".gwwkwwg.",
-	".gwwkwwg.",
-	".ggggggg.",
-	".kkkkkkk.",
+	".....g.......",
+	"....ggg......",
+	"...ggggg.....",
+	"..gwwkwwg....",
+	"..gwwkwwg....",
+	"..gwwkwwg....",
+	"..gwwkwwg....",
+	"..ggggggg....",
+	"..gwwwwwg....",
+	"..gwwkwwg....",
+	"..gwwwwwg....",
+	"..ggggggg....",
+	".kkkkkkkkk...",
+	"kkkkkkkkkkk..",
+	".kkkkkkkkk...",
+	"..kkkkkkk....",
+	"...kkkkk.....",
+	"....kkk......",
 ])
 var _CC_OPEN := PackedStringArray([
-	"..ggggg..",
-	".gwcwcwg.",
-	".gcccccg.",
-	".gwcwcwg.",
-	".ggggggg.",
-	".kkkkkkk.",
+	".....g.......",
+	"....ggg......",
+	"...ggggg.....",
+	"..gwcwcwg....",
+	"..gcccccg....",
+	"..gwcwcwg....",
+	"..gcccccg....",
+	"..ggggggg....",
+	"..gwcwcwg....",
+	"..gcccccg....",
+	"..gwwwwwg....",
+	"..ggggggg....",
+	".kkkkkkkkk...",
+	"kkkkkkkkkkk..",
+	".kkkkkkkkk...",
+	"..kkkkkkk....",
+	"...kkkkk.....",
+	"....kkk......",
 ])
