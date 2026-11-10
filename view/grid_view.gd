@@ -14,19 +14,18 @@ const WALL_H := 64
 const HEADROOM := 48
 const PX := 1
 const ACTOR_SCALE := 2
-## Side art is shorter for sand and water. The whole tile drops by the same amount so water sits lower.
-const SINK_SAND := 4
+## Water uses the short wall, so the cell sits lower. The offset is fixed; water does not bob.
 const SINK_WATER := 7
+## Second water frame slides the painted ripple pixels. No new texture.
+const RIPPLE_SHIFT := 3
 
 var TOP_NATURAL: Texture2D
 var TOP_LIGHT: Texture2D
-var TOP_HEAVY: Texture2D
-var TOP_SAND: Texture2D
-var TOP_SAND_HI: Texture2D
 var TOP_WATER: Texture2D
+var TOP_WATER_B: Texture2D
 var TOP_WATER_HI: Texture2D
+var TOP_WATER_HI_B: Texture2D
 var WALL_HIGH: Texture2D
-var WALL_MID: Texture2D
 var WALL_LOW: Texture2D
 var MOUNTAIN: Texture2D
 
@@ -408,68 +407,45 @@ func _sorted_cells() -> Array:
 
 
 func _center(x: int, y: int) -> Vector2:
-	var raw := _origin + Vector2((x - y) * HALF_W, (x + y) * HALF_H + _drop(x, y) + _bob(x, y))
+	var raw := _origin + Vector2((x - y) * HALF_W, (x + y) * HALF_H + _drop(x, y))
 	return Vector2(round(raw.x), round(raw.y))
-
-
-func _bob(x: int, y: int) -> float:
-	if _visual_kind(x, y) != "water":
-		return 0.0
-	return sin(_wave * 2.2 + float(x) * 0.85 + float(y) * 0.45) * 2.0
 
 
 func _drop(x: int, y: int) -> int:
 	return _sink(_visual_kind(x, y))
 
 
-## natural / light / heavy / mountain share the high wall. Sand is a step down. Water is lower still.
+## Empty land and mountains use the high wall. Water uses the low wall.
 func _visual_kind(x: int, y: int) -> String:
 	var terrain := str(Spatial.cell_at(_state, x, y).get("terrain", "plain"))
 	if terrain == "mountain":
 		return "mountain"
 	if terrain == "ocean" or terrain == "coast" or terrain == "reef":
 		return "water"
-	if terrain == "plain" and _beside_water(x, y):
-		return "sand"
-	return _plain_mix(x, y)
-
-
-func _plain_mix(x: int, y: int) -> String:
-	var seed := int(_state.get("seed", 1))
-	var n := absi((x * 13 + y * 29 + seed * 7) % 5)
-	if n == 0:
+	if _light_grid_laid(x, y):
 		return "light"
-	if n == 1:
-		return "heavy"
 	return "natural"
+
+
+func _light_grid_laid(x: int, y: int) -> bool:
+	var grid := Spatial.grid_at(_state, x, y)
+	if grid.is_empty():
+		return false
+	if float(grid.get("construct_remaining", 0.0)) > 0.0:
+		return false
+	return str(grid.get("def_id", "")) == "light"
 
 
 func _tier(kind: String) -> int:
 	if kind == "water":
 		return 0
-	if kind == "sand":
-		return 1
 	return 2
 
 
 func _sink(kind: String) -> int:
 	if kind == "water":
 		return SINK_WATER
-	if kind == "sand":
-		return SINK_SAND
 	return 0
-
-
-func _beside_water(x: int, y: int) -> bool:
-	for step in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
-		var nx := x + int(step.x)
-		var ny := y + int(step.y)
-		if nx < 0 or ny < 0 or nx >= _w or ny >= _h:
-			continue
-		var terrain := str(Spatial.cell_at(_state, nx, ny).get("terrain", ""))
-		if terrain == "ocean" or terrain == "coast" or terrain == "reef":
-			return true
-	return false
 
 
 func _back_higher(x: int, y: int) -> bool:
@@ -495,24 +471,23 @@ func _face_open(x: int, y: int, dx: int, dy: int) -> bool:
 func _wall_texture(kind: String) -> Texture2D:
 	if kind == "water":
 		return WALL_LOW
-	if kind == "sand":
-		return WALL_MID
 	return WALL_HIGH
 
 
 func _top_texture(kind: String, x: int, y: int) -> Texture2D:
 	var raised := _back_higher(x, y)
-	match kind:
-		"light":
-			return TOP_LIGHT
-		"heavy":
-			return TOP_HEAVY
-		"sand":
-			return TOP_SAND_HI if raised else TOP_SAND
-		"water":
-			return TOP_WATER_HI if raised else TOP_WATER
-		_:
-			return TOP_NATURAL
+	if kind == "light":
+		return TOP_LIGHT
+	if kind == "water":
+		var frame := _water_frame(x, y)
+		if raised:
+			return TOP_WATER_HI_B if frame == 1 else TOP_WATER_HI
+		return TOP_WATER_B if frame == 1 else TOP_WATER
+	return TOP_NATURAL
+
+
+func _water_frame(x: int, y: int) -> int:
+	return (int(_wave * 1.5) + x + y) % 2
 
 
 func _draw_walls(x: int, y: int, center: Vector2, kind: String) -> void:
@@ -543,24 +518,82 @@ func _draw_surface(center: Vector2, kind: String, x: int, y: int) -> void:
 func _load_art() -> void:
 	TOP_NATURAL = _load_tex("res://assets/tiles/top_natural.png")
 	TOP_LIGHT = _load_tex("res://assets/tiles/top_light.png")
-	TOP_HEAVY = _load_tex("res://assets/tiles/top_heavy.png")
-	TOP_SAND = _load_tex("res://assets/tiles/top_sand.png")
-	TOP_SAND_HI = _load_tex("res://assets/tiles/top_sand_hi.png")
-	TOP_WATER = _load_tex("res://assets/tiles/top_water.png")
-	TOP_WATER_HI = _load_tex("res://assets/tiles/top_water_hi.png")
+	var water := _load_image("res://assets/tiles/top_water.png")
+	var water_hi := _load_image("res://assets/tiles/top_water_hi.png")
+	TOP_WATER = ImageTexture.create_from_image(water)
+	TOP_WATER_B = ImageTexture.create_from_image(_shift_ripples(water))
+	TOP_WATER_HI = ImageTexture.create_from_image(water_hi)
+	TOP_WATER_HI_B = ImageTexture.create_from_image(_shift_ripples(water_hi))
 	WALL_HIGH = _load_tex("res://assets/tiles/wall_high.png")
-	WALL_MID = _load_tex("res://assets/tiles/wall_mid.png")
 	WALL_LOW = _load_tex("res://assets/tiles/wall_low.png")
 	MOUNTAIN = _load_tex("res://assets/tiles/mountain.png")
 
 
 func _load_tex(path: String) -> Texture2D:
+	return ImageTexture.create_from_image(_load_image(path))
+
+
+func _load_image(path: String) -> Image:
 	var image := Image.new()
 	var err := image.load(path)
 	if err != OK:
 		push_error("地块贴图读不出来：%s" % path)
-		return ImageTexture.new()
-	return ImageTexture.create_from_image(image)
+	return image
+
+
+func _shift_ripples(source: Image) -> Image:
+	var image := source.duplicate() as Image
+	var width := image.get_width()
+	var height := image.get_height()
+	var moves: Array = []
+	for y in height:
+		for x in width:
+			var color := source.get_pixel(x, y)
+			if not _is_ripple(color):
+				continue
+			moves.append({"x": x, "y": y, "c": color, "under": _ripple_under(source, x, y)})
+	for move in moves:
+		image.set_pixel(int(move.x), int(move.y), move.under)
+	for move in moves:
+		var nx := int(move.x) + RIPPLE_SHIFT
+		var ny := int(move.y)
+		if nx < 0 or nx >= width or ny < 0 or ny >= height:
+			continue
+		var dest := source.get_pixel(nx, ny)
+		if dest.a < 0.5 or _is_outline(dest):
+			continue
+		image.set_pixel(nx, ny, move.c)
+	return image
+
+
+func _ripple_under(image: Image, x: int, y: int) -> Color:
+	var width := image.get_width()
+	var height := image.get_height()
+	for radius in range(1, 6):
+		var y0 := maxi(0, y - radius)
+		var y1 := mini(height - 1, y + radius)
+		var x0 := maxi(0, x - radius)
+		var x1 := mini(width - 1, x + radius)
+		for ny in range(y0, y1 + 1):
+			for nx in range(x0, x1 + 1):
+				var color := image.get_pixel(nx, ny)
+				if color.a < 0.5 or _is_ripple(color) or _is_outline(color):
+					continue
+				return color
+	return Color8(131, 158, 170, 255)
+
+
+func _is_ripple(color: Color) -> bool:
+	var key := _rgb(color)
+	return key == 0x8aaeae or key == 0x728e9b or key == 0xa7c4b5
+
+
+func _is_outline(color: Color) -> bool:
+	return _rgb(color) == 0x3e606c
+
+
+func _rgb(color: Color) -> int:
+	return (int(round(color.r * 255.0)) << 16) | (int(round(color.g * 255.0)) << 8) | int(round(color.b * 255.0))
 
 
 func _draw_reef(center: Vector2) -> void:
