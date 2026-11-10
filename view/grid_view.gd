@@ -18,14 +18,19 @@ const ACTOR_SCALE := 2
 const TERRAIN := {
 	"ocean": Color("163e66"),
 	"coast": Color("2f7c78"),
+	"reef": Color("2f6a62"),
 	"plain": Color("5f7d52"),
+	"mountain": Color("6e675c"),
 }
 
+var pixel_scale := 1
+var design_size := Vector2.ZERO
 var _cells := 0
 var _w := 0
 var _h := 0
 var _built := false
 var _origin := Vector2.ZERO
+var _wave := 0.0
 var _state: Dictionary = {}
 var _marks: Dictionary = {}
 var _hover := Vector2i(-1, -1)
@@ -68,7 +73,14 @@ func setup(state: Dictionary) -> void:
 	_tip.add_theme_color_override("font_color", Color("f4f1ea"))
 	_tip_box.add_child(_tip)
 	add_child(_tip_box)
-	set_process(false)
+	set_process(true)
+
+
+func set_pixel_scale(next: int) -> void:
+	pixel_scale = clampi(next, 1, 4)
+	if _built:
+		_layout()
+	queue_redraw()
 
 
 func sync(state: Dictionary, marks: Dictionary) -> void:
@@ -111,7 +123,8 @@ func play(events: Array) -> void:
 
 
 func _process(delta: float) -> void:
-	var busy := false
+	_wave += delta
+	var busy := true
 	var dead: Array = []
 	for key in _flashes.keys():
 		_flashes[key].life = float(_flashes[key].life) - delta
@@ -137,8 +150,6 @@ func _process(delta: float) -> void:
 	_ghosts = ghosts
 	if busy:
 		queue_redraw()
-	else:
-		set_process(false)
 
 
 func _gui_input(event: InputEvent) -> void:
@@ -171,6 +182,7 @@ func _notification(what: int) -> void:
 func _draw() -> void:
 	if not _built or _state.is_empty():
 		return
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2(pixel_scale, pixel_scale))
 	for cell in _order:
 		_draw_tile(int(cell.x), int(cell.y))
 	for bolt in _bolts:
@@ -187,15 +199,17 @@ func _draw_tile(x: int, y: int) -> void:
 	var center := _center(x, y)
 	var terrain := str(Spatial.cell_at(_state, x, y).get("terrain", "plain"))
 	var fill: Color = TERRAIN.get(terrain, TERRAIN.plain)
-	if (x + y) % 2 == 1:
+	var grid := Spatial.grid_at(_state, x, y)
+	if not grid.is_empty() and float(grid.construct_remaining) > 0.0:
+		fill = Color("d4892a")
+	elif (x + y) % 2 == 1:
 		fill = fill.lightened(0.05)
 	if y == _h - 1:
 		_skirt(center, -1, _skirt_color(terrain))
 	if x == _w - 1:
 		_skirt(center, 1, _skirt_color(terrain))
 	_paint_tile(center, fill, true)
-	if terrain == "ocean":
-		draw_rect(Rect2(center.x - 8, center.y - 1, 16, 2), fill.lightened(0.18))
+	_draw_terrain_mark(center, terrain, fill)
 	_draw_plate(x, y, center)
 	var look := _mark_look(x, y)
 	if look.fill.a > 0.0:
@@ -345,6 +359,10 @@ func _tip_text(x: int, y: int) -> String:
 	if Spatial.cover_blocks(_state, x, y):
 		return "覆盖"
 	var cell := Spatial.cell_at(_state, x, y)
+	if str(cell.terrain) == "mountain":
+		return "山地"
+	if str(cell.terrain) == "reef":
+		return "礁石"
 	if str(cell.region) == "sea":
 		return "岸线" if str(cell.terrain) == "coast" else "海域"
 	return "空地"
@@ -362,8 +380,9 @@ func _layout() -> void:
 			max_x = maxf(max_x, raw.x + HALF_W)
 			min_y = minf(min_y, raw.y - HALF_H - HEADROOM)
 			max_y = maxf(max_y, raw.y + HALF_H + SKIRT)
-	_origin = Vector2(10 - min_x, 10 - min_y)
-	custom_minimum_size = Vector2(max_x - min_x + 20, max_y - min_y + 20)
+	_origin = Vector2(round(10.0 - min_x), round(10.0 - min_y))
+	design_size = Vector2(round(max_x - min_x + 24.0), round(max_y - min_y + 24.0))
+	custom_minimum_size = design_size * float(pixel_scale)
 	size = custom_minimum_size
 
 
@@ -383,15 +402,25 @@ func _sorted_cells() -> Array:
 
 
 func _center(x: int, y: int) -> Vector2:
-	return _origin + Vector2((x - y) * HALF_W, (x + y) * HALF_H + _drop(x, y))
+	var raw := _origin + Vector2((x - y) * HALF_W, (x + y) * HALF_H + _drop(x, y) + _bob(x, y))
+	return Vector2(round(raw.x), round(raw.y))
+
+
+func _bob(x: int, y: int) -> float:
+	var terrain := str(Spatial.cell_at(_state, x, y).get("terrain", "plain"))
+	if terrain != "ocean" and terrain != "coast" and terrain != "reef":
+		return 0.0
+	return sin(_wave * 2.2 + float(x) * 0.85 + float(y) * 0.45) * 2.0
 
 
 func _drop(x: int, y: int) -> int:
 	var terrain := str(Spatial.cell_at(_state, x, y).get("terrain", "plain"))
 	if terrain == "ocean":
 		return 4
-	if terrain == "coast":
+	if terrain == "coast" or terrain == "reef":
 		return 2
+	if terrain == "mountain":
+		return -2
 	return 0
 
 
@@ -401,7 +430,7 @@ func _pick(at: Vector2) -> Vector2i:
 	for cell in _order:
 		var x := int(cell.x)
 		var y := int(cell.y)
-		if not _hit(x, y, at):
+		if not _hit(x, y, at / float(maxi(pixel_scale, 1))):
 			continue
 		var score := (x + y) * 100 + x
 		if score >= best_score:
@@ -485,11 +514,29 @@ func _skirt(center: Vector2, side: int, color: Color) -> void:
 	draw_colored_polygon(PackedVector2Array([mid, bottom, bottom_down, mid_down]), color)
 
 
+func _draw_terrain_mark(center: Vector2, terrain: String, fill: Color) -> void:
+	var cx := int(round(center.x))
+	var cy := int(round(center.y))
+	if terrain == "ocean" or terrain == "coast" or terrain == "reef":
+		var crest := fill.lightened(0.2)
+		draw_rect(Rect2(cx - 8, cy - 1, 6, 2), crest)
+		draw_rect(Rect2(cx + 3, cy + 2, 5, 2), crest)
+	if terrain == "reef":
+		draw_rect(Rect2(cx - 7, cy - 4, 5, 3), Color("e7d7a8"))
+		draw_rect(Rect2(cx + 2, cy + 1, 4, 3), Color("cbb892"))
+	elif terrain == "mountain":
+		draw_rect(Rect2(cx - 7, cy - 6, 14, 5), Color("8d867c"))
+		draw_rect(Rect2(cx - 3, cy - 12, 6, 7), Color("d9d3c5"))
+		draw_rect(Rect2(cx - 1, cy - 15, 2, 4), Color("f4f1ea"))
+
+
 func _skirt_color(terrain: String) -> Color:
 	if terrain == "ocean":
 		return Color("0f2c44")
-	if terrain == "coast":
+	if terrain == "coast" or terrain == "reef":
 		return Color("1a4544")
+	if terrain == "mountain":
+		return Color("3f3b36")
 	return Color("3e4638")
 
 

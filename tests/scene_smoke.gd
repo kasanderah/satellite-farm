@@ -42,13 +42,19 @@ func _process(_delta: float) -> bool:
 	var font_ok := main.theme != null and main.theme.default_font != null
 	var board_size: Vector2 = main.grid_view.custom_minimum_size
 	var iso_board := board_size.x > board_size.y and board_size.x > 640.0
+	var design: Vector2 = main.grid_view.design_size
+	main.grid_view.set_pixel_scale(2)
+	var doubled: Vector2 = main.grid_view.custom_minimum_size
+	var pixel_blocks := absf(doubled.x - design.x * 2.0) < 1.0 and absf(doubled.y - design.y * 2.0) < 1.0
+	main.grid_view.set_pixel_scale(5)
+	var clamped := int(main.grid_view.pixel_scale) == 4
 	var fighting := str(state.phase) == "combat" and int(state.monsters.size()) == 1
 	var sea_spawn := false
 	if fighting:
 		var monster: Dictionary = state.monsters[0]
 		sea_spawn = str(state.board.cells[int(monster.y) * 9 + int(monster.x)].region) == "sea"
-	var ok := int(state.board.w) == 9 and int(state.board.h) == 18 and cells == 162 and grids == 1 and font_ok and placed and fighting and sea_spawn and iso_board and grouped and grid_then_building and turn_ok
-	print("SMOKE cells=%d grids=%d phase=%s font=%s board=%sx%s grouped=%s built=%s turn=%s" % [cells, grids, str(state.phase), str(font_ok), board_size.x, board_size.y, str(grouped), str(grid_then_building), str(turn_ok)])
+	var ok := int(state.board.w) == 9 and int(state.board.h) == 18 and cells == 162 and grids == 1 and font_ok and placed and fighting and sea_spawn and iso_board and grouped and grid_then_building and turn_ok and pixel_blocks and clamped
+	print("SMOKE cells=%d grids=%d phase=%s font=%s board=%sx%s grouped=%s built=%s turn=%s pixels=%s" % [cells, grids, str(state.phase), str(font_ok), board_size.x, board_size.y, str(grouped), str(grid_then_building), str(turn_ok), str(pixel_blocks)])
 	if not ok:
 		print("SMOKE FAIL")
 		quit(1)

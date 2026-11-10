@@ -7,22 +7,7 @@ static func new_game(seed_value: int = 1) -> Dictionary:
 	var map: Dictionary = cat.map
 	var width := int(map.width)
 	var height := int(map.height)
-	var cells: Array = []
-	for y in height:
-		for x in width:
-			var region := "city"
-			var terrain := "plain"
-			if _in_rect(x, y, map.sea):
-				region = "sea"
-				terrain = "ocean"
-				if _row_listed(y, map.coast_rows):
-					terrain = "coast"
-			cells.append({
-				"x": x,
-				"y": y,
-				"region": region,
-				"terrain": terrain,
-			})
+	var cells := _generate_map(width, height, seed_value, map.command_center)
 	var cc: Dictionary = map.command_center
 	var cc_def: Dictionary = cat.command_center
 	var econ: Dictionary = cat.economy
@@ -144,12 +129,171 @@ static func _normalize(value):
 			return value
 
 
-static func _in_rect(x: int, y: int, rect: Dictionary) -> bool:
-	return x >= int(rect.x) and y >= int(rect.y) and x < int(rect.x) + int(rect.w) and y < int(rect.y) + int(rect.h)
+static func _generate_map(width: int, height: int, seed_value: int, cc: Dictionary) -> Array:
+	var coast := _coastline(width, seed_value)
+	var cells: Array = []
+	for y in height:
+		for x in width:
+			var sea := y < int(coast[x])
+			cells.append({
+				"x": x,
+				"y": y,
+				"region": "sea" if sea else "city",
+				"terrain": "ocean" if sea else "plain",
+			})
+	for y in height:
+		for x in width:
+			var cell: Dictionary = cells[y * width + x]
+			if str(cell.region) != "sea":
+				continue
+			if _touches_land(cells, width, height, x, y):
+				cell.terrain = "coast"
+	_stamp_reefs(cells, width, height, seed_value)
+	_stamp_mountains(cells, width, height, seed_value, cc)
+	return cells
 
 
-static func _row_listed(y: int, rows: Array) -> bool:
-	for row in rows:
-		if int(row) == y:
+static func _coastline(width: int, seed_value: int) -> Array:
+	var coast: Array = []
+	for x in width:
+		var wobble := (_mix(seed_value, 40 + x) % 5) - 2
+		var neighbor := (_mix(seed_value, 80 + x) % 3) - 1
+		var row := 9 + int(round((float(wobble) + float(neighbor)) * 0.5))
+		coast.append(clampi(row, 6, 12))
+	# The water tests and the north band stay sea; the build street stays land.
+	coast[1] = mini(int(coast[1]), 10)
+	coast[4] = clampi(int(coast[4]), 9, 10)
+	var guard := 0
+	while _sea_count(coast) != 81 and guard < 48:
+		guard += 1
+		var grow := _sea_count(coast) < 81
+		var best := -1
+		for x in width:
+			var row := int(coast[x])
+			if grow and row >= _coast_max(x):
+				continue
+			if not grow and row <= _coast_min(x):
+				continue
+			if best < 0 or (grow and row < int(coast[best])) or (not grow and row > int(coast[best])):
+				best = x
+		if best < 0:
+			break
+		coast[best] = int(coast[best]) + (1 if grow else -1)
+	return coast
+
+
+static func _coast_min(x: int) -> int:
+	if x == 4:
+		return 9
+	return 6
+
+
+static func _coast_max(x: int) -> int:
+	if x == 1 or x == 4:
+		return 10
+	return 12
+
+
+static func _sea_count(coast: Array) -> int:
+	var total := 0
+	for row in coast:
+		total += int(row)
+	return total
+
+
+static func _touches_land(cells: Array, width: int, height: int, x: int, y: int) -> bool:
+	for dir in [[1, 0], [-1, 0], [0, 1], [0, -1]]:
+		var nx := x + int(dir[0])
+		var ny := y + int(dir[1])
+		if nx < 0 or ny < 0 or nx >= width or ny >= height:
+			continue
+		if str(cells[ny * width + nx].region) == "city":
 			return true
 	return false
+
+
+static func _stamp_reefs(cells: Array, width: int, height: int, seed_value: int) -> void:
+	var placed := 0
+	for i in 4:
+		var origin_x := _mix(seed_value, 300 + i * 5) % width
+		var origin_y := _mix(seed_value, 340 + i * 7) % 8
+		var shape := _mix(seed_value, 380 + i) % 4
+		if _paint_shape(cells, width, height, origin_x, origin_y, shape, "sea", "reef", true):
+			placed += 1
+	if placed > 0:
+		return
+	for y in height:
+		for x in width:
+			if str(cells[y * width + x].region) != "sea":
+				continue
+			if _protected_sea(x, y):
+				continue
+			cells[y * width + x].terrain = "reef"
+			return
+
+
+static func _stamp_mountains(cells: Array, width: int, height: int, seed_value: int, cc: Dictionary) -> void:
+	var reserved := {
+		"1,10": true, "4,10": true,
+		"2,12": true, "3,12": true, "4,12": true, "5,12": true, "6,12": true,
+		"3,13": true, "4,13": true, "5,13": true,
+	}
+	reserved["%d,%d" % [int(cc.x), int(cc.y)]] = true
+	var placed := 0
+	for i in 4:
+		var origin_x := _mix(seed_value, 500 + i * 9) % width
+		var origin_y := 14 + (_mix(seed_value, 560 + i * 3) % 4)
+		if i == 0:
+			origin_y = 11
+		var shape := _mix(seed_value, 620 + i) % 4
+		if _paint_shape(cells, width, height, origin_x, origin_y, shape, "city", "mountain", false, reserved):
+			placed += 1
+	if placed > 0:
+		return
+	for y in range(height - 1, 10, -1):
+		for x in width:
+			if _can_paint(cells, width, height, x, y, "city", false, reserved):
+				cells[y * width + x].terrain = "mountain"
+				return
+
+
+static func _paint_shape(cells: Array, width: int, height: int, x: int, y: int, shape: int, region: String, terrain: String, sea_guard: bool, reserved: Dictionary = {}) -> bool:
+	var offsets: Array = [[0, 0]]
+	if shape == 1:
+		offsets = [[0, 0], [1, 0], [-1, 0]]
+	elif shape == 2:
+		offsets = [[0, 0], [0, 1], [0, -1]]
+	elif shape == 3:
+		offsets = [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]]
+	var painted := false
+	for step in offsets:
+		var nx := x + int(step[0])
+		var ny := y + int(step[1])
+		if not _can_paint(cells, width, height, nx, ny, region, sea_guard, reserved):
+			continue
+		var cell: Dictionary = cells[ny * width + nx]
+		cell.region = region
+		cell.terrain = terrain
+		painted = true
+	return painted
+
+
+static func _can_paint(cells: Array, width: int, height: int, x: int, y: int, region: String, sea_guard: bool, reserved: Dictionary) -> bool:
+	if x < 0 or y < 0 or x >= width or y >= height:
+		return false
+	if sea_guard and _protected_sea(x, y):
+		return false
+	if reserved.has("%d,%d" % [x, y]):
+		return false
+	return str(cells[y * width + x].region) == region
+
+
+static func _protected_sea(x: int, y: int) -> bool:
+	return x == 4 and (y == 2 or y == 7 or y == 8)
+
+
+static func _mix(seed_value: int, salt: int) -> int:
+	var x := int(seed_value) * 374761393 + int(salt) * 668265263
+	x = (x ^ (x >> 13)) * 1274126177
+	x = x ^ (x >> 16)
+	return absi(x)

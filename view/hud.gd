@@ -16,6 +16,24 @@ var log_label: Label
 var _normal: StyleBoxFlat
 var _hover: StyleBoxFlat
 var _pressed: StyleBoxFlat
+var _pixel_scale := 1
+
+
+func set_pixel_scale(scale: int) -> void:
+	var next := clampi(scale, 1, 4)
+	if next == _pixel_scale:
+		return
+	_pixel_scale = next
+	_restyle(self)
+
+
+func _restyle(node: Node) -> void:
+	if node is Label or node is Button:
+		var base := int(node.get_meta("base_size", 0))
+		if base > 0:
+			node.add_theme_font_size_override("font_size", base * _pixel_scale)
+	for child in node.get_children():
+		_restyle(child)
 
 
 func setup() -> void:
@@ -84,7 +102,8 @@ func refresh(vm: Dictionary) -> void:
 			button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 			button.custom_minimum_size = Vector2(0, 36)
 			button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			button.add_theme_font_size_override("font_size", 16)
+			button.set_meta("base_size", 16)
+			button.add_theme_font_size_override("font_size", 16 * _pixel_scale)
 			button.add_theme_stylebox_override("normal", _normal)
 			button.add_theme_stylebox_override("hover", _hover)
 			button.add_theme_stylebox_override("pressed", _pressed)
@@ -111,7 +130,8 @@ func _wrap(label: Label) -> void:
 func _label(text: String, size: int, color: Color) -> Label:
 	var label := Label.new()
 	label.text = text
-	label.add_theme_font_size_override("font_size", size)
+	label.set_meta("base_size", size)
+	label.add_theme_font_size_override("font_size", size * _pixel_scale)
 	label.add_theme_color_override("font_color", color)
 	return label
 

@@ -90,8 +90,48 @@ func _test_board() -> void:
 			sea += 1
 		if str(cell.terrain) == "coast":
 			coast += 1
-	check(city == 81 and sea == 81, "城区和海域各 9×9")
-	check(coast == 9, "岸线占位占海域南缘一行")
+	check(city == 81 and sea == 81, "城区和海域各一半")
+	check(coast > 0, "岸线贴着陆地")
+	var mountains := 0
+	var reefs := 0
+	var coast_ok := true
+	for cell in state.board.cells:
+		if str(cell.terrain) == "mountain":
+			mountains += 1
+			if str(cell.region) != "city":
+				coast_ok = false
+		if str(cell.terrain) == "reef":
+			reefs += 1
+			if str(cell.region) != "sea":
+				coast_ok = false
+		if str(cell.terrain) == "coast":
+			var beside := false
+			for dir in [[1, 0], [-1, 0], [0, 1], [0, -1]]:
+				var nx := int(cell.x) + int(dir[0])
+				var ny := int(cell.y) + int(dir[1])
+				var next := Spatial.cell_at(state, nx, ny)
+				if not next.is_empty() and str(next.region) == "city":
+					beside = true
+			if not beside:
+				coast_ok = false
+	check(mountains > 0 and reefs > 0 and coast_ok, "种子会放山地和礁石")
+	var other := GameState.new_game(8)
+	var same := GameState.new_game(7)
+	var changed := false
+	var stable := true
+	for i in state.board.cells.size():
+		if str(state.board.cells[i].terrain) != str(same.board.cells[i].terrain):
+			stable = false
+		if str(state.board.cells[i].terrain) != str(other.board.cells[i].terrain) or str(state.board.cells[i].region) != str(other.board.cells[i].region):
+			changed = true
+	check(stable and changed, "同一种子地图不变，换种子岸线和山地会变")
+	var blocked := {}
+	for cell in state.board.cells:
+		if str(cell.terrain) == "mountain":
+			blocked = cell
+			break
+	var denied_mountain := Commands.apply(state, {"type": "place_grid", "def_id": "light", "x": int(blocked.x), "y": int(blocked.y)})
+	check(not denied_mountain.ok, "山地不能铺网格")
 	var cc: Dictionary = state.command_center
 	check(int(cc.x) == 4 and int(cc.y) == 13, "指挥中心在城区正中")
 	check(str(Spatial.cell_at(state, 4, 13).region) == "city", "中心格属于城区")

@@ -27,9 +27,9 @@ static func mode_allows(mode: String, cell: Dictionary) -> bool:
 		"land":
 			return terrain == "plain"
 		"sea":
-			return terrain == "ocean" or terrain == "coast"
+			return terrain == "ocean" or terrain == "coast" or terrain == "reef"
 		"amphibious":
-			return terrain == "plain" or terrain == "ocean" or terrain == "coast"
+			return terrain == "plain" or terrain == "ocean" or terrain == "coast" or terrain == "reef"
 		_:
 			return terrain == "plain"
 

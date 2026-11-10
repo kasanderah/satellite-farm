@@ -21,6 +21,9 @@ var selected := Vector2i(-1, -1)
 var last_reason := ""
 var enemy_wait := 0.0
 var turn_label: Label
+var title_label: Label
+var legend_label: Label
+var pixel_scale := 1
 
 
 func _ready() -> void:
@@ -29,6 +32,8 @@ func _ready() -> void:
 	_build()
 	grid_view.setup(state)
 	_refresh([])
+	get_tree().root.size_changed.connect(_fit_pixel_scale)
+	call_deferred("_fit_pixel_scale")
 
 
 func _process(delta: float) -> void:
@@ -57,6 +62,22 @@ func _unhandled_input(event: InputEvent) -> void:
 				_on_action("end_day")
 		elif event.keycode == KEY_ESCAPE:
 			_on_action("cancel")
+		elif event.keycode == KEY_EQUAL or event.keycode == KEY_KP_ADD:
+			_step_zoom(1)
+		elif event.keycode == KEY_MINUS or event.keycode == KEY_KP_SUBTRACT:
+			_step_zoom(-1)
+
+
+func _input(event: InputEvent) -> void:
+	if not (event is InputEventMouseButton) or not event.pressed:
+		return
+	var button := event as InputEventMouseButton
+	if button.button_index != MOUSE_BUTTON_WHEEL_UP and button.button_index != MOUSE_BUTTON_WHEEL_DOWN:
+		return
+	if grid_view == null or not grid_view.get_global_rect().has_point(button.global_position):
+		return
+	_step_zoom(1 if button.button_index == MOUSE_BUTTON_WHEEL_UP else -1)
+	get_viewport().set_input_as_handled()
 
 
 func _build() -> void:
@@ -76,27 +97,31 @@ func _build() -> void:
 	margin.add_child(row)
 	var board := VBoxContainer.new()
 	board.add_theme_constant_override("separation", 6)
-	board.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	board.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	board.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	board.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	row.add_child(board)
-	var title := Label.new()
-	title.text = "武装城市"
-	title.add_theme_font_size_override("font_size", 20)
-	board.add_child(title)
+	title_label = Label.new()
+	title_label.text = "武装城市"
+	title_label.add_theme_font_size_override("font_size", 20)
+	board.add_child(title_label)
 	turn_label = Label.new()
 	turn_label.text = "和平 1月1日"
 	turn_label.add_theme_font_size_override("font_size", 22)
 	turn_label.add_theme_color_override("font_color", Color("f2d16b"))
 	board.add_child(turn_label)
+	var board_scroll := ScrollContainer.new()
+	board_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	board_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	board.add_child(board_scroll)
 	grid_view = GridViewScript.new()
 	grid_view.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	grid_view.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
-	board.add_child(grid_view)
+	board_scroll.add_child(grid_view)
 	grid_view.cell_pressed.connect(_on_cell)
-	var legend := Label.new()
-	legend.text = "斜向俯视的占位像素。奶油色哨卫是机体，低矮的是怪物，小房子是建筑。"
-	legend.add_theme_font_size_override("font_size", 13)
-	board.add_child(legend)
+	legend_label = Label.new()
+	legend_label.text = "斜向俯视的占位像素。滚轮或 -/= 缩放。山地不能铺，礁石在海里。"
+	legend_label.add_theme_font_size_override("font_size", 13)
+	board.add_child(legend_label)
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -544,6 +569,10 @@ func _ground_name() -> String:
 		return "超出棋盘"
 	if Spatial.cover_blocks(state, selected.x, selected.y):
 		return "覆盖"
+	if str(cell.terrain) == "mountain":
+		return "山地"
+	if str(cell.terrain) == "reef":
+		return "礁石"
 	if str(cell.region) == "sea":
 		return "岸线" if str(cell.terrain) == "coast" else "海域"
 	return "空地"
@@ -997,6 +1026,45 @@ func _weapon_at(x: int, y: int) -> Dictionary:
 		if not def.is_empty() and str(def.role) == "weapon":
 			return building
 	return {}
+
+
+func _step_zoom(step: int) -> void:
+	_apply_pixel_scale(pixel_scale + step)
+
+
+func _fit_pixel_scale() -> void:
+	if grid_view == null or grid_view.design_size.x < 1.0:
+		return
+	var window := get_viewport_rect().size
+	var best := 1
+	for candidate in [4, 3, 2, 1]:
+		if _scale_fits(candidate, window):
+			best = candidate
+			break
+	_apply_pixel_scale(best)
+
+
+func _scale_fits(scale: int, window: Vector2) -> bool:
+	var design: Vector2 = grid_view.design_size
+	var panel := 440.0 * float(scale)
+	var room_w := window.x - 16.0 - 12.0 - panel
+	var room_h := window.y - 16.0 - float(20 + 22 + 13) * float(scale) - 18.0
+	return design.x * float(scale) <= room_w and design.y * float(scale) <= room_h
+
+
+func _apply_pixel_scale(next: int) -> void:
+	var clamped := clampi(next, 1, 4)
+	pixel_scale = clamped
+	if grid_view != null:
+		grid_view.set_pixel_scale(clamped)
+	if title_label != null:
+		title_label.add_theme_font_size_override("font_size", 20 * clamped)
+	if turn_label != null:
+		turn_label.add_theme_font_size_override("font_size", 22 * clamped)
+	if legend_label != null:
+		legend_label.add_theme_font_size_override("font_size", 13 * clamped)
+	if hud != null:
+		hud.set_pixel_scale(clamped)
 
 
 func _apply_theme() -> void:
